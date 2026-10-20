@@ -5,6 +5,8 @@ several AI models work as one team, but nothing is written to your project unles
 real machine check passes.
 
 > Status: **experimental**. Built and tested on Windows (Python 3.12 + OpenCode Go).
+>
+> Built with AI assistance; every change is machine-verified.
 
 ## Why
 
