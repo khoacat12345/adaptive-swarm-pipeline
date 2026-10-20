@@ -1002,6 +1002,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="chon chain coder theo router W0-W8 thay vi config.json")
     parser.add_argument("--reviewer-chain", default=None,
                         help="chuoi reviewer du phong, vd: modelA,modelB")
+    parser.add_argument("--force", action="store_true",
+                        help="van chay du router bao het quota")
     args = parser.parse_args(argv)
 
     order_data = json.loads(Path(args.order).read_text(encoding="utf-8"))
@@ -1017,6 +1019,11 @@ def main(argv: list[str] | None = None) -> int:
         problems = router.validate_roles()
         if problems:
             raise SystemExit("router khong hop le: " + "; ".join(problems[:5]))
+        if route_plan.get("exhausted") and not args.force:
+            raise SystemExit(
+                f"het quota cho moi model trong chain {route_plan.get('work_type')}: "
+                f"{' -> '.join(route_plan.get('chain') or [])}. "
+                "Doi sang model free, cho reset, hoac dung --force.")
 
     import workers
     if args.coder == "scripted":
