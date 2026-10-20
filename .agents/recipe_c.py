@@ -339,7 +339,10 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                   "escalate": route_plan.get("escalate"),
                   "chain": route_plan.get("chain"),
                   "why": route_plan.get("why"),
-                  "signals": route_plan.get("signals")},
+                  "signals": route_plan.get("signals"),
+                  "quota": route_plan.get("quota"),
+                  "quota_available": route_plan.get("quota_available"),
+                  "exhausted": route_plan.get("exhausted")},
             root=root_path,
         )
 
@@ -1008,7 +1011,9 @@ def main(argv: list[str] | None = None) -> int:
     route_plan = None
     if args.route:
         import router
-        route_plan = router.route(order)
+        import quota as quota_module
+        tracker = quota_module.QuotaTracker(root=args.root).refresh()
+        route_plan = router.route(order, quota=tracker)
         problems = router.validate_roles()
         if problems:
             raise SystemExit("router khong hop le: " + "; ".join(problems[:5]))

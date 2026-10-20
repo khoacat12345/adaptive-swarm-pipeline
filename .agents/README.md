@@ -526,6 +526,11 @@ Thu tu uu tien tin hieu: W8 > W6 > W3 > W5 > W4 > W0 > W7 > W2 > W1.
 `validate_roles()` bat buoc main/escalate khac ho o W3/W5/W8. Dung:
 `python .agents/recipe_c.py --order order.json --route`.
 
+**Quota that:** `quota.py` doc `opencode stats --models --cost --json` (cung so lieu
+console), cat theo tran Go: 5h=20%, tuan=50%, thang=100%; free = vo han. `--route`
+tu day escalate len khi main sap can va bao `exhausted` khi ca 2 het. Xem nhanh:
+`python .agents/quota.py`.
+
 ### Work Order (5 truong)
 
 `objective`, `boundaries`, `input_context`, `acceptance_criteria`, `verify_command`.
@@ -1184,8 +1189,10 @@ classifier/clarify cap nhat; nghiem thu **47/47 PASS** (gom 5 suite hoi quy Phas
 **Phase 5B — router theo loai viec (da lam):** `router.py` chia W0-W8 theo tin hieu
 do duoc (so file, risk keyword, context, modality, fail count) va bang dinh tuyen
 main/escalate uu tien ngon-bo-re; `validate_roles()` chan trung ho o vai kiem toan;
-`FallbackReviewer` cho reviewer co chuoi du phong; `recipe_c --route` ghi event
-`router.decided`. Nghiem thu **57/57 PASS** (gom Level 3 + Phase 4).
+`FallbackReviewer` cho reviewer co chuoi du phong; `quota.py` doc usage THAT tu
+`opencode stats` va cat theo tran Go (5h=20%, tuan=50%, thang=100%), `recipe_c --route`
+tu day escalate len khi main sap can; `recipe_c --route` ghi event `router.decided`.
+Nghiem thu **57/57 PASS** (gom Level 3 + Phase 4) va **15/15** quota.
 
 **Chua lam (co y):** executor song song (Level 3 chay tuan tu trong 1 giao dich),
 backoff luy tien cho cooldown, do model tra phi tren task that (benchmark hien chi

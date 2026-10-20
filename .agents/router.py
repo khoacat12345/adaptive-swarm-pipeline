@@ -150,20 +150,35 @@ def classify_work(work_order, *, context_tokens: int = 0, has_image: bool = Fals
     return "W1", signals
 
 
-def route(work_order, **signals) -> dict:
-    """Tra ke hoach dinh tuyen: work_type, main, escalate, chain, ly do."""
+def route(work_order, *, quota=None, **signals) -> dict:
+    """Tra ke hoach dinh tuyen: work_type, main, escalate, chain, ly do.
+
+    `quota` (tuy chon): QuotaTracker da refresh. Neu main sap can, router tu
+    day escalate len va loai model het dia khoi chain.
+    """
     work_type, detected = classify_work(work_order, **signals)
     entry = ROUTES[work_type]
     chain = [model for model in (entry["main"], entry["escalate"]) if model]
+    quota_info: dict = {}
+    exhausted = False
+    if quota is not None:
+        chosen, quota_info = quota.choose(chain)
+        if chosen:
+            chain = [model for model in chain if quota_info.get(model, {}).get("ok")]
+        else:
+            exhausted = True
     return {
         "work_type": work_type,
         "label": WORK_TYPES[work_type],
-        "main": entry["main"],
-        "escalate": entry["escalate"],
+        "main": chain[0] if chain else entry["main"],
+        "escalate": chain[1] if len(chain) > 1 else None,
         "chain": chain,
         "why": entry["why"],
         "signals": detected,
         "family": [FAMILY.get(model, "?") for model in chain],
+        "quota": quota_info,
+        "quota_available": bool(getattr(quota, "available", False)) if quota else False,
+        "exhausted": exhausted,
     }
 
 
@@ -197,6 +212,8 @@ def _cli(argv=None) -> int:
     parser.add_argument("--order", default=None)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--check", action="store_true", help="chi validate bang dinh tuyen")
+    parser.add_argument("--quota", action="store_true", help="doc quota that tu opencode stats")
+    parser.add_argument("--root", default=".")
     args = parser.parse_args(argv)
 
     if args.check:
@@ -216,7 +233,11 @@ def _cli(argv=None) -> int:
         return 2
     data = json.loads(Path(args.order).read_text(encoding="utf-8"))
     order = work_order_module.WorkOrder.from_dict(data)
-    plan = route(order)
+    tracker = None
+    if args.quota:
+        import quota as quota_module
+        tracker = quota_module.QuotaTracker(root=args.root).refresh()
+    plan = route(order, quota=tracker)
     if args.json:
         print(json.dumps(plan, ensure_ascii=False, indent=2))
     else:
@@ -226,6 +247,16 @@ def _cli(argv=None) -> int:
         print(f"  chain   : {' -> '.join(plan['chain'])}")
         print(f"  ly do   : {plan['why']}")
         print(f"  signals : {plan['signals']}")
+        if plan.get("quota"):
+            print(f"  quota   : {'HET DIA' if plan['exhausted'] else 'con dia'}")
+            for model, info in plan["quota"].items():
+                if info["unlimited"]:
+                    print(f"    {model}: free (khong tieu quota)")
+                else:
+                    w = info["windows"]
+                    print(f"    {model}: 5h {w['today']['pct']}% / tuan "
+                          f"{w['week']['pct']}% / thang {w['month']['pct']}% "
+                          f"{'OK' if info['ok'] else 'CAN'}")
     return 0
 
 

@@ -81,6 +81,7 @@ python .agents/tests/test_phase3.py --fast  # 51/51
 python .agents/tests/test_phase4.py         # 36/36 (gom ca 4 suite tren)
 python .agents/tests/test_level3.py         # 47/47 (Level 3 + hoi quy 5 suite)
 python .agents/tests/test_phase5.py         # 57/57 (router + FallbackReviewer + hoi quy)
+python .agents/tests/test_quota.py          # 15/15 (quota that + route theo quota)
 ```
 
 ## Bat bien (khong duoc vi pham)
@@ -116,6 +117,7 @@ python .agents/tests/test_phase5.py         # 57/57 (router + FallbackReviewer +
 | `.agents/schema.py` | schema v1.0.0 + chuan hoa event cu |
 | `.agents/recipe_c.py` | dong co pipeline (verify 2 lan, circuit breaker, budget) |
 | `.agents/router.py` | chon model theo loai viec W0-W8 (main/escalate, khac ho) |
+| `.agents/quota.py` | doc usage that tu `opencode stats`, cat theo tran Go |
 | `.agents/fallback.py` | chuoi du phong + health thu dong |
 | `.agents/safe_writer.py` | nguoi ghi file duy nhat (backup/atomic/rollback) |
 | `.agents/draft/` | ban nhap cua Coder (de xem diff) |

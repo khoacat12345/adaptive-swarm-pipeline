@@ -93,8 +93,9 @@ def _message(event: dict, norm: dict) -> str:
         state = "nhap ban sua" if norm["status"] in ("ok", "pass") else "that bai"
         return f"{state} (vong {data.get('round')})"
     if kind == "router.decided":
+        extra = " [HET QUOTA]" if data.get("exhausted") else ""
         return (f"router chon {data.get('work_type')} ({data.get('label')}): "
-                f"{' -> '.join(data.get('chain') or [])}")
+                f"{' -> '.join(data.get('chain') or [])}{extra}")
     if kind == "recipe.ladder":
         history = [item for item in (data.get("history") or []) if isinstance(item, dict)]
         levels = " -> ".join(str(item.get("level_name")) for item in history)
