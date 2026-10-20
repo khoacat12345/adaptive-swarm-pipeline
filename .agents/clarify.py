@@ -66,8 +66,14 @@ def check(work_order, root=None) -> list[str]:
         problems.append("tieu chi nghiem thu qua ngan - can noi ro ket qua nao la dat")
 
     targets = list(getattr(work_order, "target_files", []) or [])
-    if len(targets) != 1 and targets:
-        problems.append(f"can dung 1 file dich cho moi task, nhan duoc {len(targets)}")
+    level = int(getattr(work_order, "level", 2) or 0)
+    if level == 3:
+        if len(targets) < 2:
+            problems.append(f"Level 3 (da file) can it nhat 2 file dich, nhan duoc {len(targets)}")
+    elif len(targets) != 1 and targets:
+        problems.append(f"can dung 1 file dich cho Level 0-2, nhan duoc {len(targets)}")
+    if len(set(targets)) != len(targets):
+        problems.append("danh sach file dich bi trung lap")
 
     if root is not None and targets:
         base = Path(root)

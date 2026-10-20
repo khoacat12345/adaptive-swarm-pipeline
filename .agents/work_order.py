@@ -20,7 +20,7 @@ Validator con kiem tra `verify_command` co qua duoc guard cua SystemBot khong
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import system_bot
@@ -37,7 +37,11 @@ FIELD_LABEL = {
     "acceptance_criteria": "TIEU CHI NGHIEM THU (the nao la dung)",
     "verify_command": "LENH VERIFY (chay that de chung minh)",
 }
-VALID_LEVELS = (0, 1, 2)
+VALID_LEVELS = (0, 1, 2, 3)
+MULTI_FILE_LEVEL = 3
+
+# Level 3 = sua NHIEU file trong MOT giao dich nguyen tu. Thu tu trong
+# `target_files` chinh la thu tu apply (file nen / dependency truoc).
 
 
 class WorkOrderRejected(Exception):
@@ -80,6 +84,12 @@ class WorkOrder:
 
         if self.level not in VALID_LEVELS:
             found.append(f"level phai thuoc {VALID_LEVELS}, nhan duoc {self.level!r}")
+        elif self.level == MULTI_FILE_LEVEL and len(self.target_files) < 2:
+            found.append(f"level {MULTI_FILE_LEVEL} (da file) can it nhat 2 target_files, "
+                         f"nhan duoc {len(self.target_files)}")
+        elif self.level != MULTI_FILE_LEVEL and len(self.target_files) > 1:
+            found.append(f"level {self.level} chi nhan 1 target file; "
+                         f"dung level {MULTI_FILE_LEVEL} cho da file")
 
         if not isinstance(self.max_rounds, int) or not 1 <= self.max_rounds <= MAX_ROUNDS_HARD_CAP:
             found.append(f"max_rounds phai trong 1..{MAX_ROUNDS_HARD_CAP} (circuit breaker), "
@@ -104,6 +114,14 @@ class WorkOrder:
         return not self.problems()
 
     # -- tieu thu ----------------------------------------------------------
+    def for_file(self, relative: str) -> "WorkOrder":
+        """Ban sao cua Work Order chi con 1 file dich (de giao tung file cho Coder)."""
+        clone = replace(self, target_files=[relative])
+        scope = ", ".join(self.target_files)
+        note = f"Task da file (Level {self.level}): {scope}. Vong nay chi sua {relative}."
+        clone.notes = f"{self.notes.strip()} {note}".strip() if self.notes else note
+        return clone
+
     def render_verify_command(self, file_path=None) -> str:
         """Thay placeholder `{file}` (dung nhu profile.json cua Phase 0)."""
         command = self.verify_command
@@ -136,6 +154,10 @@ class WorkOrder:
             self.verify_command.strip(),
             "```",
             "",
+        ]
+        if self.notes.strip():
+            parts += ["## GHI CHU", self.notes.strip(), ""]
+        parts += [
             "## DINH DANG TRA VE (bat buoc)",
             "Chi tra ve 1 object JSON, khong giai thich ngoai JSON:",
             '{"format": "whole"|"replace"|"symbol", ...}',

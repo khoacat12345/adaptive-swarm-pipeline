@@ -113,6 +113,14 @@ def _message(event: dict, norm: dict) -> str:
         return f"verify file that exit={data.get('exit_code')}"
     if kind == "safe_writer.rollback":
         return f"ROLLBACK ve ban backup {_short(data.get('target'), 60)}"
+    if kind == "transaction.begin":
+        return f"mo giao dich da file: {', '.join(data.get('files') or [])}"
+    if kind == "transaction.commit":
+        return f"chot giao dich {len(data.get('files') or [])} file"
+    if kind == "transaction.rollback":
+        return f"ROLLBACK toan bo {len(data.get('files') or [])} file: {_short(data.get('reason') or '', 60)}"
+    if kind == "transaction.recovered":
+        return f"khoi phuc giao dich bi do giua chung: {', '.join(data.get('files') or [])}"
     if kind == "budget.exceeded":
         return f"dung vi cham tran ({data.get('exceeded') or 'ngan sach'})"
     if kind == "recipe.fallback":

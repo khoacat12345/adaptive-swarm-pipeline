@@ -102,7 +102,7 @@ def engine_checks(workspace: Path) -> Checks:
         ("Sua gia tri return trong calc.py", 1),
         ("Ham tinh toan trong calc.py bi sai logic", 2),
         ("Sua check token trong auth.py", 2),
-        ("Sua a.py va b.py", 2),
+        ("Sua a.py va b.py", 3),
     ]
     for prompt, expected in cases:
         outcome = classifier.classify(prompt)
@@ -148,6 +148,26 @@ def engine_checks(workspace: Path) -> Checks:
     checks.check("work_order: target ../ -> tu choi", ok and "target_files" in detail, detail)
     valid = work_order_module.create(**{**base, "verify_command": "python test.py"})
     checks.check("work_order: hop le", valid.is_valid() and valid.max_rounds == 2)
+
+    # --- Level 3 (da file) ----------------------------------------------
+    ok, detail = rejected(verify_command="python t.py", level=3)
+    checks.check("work_order: level 3 can >= 2 file -> tu choi",
+                 ok and "target_files" in detail, detail)
+    ok, detail = rejected(verify_command="python t.py", level=2,
+                          target_files=["a.py", "b.py"])
+    checks.check("work_order: level 2 voi 2 file -> tu choi (phai la level 3)",
+                 ok and "level" in detail, detail)
+    multi = work_order_module.create(**{**base, "verify_command": "python test.py",
+                                        "level": 3, "target_files": ["a.py", "b.py"]})
+    checks.check("work_order: level 3 voi 2 file hop le",
+                 multi.is_valid() and len(multi.target_files) == 2, multi.problems())
+    clone = multi.for_file("b.py")
+    checks.check("work_order: for_file thu hep dung 1 file + giu ghi chu",
+                 clone.target_files == ["b.py"] and "a.py" in clone.notes
+                 and "b.py" in clone.notes, clone.notes)
+    classified = classifier.classify("Sua a.py va b.py")
+    checks.check("classifier: 2 file -> Level 3 (multi-file)", classified["level"] == 3,
+                 classified)
     checks.check("work_order: prompt coder co du 5 truong",
                  all(label in valid.to_prompt() for label in
                      ("MUC TIEU", "RANH GIOI", "NGU CANH", "TIEU CHI", "LENH VERIFY")))

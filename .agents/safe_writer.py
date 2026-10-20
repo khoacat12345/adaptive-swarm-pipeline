@@ -424,6 +424,244 @@ def write_safely(
 
 
 # --------------------------------------------------------------------------
+# Multi-file transaction (Level 3)
+# --------------------------------------------------------------------------
+class TransactionError(RuntimeError):
+    """Giao dich da file khong the bat dau / khong the hoan tat."""
+
+
+def _tx_dir(root=None) -> Path:
+    base = Path(root).resolve() if root else AGENTS_DIR.parent
+    return ledger.resolve_agents_dir(root=base) / "tmp" / "tx"
+
+
+class Transaction:
+    """Giao dich nguyen tu cho NHIEU file.
+
+    Quy trinh:
+
+      1. begin()  -> backup TOAN BO file truoc khi ghi bat ky byte nao,
+                     dong thoi ghi journal (de neu process chet giua chung,
+                     lan chay sau tu rollback).
+      2. write()  -> ghi atomic tung file, kiem tra hash tren dia.
+      3. verify() -> chay lenh verify toan duong (SystemBot).
+      4. commit() -> giu code moi; hoac rollback() -> khoi phuc TOAN BO file
+                     ve dung 100% byte goc.
+
+    Khong the co atomicity o muc filesystem cho N file; cai duoc bao dam la
+    "all-or-nothing" o muc ung dung + journal de khoi phuc sau crash.
+    """
+
+    def __init__(self, *, root=None, backups_dir=None, run_id: str | None = None,
+                 log: bool = True, reason: str = "transaction", tx_id: str | None = None) -> None:
+        self.root = Path(root).resolve() if root else None
+        self.backups_dir = backups_dir
+        self.run_id = run_id or ledger.new_run_id("tx")
+        self.log = log
+        self.reason = reason
+        self.tx_id = tx_id or f"tx_{uuid.uuid4().hex[:10]}"
+        self.entries: list[dict] = []
+        self.state = "new"
+        self.journal = _tx_dir(self.root) / f"{self.tx_id}.json"
+
+    # -- noi bo -----------------------------------------------------------
+    def _write_journal(self) -> None:
+        self.journal.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "tx_id": self.tx_id, "run_id": self.run_id, "state": self.state,
+            "created": datetime.now(timezone.utc).isoformat(),
+            "reason": self.reason, "entries": self.entries,
+        }
+        atomic_write(self.journal, json.dumps(payload, ensure_ascii=False, indent=2))
+
+    def _event(self, event_type: str, *, result: dict, data: dict) -> None:
+        if not self.log:
+            return
+        ledger.append_event(event_type, run_id=self.run_id, result=result,
+                            data=data, root=self.root)
+
+    def _entry(self, relative: str) -> dict:
+        for entry in self.entries:
+            if entry["relative"] == relative:
+                return entry
+        raise TransactionError(f"file khong thuoc giao dich: {relative}")
+
+    # -- vong doi ---------------------------------------------------------
+    def begin(self, targets) -> "Transaction":
+        """`targets`: list[(relative, Path)] theo dung thu tu apply."""
+        if self.state == "open":
+            raise TransactionError("giao dich da mo")
+        if not targets:
+            raise TransactionError("khong co file nao de giao dich")
+        for relative, path in targets:
+            target = Path(path)
+            info = backup_file(
+                target, root=self.root, backups_dir=self.backups_dir,
+                reason=f"{self.reason}:{relative}", run_id=self.run_id, log=self.log,
+            )
+            self.entries.append({
+                "relative": relative,
+                "target": str(target.resolve()),
+                "backup_path": info["backup_path"],
+                "meta_path": info["meta_path"],
+                "existed": info["existed"],
+                "original_sha256": info["original_sha256"],
+                "written_sha256": None,
+            })
+        self.state = "open"
+        self._write_journal()
+        self._event("transaction.begin", result={"status": "info"}, data={
+            "tx_id": self.tx_id, "files": [e["relative"] for e in self.entries],
+            "reason": self.reason,
+        })
+        return self
+
+    def write(self, relative: str, content, *, encoding: str = "utf-8") -> dict:
+        entry = self._entry(relative)
+        target = Path(entry["target"])
+        written = atomic_write(target, content, encoding=encoding)
+        on_disk = sha256_file(target)
+        ok = on_disk == written["sha256"]
+        entry["written_sha256"] = on_disk
+        self._write_journal()
+        if self.log:
+            ledger.append_event(
+                "safe_writer.write", run_id=self.run_id,
+                result={"status": "pass" if ok else "fail",
+                        "error": None if ok else "hash tren dia khac hash ghi ra"},
+                data={"target": written["path"], "bytes_written": written["size"],
+                      "sha256": written["sha256"], "sha256_on_disk": on_disk,
+                      "atomic": True, "transaction_id": self.tx_id,
+                      "backup_path": entry["backup_path"]},
+                root=self.root,
+            )
+        if not ok:
+            raise TransactionError(f"ghi file khong toan ven: {relative}")
+        return written
+
+    def verify(self, command: str, *, cwd=None, timeout=None,
+               allow_network: bool = False) -> dict:
+        """Verify TOAN BO du an sau khi da ghi N file."""
+        bot = system_bot.run_command(
+            command, cwd=cwd or (str(self.root) if self.root else None),
+            timeout=timeout or system_bot.DEFAULT_TIMEOUT,
+            root=self.root, run_id=self.run_id,
+            allow_network=allow_network, log=self.log,
+        )
+        if self.log:
+            ledger.append_event(
+                "safe_writer.verify", run_id=self.run_id,
+                duration_ms=bot["duration_ms"],
+                result={"status": "pass" if bot["exit_code"] == 0 else "fail",
+                        "error": None if bot["exit_code"] == 0
+                        else f"exit_code={bot['exit_code']}"},
+                data={"target": f"transaction:{self.tx_id}", "verify_cmd": command,
+                      "exit_code": bot["exit_code"], "transaction_id": self.tx_id,
+                      "files": [e["relative"] for e in self.entries]},
+                root=self.root,
+            )
+        return bot
+
+    def commit(self) -> dict:
+        if self.state != "open":
+            raise TransactionError(f"giao dich khong o trang thai open: {self.state}")
+        self.state = "committed"
+        self._write_journal()
+        self._event("transaction.commit", result={"status": "pass"}, data={
+            "tx_id": self.tx_id,
+            "files": [{"path": e["relative"], "sha256": e["written_sha256"]}
+                      for e in self.entries],
+        })
+        self._cleanup_journal()
+        return {"tx_id": self.tx_id, "state": self.state,
+                "sha256": {e["relative"]: e["written_sha256"] for e in self.entries}}
+
+    def rollback(self, reason: str = "verify that bai") -> dict:
+        """Khoi phuc TOAN BO file. Tiep tuc du 1 file loi (khong dung giua chung)."""
+        results: list[dict] = []
+        errors: list[str] = []
+        for entry in reversed(self.entries):
+            try:
+                results.append(rollback(
+                    entry["target"], backup_path=entry["backup_path"],
+                    root=self.root, backups_dir=self.backups_dir,
+                    run_id=self.run_id, log=self.log,
+                ))
+            except Exception as exc:                    # noqa: BLE001
+                errors.append(f"{entry['relative']}: {str(exc)[:200]}")
+        ok = all(item.get("ok") for item in results) and not errors
+        self.state = "rolled_back"
+        self._write_journal()
+        self._event("transaction.rollback",
+                    result={"status": "pass" if ok else "fail",
+                            "error": None if ok else "; ".join(errors)[:300]},
+                    data={"tx_id": self.tx_id, "reason": reason,
+                          "files": [e["relative"] for e in self.entries],
+                          "restored": results, "errors": errors})
+        self._cleanup_journal()
+        return {"tx_id": self.tx_id, "ok": ok, "files": results, "errors": errors}
+
+    def _cleanup_journal(self) -> None:
+        try:
+            self.journal.unlink()
+        except OSError:
+            pass
+
+    # -- bao cao ----------------------------------------------------------
+    def snapshot(self) -> dict:
+        return {"tx_id": self.tx_id, "state": self.state,
+                "files": [{"path": e["relative"], "existed": e["existed"],
+                           "original_sha256": e["original_sha256"],
+                           "written_sha256": e["written_sha256"]}
+                          for e in self.entries]}
+
+
+def recover_open_transactions(root=None, *, log: bool = True) -> list[dict]:
+    """Rollback moi journal con `open` (process bi kill giua giao dich)."""
+    recovered: list[dict] = []
+    directory = _tx_dir(root)
+    if not directory.exists():
+        return recovered
+    for journal in sorted(directory.glob("*.json")):
+        try:
+            data = json.loads(journal.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if data.get("state") != "open":
+            continue
+        errors: list[str] = []
+        restored: list[dict] = []
+        for entry in reversed(data.get("entries") or []):
+            try:
+                restored.append(rollback(
+                    entry["target"], backup_path=entry["backup_path"],
+                    root=root, run_id=data.get("run_id"), log=log,
+                ))
+            except Exception as exc:                    # noqa: BLE001
+                errors.append(f"{entry.get('relative')}: {str(exc)[:200]}")
+        data["state"] = "recovered"
+        data["recovered_at"] = datetime.now(timezone.utc).isoformat()
+        data["recovery_errors"] = errors
+        try:
+            atomic_write(journal, json.dumps(data, ensure_ascii=False, indent=2))
+        except OSError:
+            pass
+        if log:
+            ledger.append_event(
+                "transaction.recovered", run_id=data.get("run_id"),
+                result={"status": "pass" if not errors else "fail",
+                        "error": None if not errors else "; ".join(errors)[:300]},
+                data={"tx_id": data.get("tx_id"),
+                      "files": [e.get("relative") for e in data.get("entries") or []],
+                      "errors": errors},
+                root=root,
+            )
+        recovered.append({"tx_id": data.get("tx_id"), "errors": errors,
+                          "files": [e.get("relative") for e in data.get("entries") or []]})
+    return recovered
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 

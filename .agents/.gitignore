@@ -2,6 +2,7 @@
 tmp/
 backups/
 eval/*/debug/
+eval/bench/
 *.lock
 .ledger.lock
 ledger.jsonl

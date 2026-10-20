@@ -79,6 +79,7 @@ python .agents/run_phase05_acceptance.py    # 69/69
 python .agents/tests/smoke_suite.py         # 53/53 engine + 10/10 task
 python .agents/tests/test_phase3.py --fast  # 51/51
 python .agents/tests/test_phase4.py         # 36/36 (gom ca 4 suite tren)
+python .agents/tests/test_level3.py         # 47/47 (Level 3 + hoi quy 5 suite)
 ```
 
 ## Bat bien (khong duoc vi pham)
@@ -87,6 +88,8 @@ python .agents/tests/test_phase4.py         # 36/36 (gom ca 4 suite tren)
    ngoai du an; moi thay doi vao file that phai qua `safe_writer`.
 2. **Verify bang may that.** Khong co `verify_command` hoac verify fail -> khong apply.
 3. **Rollback nguyen byte.** Backup truoc khi ghi; verify fail -> tra ve dung hash cu.
+   Level 3: backup TAT CA file truoc, verify fail -> batch rollback toan bo, khong de
+   file nao o trang thai do dang (co journal de khoi phuc sau crash).
 4. **Tran cung:** 8 request / 300 giay moi run; cham tran -> dung, khong ghi.
 5. **Secret khong ra khoi may.** `.env`, khoa, token bi chan/redact truoc khi gui model.
 6. **Ledger append-only.** Khong sua, khong xoa event; schema v1.0.0 chi doc, khong

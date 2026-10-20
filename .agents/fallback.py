@@ -181,6 +181,17 @@ class FallbackCoder(Coder):
     # -- patch -------------------------------------------------------------
     def patch(self, work_order, *, current_content: str, feedback: str | None,
               round_index: int) -> dict:
+        return self._dispatch("patch", work_order, current_content=current_content,
+                              feedback=feedback, round_index=round_index)
+
+    def patch_set(self, work_order, *, current_files: dict, feedback: str | None,
+                  round_index: int) -> dict:
+        return self._dispatch("patch_set", work_order, current_files=current_files,
+                              feedback=feedback, round_index=round_index)
+
+    def _dispatch(self, method: str, work_order, **kwargs) -> dict:
+        feedback = kwargs.get("feedback")
+        round_index = kwargs.get("round_index", 1)
         failures: list[str] = []
         for model in self.models:
             if self.limit_check is not None and not self.limit_check():
@@ -194,13 +205,13 @@ class FallbackCoder(Coder):
 
             child = self._child(model)
             started = time.perf_counter()
+            calls_before = int(getattr(child, "calls", 0) or 0)
             try:
-                result = child.patch(work_order, current_content=current_content,
-                                     feedback=feedback, round_index=round_index)
+                result = getattr(child, method)(work_order, **kwargs)
             except Exception as exc:                       # noqa: BLE001
                 latency_ms = int((time.perf_counter() - started) * 1000)
                 kind = getattr(exc, "kind", "error")
-                self.calls += 1
+                self.calls += max(1, int(getattr(child, "calls", 0) or 0) - calls_before)
                 self.health.record(model, ok=False, kind=kind, latency_ms=latency_ms,
                                    error=str(exc)[:200])
                 self.errors.append(f"{model}: {exc}")
@@ -216,7 +227,7 @@ class FallbackCoder(Coder):
                 continue
 
             latency_ms = int((time.perf_counter() - started) * 1000)
-            self.calls += 1
+            self.calls += max(1, int(getattr(child, "calls", 0) or 0) - calls_before)
             self.health.record(model, ok=True, latency_ms=latency_ms)
             if isinstance(getattr(child, "usage", None), dict):
                 self.usage.update(child.usage)

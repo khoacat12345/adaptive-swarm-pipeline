@@ -6,7 +6,7 @@ khong phu thuoc vao bat ky file nao cua du an. Du an chi bi tac dong qua
 
 - **Phase 0** — lop an toan: profile_detector, system_bot, ledger, safe_writer.
 - **Phase 0.5** — *Scout*: doc catalog model + auth, anh xa vai tro, sinh `config.json`.
-- **Phase 1** — pipeline Level 1 & 2: classifier, work_order, permissions, format ladder,
+- **Phase 1** - pipeline Level 1-3: classifier, work_order, permissions, format ladder,
   recipe_c (co circuit breaker), smoke suite 10 task.
 - **Phase 2** — eval harness: do ty le pass that cua tung model.
 - **Phase 3** — chiu loi & bao mat: fallback chain + health, plan validator, session
@@ -102,7 +102,7 @@ python .agents/dashboard.py --port 8080 --open
 ├── safe_writer.py         <- [0.5] backup + atomic write + rollback
 ├── scout.py               <- [0.5.1-0.5.4] do catalog + sinh config.json
 ├── inspect_plan.py        <- [0.5] doc config.json -> bang ke hoach de doc
-├── classifier.py          <- [1.1] phan loai task Level 0/1/2 (rules-first)
+├── classifier.py          <- [1.1] phan loai task Level 0/1/2/3 (rules-first)
 ├── work_order.py          <- [1.2] Work Order 5 truong + validator
 ├── permissions.py         <- [1.3] phan quyen Coder/Reviewer/Lead + FindingsSink
 ├── format_ladder.py       <- [1.4] thang ghi file bac 0/1/2 + tu ha bac
@@ -452,7 +452,7 @@ python .agents/scout.py --write --verify      # ve ke hoach balanced
 python .agents/scout.py --free-only --write --verify   # quay lai chi model free
 ```
 
-## Phase 1 — Pipeline Level 1 & 2 (Recipe C)
+## Phase 1 - Pipeline Level 1-3 (Recipe C)
 
 Muc tieu: fix bug / sua 1-2 file hang ngay chay tu dong, ton 1-2 request, co verify
 bang may that, va khong the lam hong file.
@@ -481,11 +481,29 @@ lan 2 tren file that de chot hop dong "may that chung minh", va luon co rollback
 |---|---|---|
 | 0 | cau hoi / giai thich | khong dung code |
 | 1 | sua 1 cho ro rang trong 1 file | 1 vong, khong reviewer |
-| 2 | bug logic, refactor, >= 2 file, hoac vung rui ro (auth, token, db, migration...) | co reviewer doc diff |
+| 2 | bug logic, refactor 1 file, hoac vung rui ro (auth, token, db, migration...) | co reviewer doc diff |
+| 3 | >= 2 file, refactor phu thuoc cheo | giao dich nguyen tu da file: backup tat ca -> ghi tat ca -> verify toan du an -> commit/rollback tat ca |
 
 Rules-first: dem so file + khop tu khoa. Chi goi LLM khi tin hieu xung dot, prompt
 <= 200 token; LLM tra loi rac -> Level 2. Smoke suite: phan loai dung 10/10 task,
 **0 request** cho khau phan loai.
+
+### Level 3 - giao dich da file
+
+Work Order phai co `level: 3` va >= 2 `target_files`; thu tu trong danh sach chinh la
+thu tu apply (file nen / dependency truoc). Level 1/2 chi nhan 1 file (validator tu choi).
+
+- **Patch set:** AgenticCoder sua TAT CA file trong 1 lan goi (1 request), tra ve
+  `{file: patch}`; file khong doi -> giu ban goc.
+- **Verify ban nhap:** 1 shadow dir chua ca tap file + sandbox, chay verify 1 lan.
+- **Reviewer:** doc TOAN BO diff cua tap file (`review_set`), bat loi lech logic giua
+  module (doi ten ham o file A nhung noi goi o file B khong doi...).
+- **Apply:** `safe_writer.Transaction` backup TAT CA truoc khi ghi byte nao, ghi atomic
+  tung file, verify toan du an, roi commit hoac **batch rollback ve 100% byte goc**.
+- **Journal:** `.agents/tmp/tx/<tx_id>.json`; process bi kill giua giao dich -> lan chay
+  sau tu `recover_open_transactions()` rollback truoc khi lam gi khac.
+- **Nghiem thu:** `tests/test_level3.py` (47 check): apply da file, rollback toan dien,
+  crash recovery, patch_set, fallback, va hoi quy Phase 0-4.
 
 ### Work Order (5 truong)
 
@@ -493,7 +511,7 @@ Rules-first: dem so file + khop tu khoa. Chi goi LLM khi tin hieu xung dot, prom
 
 Thieu `verify_command` -> `WorkOrderRejected` **ngay**, khong goi model. Validator con
 chay `verify_command` qua guard cua SystemBot truoc khi bat dau (fail fast) va chan
-cung `max_rounds > 2`.
+cung `max_rounds > 4`.
 
 ### Phan quyen
 
@@ -630,8 +648,10 @@ Model coder mac dinh lay tu `config.json` (`roles.coder.primary`) — hien la mo
 `--reviewer heuristic` (mac dinh) ton 0 request; `--reviewer llm` moi ton them 1;
 `--reviewer none` tat han reviewer (chi nen dung khi da biet ro rui ro).
 
-**Gioi han cua Phase 1:** chi sua **1 file** (`target_files` dai 1 phan tu). Nhieu file
-la Level 3+ — validator tu choi chu khong doan mo.
+**Da ho tro Level 3 (da file):** `level: 3` + >= 2 `target_files` -> pipeline dung
+giao dich nguyen tu `safe_writer.Transaction` (backup het -> ghi het -> verify toan du
+an -> commit / batch rollback) + journal khoi phuc sau crash. Level 1/2 van chi nhan
+1 file; khai nhieu file o Level 2 bi validator tu choi.
 
 ### Vi sao co `AgenticCoder` (va vi sao no an toan)
 
@@ -1116,7 +1136,7 @@ Pipeline se thay bang duong dan file vua sua de verify nhanh, thay vi chay ca te
 bai toan gan co rang buoc khac ho), preview diff, ghi config an toan, rang buoc
 `--free-only`, micro-ping tuy chon, chuoi du phong 2 cua thoat (quota + provider),
 nghiem thu 69/69 tren may that.
-**Phase 1 — da lam:** classifier rules-first (Level 0/1/2), Work Order 5 truong +
+**Phase 1 — da lam:** classifier rules-first (Level 0/1/2/3), Work Order 5 truong +
 validator tu choi khi thieu `verify_command`, phan quyen Coder (draft-only) /
 Reviewer (read-only qua `FindingsSink`), format ladder 3 bac co tu ha bac va chuan
 hoa khoang trang, Recipe C (2 lan verify + apply an toan), circuit breaker 2 vong,
@@ -1134,6 +1154,12 @@ CLI (timeline mau, 0 request), dashboard 3 cot bang `http.server`, memory engine
 (phan loai loi + suc khoe model + chen goi y vao prompt Coder), SKILL.md + wrapper
 `.opencode/skills/`, nghiem thu **36/36 PASS** (gom lai 4 suite Phase 0/0.5/1/3).
 
-**Chua lam (co y):** Level 3+ (nhieu file / kien truc), executor song song (plan
-validator da cho phep khai bao <=2 nhanh nhung chay tuan tu), backoff luy tien
-cho cooldown, do model tra phi (tai khoan chua co quota).
+**Phase 5 — Level 3 (da lam):** `VALID_LEVELS=(0,1,2,3)`, Work Order da file,
+`Coder.patch_set` (AgenticCoder: 1 request cho ca tap file), `Reviewer.review_set`
+(doc toan bo diff, bat lech logic giua module), `safe_writer.Transaction` (backup het
+-> ghi het -> verify -> commit / batch rollback) + journal + `recover_open_transactions()`,
+classifier/clarify cap nhat; nghiem thu **47/47 PASS** (gom 5 suite hoi quy Phase 0/0.5/1/3/4).
+
+**Chua lam (co y):** executor song song (Level 3 chay tuan tu trong 1 giao dich),
+backoff luy tien cho cooldown, router theo domain (Phase 5B), do model tra phi
+(tai khoan chua co quota).

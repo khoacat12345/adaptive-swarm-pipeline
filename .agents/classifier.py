@@ -26,7 +26,9 @@ import unicodedata
 LEVEL_0 = 0
 LEVEL_1 = 1
 LEVEL_2 = 2
-LEVEL_LABEL = {LEVEL_0: "no-code", LEVEL_1: "quick-fix", LEVEL_2: "logic-fix"}
+LEVEL_3 = 3
+LEVEL_LABEL = {LEVEL_0: "no-code", LEVEL_1: "quick-fix", LEVEL_2: "logic-fix",
+               LEVEL_3: "multi-file"}
 
 MAX_LLM_PROMPT_TOKENS = 200
 _LLM_TASK_CHARS = 600
@@ -112,10 +114,11 @@ def _llm_prompt(task: str, paths: list[str]) -> str:
         "Phan loai yeu cau sau thanh dung 1 muc:\n"
         "0 = chi hoi/dap hoac sua vai ky tu, khong can sua code\n"
         "1 = sua ro rang 1 cho trong 1 file\n"
-        "2 = bug logic hoac refactor\n"
+        "2 = bug logic hoac refactor trong 1 file\n"
+        "3 = sua nhieu file / refactor phu thuoc cheo giua cac module\n"
         f"Files: {files}\n"
         f"Yeu cau: {snippet}\n"
-        "Chi tra ve 1 so (0, 1 hoac 2)."
+        "Chi tra ve 1 so (0, 1, 2 hoac 3)."
     )
 
 
@@ -124,7 +127,7 @@ def _ask_llm(llm, prompt: str) -> int | None:
         answer = llm(prompt)
     except Exception:                                   # noqa: BLE001 - LLM loi -> mac dinh
         return None
-    match = re.search(r"\b([012])\b", str(answer or ""))
+    match = re.search(r"\b([0-3])\b", str(answer or ""))
     return int(match.group(1)) if match else None
 
 
@@ -168,13 +171,14 @@ def classify(task: str, *, paths=None, llm=None) -> dict:
     if not task.strip():
         return result(LEVEL_0, "yeu cau rong", "rules")
 
-    # 2) Tu khoa rui ro (auth/db/migration...) -> luon Level 2
+    # 2) Nhieu file -> Level 3 (giao dich da file). Kiem tra TRUOC risk: mot task
+    #    cham 2 file tro len luon can multi-file transaction.
+    if file_count >= 2:
+        return result(LEVEL_3, f"dong {file_count} file: {', '.join(resolved_paths[:3])}", "rules")
+
+    # 3) Tu khoa rui ro (auth/db/migration...) -> Level 2
     if signals["risk"]:
         return result(LEVEL_2, f"cham vao vung rui ro: {', '.join(signals['risk'][:3])}", "rules")
-
-    # 3) Nhieu file -> Level 2
-    if file_count >= 2:
-        return result(LEVEL_2, f"dong {file_count} file: {', '.join(resolved_paths[:3])}", "rules")
 
     # 4) Dung 1 file
     if file_count == 1:

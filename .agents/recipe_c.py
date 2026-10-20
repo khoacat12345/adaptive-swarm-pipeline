@@ -137,6 +137,163 @@ def _verify_draft(work_order, *, gate, root: Path, run_id: str, round_index: int
     }
 
 
+def _verify_draft_set(work_order, *, gate, root: Path, run_id: str, round_index: int,
+                      contents: dict, encodings: dict, verify_timeout: int | None,
+                      log: bool) -> dict:
+    """Verify TOAN BO ban nhap da file trong 1 shadow dir (1 lan chay verify)."""
+    started = time.perf_counter()
+    targets = list(contents)
+    sandbox_files = [item for item in (work_order.sandbox_files or [])
+                     if item not in contents]
+
+    if sandbox_files:
+        shadow = gate.agents_dir / "tmp" / run_id / f"shadow_r{round_index}"
+        if shadow.exists():
+            shutil.rmtree(shadow, ignore_errors=True)
+        for relative in targets + sandbox_files:
+            source = root / relative
+            if not source.exists():
+                return {"mode": "sandbox-multi", "files": targets,
+                        "result": "error", "exit_code": None,
+                        "error": f"thieu file trong sandbox: {relative}",
+                        "duration_ms": int((time.perf_counter() - started) * 1000)}
+            destination = shadow / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+        for relative in targets:
+            try:
+                (shadow / relative).write_text(
+                    contents[relative], encoding=encodings.get(relative, "utf-8"),
+                    newline="")
+            except (OSError, UnicodeEncodeError) as exc:
+                return {"mode": "sandbox-multi", "files": targets,
+                        "result": "error", "exit_code": None,
+                        "error": f"khong ghi duoc ban nhap {relative}: {exc}",
+                        "duration_ms": int((time.perf_counter() - started) * 1000)}
+
+        command = work_order.render_verify_command(targets[0])
+        bot = system_bot.run_command(
+            command, cwd=shadow, timeout=verify_timeout or system_bot.DEFAULT_TIMEOUT,
+            root=root, run_id=run_id, log=log,
+        )
+        return {
+            "mode": "sandbox-multi",
+            "command": command,
+            "files": targets,
+            "result": bot["result"],
+            "exit_code": bot["exit_code"],
+            "duration_ms": bot["duration_ms"],
+            "output_tail": bot["output_tail"][-VERIFY_TAIL_LINES:],
+            "error": None if bot["exit_code"] == 0 else f"exit_code={bot['exit_code']}",
+        }
+
+    # Khong co sandbox: chi kiem tra cu phap cua TAT CA ban nhap .py.
+    py_files = [relative for relative in targets if relative.endswith(".py")]
+    if not py_files:
+        return {"mode": "syntax-multi", "files": targets, "command": None,
+                "result": "pass", "exit_code": 0, "output_tail": [], "error": None,
+                "duration_ms": int((time.perf_counter() - started) * 1000)}
+    quoted = " ".join(
+        f'"{gate.draft_path(work_order.task_id or "task", relative)}"'
+        for relative in py_files)
+    bot = system_bot.run_command(
+        f'"{sys.executable}" -m py_compile {quoted}',
+        cwd=root, timeout=verify_timeout or 120, root=root, run_id=run_id, log=log,
+    )
+    return {
+        "mode": "syntax-multi",
+        "command": "py_compile",
+        "files": targets,
+        "result": bot["result"],
+        "exit_code": bot["exit_code"],
+        "duration_ms": bot["duration_ms"],
+        "output_tail": bot["output_tail"][-VERIFY_TAIL_LINES:],
+        "error": None if bot["exit_code"] == 0 else f"exit_code={bot['exit_code']}",
+    }
+
+
+def _apply_transaction(work_order, *, gate, root: Path, run_id: str, round_index: int,
+                       contents: dict, encodings: dict, verify_timeout: int | None,
+                       log: bool, targets: list) -> dict:
+    """Giao dich nguyen tu da file: backup het -> ghi het -> verify -> commit/rollback."""
+    started = time.perf_counter()
+    tx = safe_writer.Transaction(
+        root=root, run_id=run_id, log=log,
+        reason=f"recipe_c:level3:{work_order.task_id}:r{round_index}",
+    )
+    verify_command = work_order.render_verify_command(targets[0])
+    result: dict = {
+        "mode": "transaction", "tx_id": tx.tx_id, "verify_command": verify_command,
+        "files": [], "written": 0, "integrity_ok": False, "verified": False,
+        "rolled_back": False, "verify": None, "error": None,
+        "duration_ms": 0, "transaction": None,
+    }
+
+    try:
+        tx.begin([(relative, gate.project_path(relative)) for relative in targets])
+        for relative in targets:
+            tx.write(relative, contents[relative],
+                     encoding=encodings.get(relative, "utf-8"))
+        result["files"] = [
+            {"path": entry["relative"],
+             "original_sha256": entry["original_sha256"],
+             "written_sha256": entry["written_sha256"]}
+            for entry in tx.entries
+        ]
+        result["written"] = len(tx.entries)
+
+        bot = tx.verify(verify_command, cwd=str(root),
+                        timeout=verify_timeout or system_bot.DEFAULT_TIMEOUT)
+        result["verify"] = bot
+        if bot["exit_code"] == 0:
+            tx.commit()
+            result.update(verified=True, integrity_ok=True, transaction=tx.snapshot(),
+                          duration_ms=int((time.perf_counter() - started) * 1000))
+            if log:
+                ledger.append_event(
+                    "recipe.apply", run_id=run_id, duration_ms=result["duration_ms"],
+                    result={"status": "pass"},
+                    data={"round": round_index, "mode": "transaction",
+                          "tx_id": tx.tx_id, "files": targets,
+                          "sha256": {item["path"]: item["written_sha256"]
+                                     for item in result["files"]}},
+                    root=root,
+                )
+            return result
+
+        rollback = tx.rollback(f"verify that bai (exit {bot['exit_code']})")
+        result.update(
+            rolled_back=bool(rollback.get("ok")),
+            error=f"verify that bai: exit_code={bot['exit_code']}",
+            transaction=tx.snapshot(),
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+    except Exception as exc:                            # noqa: BLE001
+        rb = {"ok": False, "errors": [str(exc)[:200]]}
+        if tx.state == "open":
+            try:
+                rb = tx.rollback(f"loi khi ghi: {str(exc)[:200]}")
+            except Exception as exc2:                   # noqa: BLE001
+                rb = {"ok": False, "errors": [str(exc2)[:200]]}
+        result.update(
+            rolled_back=bool(rb.get("ok")),
+            error=f"giao dich that bai: {str(exc)[:300]}",
+            transaction=tx.snapshot(),
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+    if log:
+        ledger.append_event(
+            "recipe.apply", run_id=run_id, duration_ms=result["duration_ms"],
+            result={"status": "fail", "error": result["error"]},
+            data={"round": round_index, "mode": "transaction", "tx_id": tx.tx_id,
+                  "files": targets, "rolled_back": result["rolled_back"],
+                  "rollback_ok": result["rolled_back"]},
+            root=root,
+        )
+    return result
+
+
 # --------------------------------------------------------------------------
 def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = None,
         dry_run: bool = False, verify_timeout: int | None = None,
@@ -153,6 +310,10 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
     max_seconds = (BUDGET_MAX_SECONDS if max_seconds is None
                    else min(int(max_seconds), BUDGET_MAX_SECONDS))
 
+    # Level 3: neu lan chay truoc bi kill giua giao dich da file, khoi phuc
+    # NGAY truoc khi lam bat cu viec gi khac (journal trong .agents/tmp/tx/).
+    recovered = safe_writer.recover_open_transactions(root_path, log=log)
+
     # Mo run TRUOC moi buoc: timeline luon bat dau bang "nhan task", ke ca khi
     # clarify / plan / secret chan o buoc sau.
     if log:
@@ -162,6 +323,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
             data={"task_id": work_order.task_id, "level": work_order.level,
                   "target": (work_order.target_files[0]
                              if len(work_order.target_files) == 1 else None),
+                  "files": list(work_order.target_files),
                   "max_rounds": work_order.max_rounds,
                   "verify_command": work_order.verify_command, "dry_run": dry_run},
             root=root_path,
@@ -205,19 +367,26 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                                            dir=str(Path(tempfile.gettempdir()) / "opencode")))
         coder.bind_workspace(root_path, coder_root)
 
-    if len(work_order.target_files) != 1:
+    targets = list(work_order.target_files or [])
+    if not targets:
+        raise work_order_module.WorkOrderRejected(["Work Order thieu target_files"])
+    if len(targets) > 1 and work_order.level < work_order_module.MULTI_FILE_LEVEL:
         raise work_order_module.WorkOrderRejected(
-            [f"Phase 1 chi ho tro 1 target file, nhan duoc {len(work_order.target_files)}"]
+            [f"task dong {len(targets)} file nhung level={work_order.level}; "
+             f"can level {work_order_module.MULTI_FILE_LEVEL} (da file)"]
         )
-    target_rel = work_order.target_files[0]
+    multi_file = len(targets) > 1
+    target_rel = targets[0]
     target_path = gate.project_path(target_rel)
-    if not target_path.exists():
-        raise work_order_module.WorkOrderRejected([f"file dich khong ton tai: {target_rel}"])
+    for relative in targets:
+        if not gate.project_path(relative).exists():
+            raise work_order_module.WorkOrderRejected(
+                [f"file dich khong ton tai: {relative}"])
 
     # Snapshot byte-level cac file thuoc pham vi task: neu worker tu sua file
     # (agent co the dung tool edit/shell), ta phat hien va khoi phuc nguyen byte.
-    guard_files = [target_rel] + [item for item in (work_order.sandbox_files or [])
-                                 if item != target_rel]
+    guard_files = list(dict.fromkeys(targets + [
+        item for item in (work_order.sandbox_files or []) if item not in targets]))
     # Secret Scanner (Task 3.5): chan file nhay cam + file dich chua secret TRUOC
     # khi bat ky noi dung nao roi khoi may. Sandbox file co secret chi bi loai
     # khoi ban sao gui model (AgenticCoder tu bo qua), verify van chay local.
@@ -227,7 +396,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         if finding["kind"] == "sensitive_path":
             blocked_reasons.append(
                 f"file nhay cam khong duoc gui model: {finding['file']} ({finding['preview']})")
-        elif finding["file"] == target_rel:
+        elif finding["file"] in targets:
             blocked_reasons.append(
                 f"file dich chua secret ({finding['kind']}) tai dong {finding['line']}: "
                 f"{finding['file']}")
@@ -268,13 +437,19 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                 )
         return tampered
 
-    original_sha = safe_writer.sha256_file(target_path)
+    original_shas = {relative: safe_writer.sha256_file(gate.project_path(relative))
+                     for relative in targets}
+    original_sha = original_shas[target_rel]
 
     started = time.perf_counter()
     report = {
         "task_id": work_order.task_id,
         "level": work_order.level,
         "file": target_rel,
+        "files": [{"path": relative, "original_sha256": original_shas[relative],
+                   "final_sha256": original_shas[relative], "changed": False,
+                   "patched": False} for relative in targets],
+        "transaction": None,
         "status": None,
         "source_encoding": None,
         "max_rounds": work_order.max_rounds,
@@ -348,24 +523,30 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         coder.limit_check = lambda: requests_used() < max_requests
 
     # Doc file nguon: giu nguyen byte-level (xem _read_source).
-    gate.assert_can_read(permissions.ROLE_LEAD, target_path)
-    try:
-        original, source_encoding = _read_source(target_path)
-    except (OSError, ValueError) as exc:
-        report["status"] = STATUS_REJECTED
-        report["error"] = f"khong doc duoc file nguon: {exc}"
-        report["duration_ms"] = int((time.perf_counter() - started) * 1000)
-        if log:
-            ledger.append_event(
-                "recipe.done", run_id=run_id, duration_ms=report["duration_ms"],
-                result={"status": "fail", "error": report["error"]},
-                data={"task_id": work_order.task_id, "status": STATUS_REJECTED},
-                root=root_path,
-            )
-        return report
-    report["source_encoding"] = source_encoding
+    originals: dict[str, str] = {}
+    encodings: dict[str, str] = {}
+    for relative in targets:
+        source_path = gate.project_path(relative)
+        gate.assert_can_read(permissions.ROLE_LEAD, source_path)
+        try:
+            text_value, encoding = _read_source(source_path)
+        except (OSError, ValueError) as exc:
+            report["status"] = STATUS_REJECTED
+            report["error"] = f"khong doc duoc file nguon {relative}: {exc}"
+            report["duration_ms"] = int((time.perf_counter() - started) * 1000)
+            if log:
+                ledger.append_event(
+                    "recipe.done", run_id=run_id, duration_ms=report["duration_ms"],
+                    result={"status": "fail", "error": report["error"]},
+                    data={"task_id": work_order.task_id, "status": STATUS_REJECTED},
+                    root=root_path,
+                )
+            return report
+        originals[relative] = text_value
+        encodings[relative] = encoding
+    report["source_encoding"] = encodings[target_rel]
 
-    current_content = original
+    current_contents = dict(originals)
     feedback = None
 
     # Memory Engine (Task 4.4): rut kinh nghiem tu ledger, chen vao prompt Coder.
@@ -401,10 +582,16 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         report["rounds"] = round_index
         round_started = time.perf_counter()
 
-        # --- 1. Coder sinh patch ------------------------------------------
+        # --- 1. Coder sinh patch (Level 3: ca tap file trong 1 lan goi) ----
         try:
-            patch = coder.patch(work_order, current_content=current_content,
-                                feedback=feedback, round_index=round_index)
+            if multi_file:
+                raw_patches = coder.patch_set(
+                    work_order, current_files=dict(current_contents),
+                    feedback=feedback, round_index=round_index)
+            else:
+                raw_patches = {target_rel: coder.patch(
+                    work_order, current_content=current_contents[target_rel],
+                    feedback=feedback, round_index=round_index)}
         except Exception as exc:                        # noqa: BLE001
             restore_tampered()
             if getattr(exc, "kind", "") == "budget":
@@ -425,7 +612,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                     duration_ms=int((time.perf_counter() - round_started) * 1000),
                     result={"status": "fail", "error": str(exc)[:300]},
                     data={"round": round_index, "kind": getattr(exc, "kind", "error"),
-                          "model": model_label()}, root=root_path,
+                          "model": model_label(), "files": targets}, root=root_path,
                 )
             continue
 
@@ -436,6 +623,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                 duration_ms=int((time.perf_counter() - round_started) * 1000),
                 result={"status": "ok"},
                 data={"round": round_index, "model": model_label(),
+                      "files": list(raw_patches),
                       "fallback_attempts": len(getattr(coder, "attempts", []) or [])},
                 root=root_path,
             )
@@ -449,44 +637,92 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                 )
             break
 
-        # --- 2. Format ladder -> ban nhap -------------------------------
-        try:
-            ladder = format_ladder.apply_patch(current_content, patch)
-        except format_ladder.PatchFailed as exc:
-            feedback = _feedback("format_ladder", str(exc)[:400], "", round_index)
+        # --- 2. Format ladder -> ban nhap (tung file) --------------------
+        new_contents = dict(current_contents)
+        ladders: dict[str, dict] = {}
+        failures: list[str] = []
+        histories: list[list] = []
+        for relative in targets:
+            patch = raw_patches.get(relative)
+            if patch is None:
+                # Model khong doi file nay -> giu nguyen ban goc (khong phai loi).
+                ladders[relative] = {"content": current_contents[relative],
+                                     "level_name": "unchanged", "level": None,
+                                     "declared_level": None, "attempts": 0,
+                                     "downgraded": False}
+                continue
+            try:
+                ladders[relative] = format_ladder.apply_patch(
+                    current_contents[relative], patch)
+            except format_ladder.PatchFailed as exc:
+                failures.append(f"{relative}: {exc}")
+                histories.append(list(getattr(exc, "history", []) or []))
+        if failures:
+            feedback = _feedback("format_ladder", "; ".join(failures)[:400], "", round_index)
             report["feedback"].append(feedback)
             if log:
                 ledger.append_event(
                     "recipe.ladder", run_id=run_id,
-                    result={"status": "fail", "error": str(exc)[:300]},
-                    data={"round": round_index, "history": exc.history}, root=root_path,
+                    result={"status": "fail", "error": "; ".join(failures)[:300]},
+                    data={"round": round_index, "history": histories[0] if histories else [],
+                          "failed": failures}, root=root_path,
                 )
             continue
 
-        new_content = ladder["content"]
-        report["patch_level"] = ladder["level_name"]
-        report["patch_declared"] = format_ladder.LEVEL_NAME[ladder["declared_level"]]
-        report["patch_attempts"] = ladder["attempts"]
-        report["patch_downgraded"] = ladder["downgraded"]
+        for relative in targets:
+            new_contents[relative] = ladders[relative]["content"]
+        main_ladder = ladders[target_rel]
+        report["patch_level"] = main_ladder["level_name"]
+        report["patch_declared"] = (
+            format_ladder.LEVEL_NAME[main_ladder["declared_level"]]
+            if main_ladder["declared_level"] is not None else None)
+        report["patch_attempts"] = sum(int(item.get("attempts") or 0)
+                                       for item in ladders.values())
+        report["patch_downgraded"] = any(bool(item.get("downgraded"))
+                                         for item in ladders.values())
+        if multi_file and log:
+            ledger.append_event(
+                "recipe.ladder", run_id=run_id, result={"status": "pass"},
+                data={"round": round_index,
+                      "levels": {relative: ladders[relative]["level_name"]
+                                 for relative in targets}},
+                root=root_path,
+            )
 
-        # --- 3. Ghi ban nhap (Coder: CHI duoc ghi trong .agents/draft) ---
-        draft_path = gate.draft_path(work_order.task_id or "task", target_rel)
-        gate.assert_can_write(permissions.ROLE_CODER, draft_path)
-        draft_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            draft_path.write_text(new_content, encoding=source_encoding, newline="")
-        except (OSError, UnicodeEncodeError) as exc:
-            feedback = _feedback("ghi-ban-nhap", str(exc)[:300], "", round_index)
+        # --- 3. Ghi ban nhap cho TUNG file (Coder: CHI duoc ghi .agents/draft)
+        draft_paths: dict[str, Path] = {}
+        draft_error = None
+        for relative in targets:
+            draft_path = gate.draft_path(work_order.task_id or "task", relative)
+            gate.assert_can_write(permissions.ROLE_CODER, draft_path)
+            draft_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                draft_path.write_text(new_contents[relative],
+                                      encoding=encodings[relative], newline="")
+            except (OSError, UnicodeEncodeError) as exc:
+                draft_error = f"{relative}: {exc}"
+                break
+            draft_paths[relative] = draft_path
+        if draft_error:
+            feedback = _feedback("ghi-ban-nhap", draft_error[:300], "", round_index)
             report["feedback"].append(feedback)
             continue
 
         # --- 4. SystemBot verify ban nhap --------------------------------
-        draft_verify = _verify_draft(
-            work_order, gate=gate, root=root_path, run_id=run_id,
-            round_index=round_index, target_rel=target_rel, content=new_content,
-            draft_path=draft_path, verify_timeout=verify_timeout, log=log,
-            encoding=source_encoding,
-        )
+        if multi_file:
+            draft_verify = _verify_draft_set(
+                work_order, gate=gate, root=root_path, run_id=run_id,
+                round_index=round_index, contents=new_contents,
+                encodings=encodings, verify_timeout=verify_timeout, log=log,
+            )
+        else:
+            draft_verify = _verify_draft(
+                work_order, gate=gate, root=root_path, run_id=run_id,
+                round_index=round_index, target_rel=target_rel,
+                content=new_contents[target_rel], draft_path=draft_paths[target_rel],
+                verify_timeout=verify_timeout, log=log,
+                encoding=encodings[target_rel],
+            )
         report["draft_verify"] = {key: value for key, value in draft_verify.items()}
         if draft_verify["exit_code"] != 0:
             feedback = _feedback(
@@ -501,6 +737,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                     duration_ms=draft_verify["duration_ms"],
                     result={"status": "fail", "error": draft_verify.get("error")},
                     data={"round": round_index, "mode": draft_verify["mode"],
+                          "files": targets,
                           "exit_code": draft_verify["exit_code"],
                           "output_tail": draft_verify.get("output_tail")},
                     root=root_path,
@@ -513,17 +750,29 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                 duration_ms=draft_verify["duration_ms"],
                 result={"status": "pass"},
                 data={"round": round_index, "mode": draft_verify["mode"],
-                      "exit_code": 0, "ladder_level": ladder["level_name"]},
+                      "files": targets,
+                      "exit_code": 0,
+                      "ladder_level": main_ladder["level_name"]},
                 root=root_path,
             )
 
         # --- 5. Reviewer doc diff (Level 2, read-only) -------------------
         if work_order.level >= 2 and reviewer is not None:
-            diff = _diff(original, new_content, target_rel)
-            review = reviewer.review(
-                work_order, diff=diff, new_content=new_content,
-                old_content=current_content, level=work_order.level, sink=sink,
-            )
+            if multi_file:
+                diffs = {relative: _diff(originals[relative],
+                                         new_contents[relative], relative)
+                         for relative in targets}
+                review = reviewer.review_set(
+                    work_order, diffs=diffs, new_contents=new_contents,
+                    old_contents=current_contents, level=work_order.level, sink=sink,
+                )
+            else:
+                diff = _diff(originals[target_rel], new_contents[target_rel], target_rel)
+                review = reviewer.review(
+                    work_order, diff=diff, new_content=new_contents[target_rel],
+                    old_content=current_contents[target_rel],
+                    level=work_order.level, sink=sink,
+                )
             report["review"] = dict(review)
             if review.get("verdict") != "approve":
                 feedback = _feedback(
@@ -539,14 +788,51 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
             report["final_sha256"] = original_sha
             break
 
-        gate.assert_can_write(permissions.ROLE_LEAD, target_path)
+        for relative in targets:
+            gate.assert_can_write(permissions.ROLE_LEAD, gate.project_path(relative))
         restore_tampered()          # kiem tra lan cuoi truoc khi ghi that
+
+        if multi_file:
+            # Level 3: MOT giao dich cho ca tap file. Hoac tat ca duoc ghi va
+            # verify pass, hoac tat ca quay ve byte goc (batch rollback).
+            apply_report = _apply_transaction(
+                work_order, gate=gate, root=root_path, run_id=run_id,
+                round_index=round_index, contents=new_contents,
+                encodings=encodings, verify_timeout=verify_timeout, log=log,
+                targets=targets,
+            )
+            report["apply"] = apply_report
+            report["transaction"] = apply_report.get("transaction")
+            if apply_report["verified"]:
+                report["status"] = STATUS_APPLIED
+                report["applied"] = True
+                report["file_changed"] = any(
+                    item["written_sha256"] != item["original_sha256"]
+                    for item in apply_report["files"])
+                for relative in list(snapshots):
+                    guarded = gate.project_path(relative)
+                    if guarded.exists():
+                        snapshots[relative] = guarded.read_bytes()
+                break
+
+            report["rolled_back"] = True
+            verify_info = apply_report.get("verify") or {}
+            feedback = _feedback(
+                "apply-verify-da-file",
+                f"exit_code={verify_info.get('exit_code')}",
+                _tail(verify_info.get("output_tail")), round_index,
+            )
+            report["feedback"].append(feedback)
+            report["error"] = apply_report.get("error")
+            continue
+
         try:
             apply_report = safe_writer.write_safely(
-                target_path, new_content,
+                target_path, new_contents[target_rel],
                 verify_cmd=work_order.render_verify_command(target_rel),
                 verify_timeout=verify_timeout or system_bot.DEFAULT_TIMEOUT,
-                cwd=root_path, root=root_path, run_id=run_id, encoding=source_encoding,
+                cwd=root_path, root=root_path, run_id=run_id,
+                encoding=encodings[target_rel],
                 reason=f"recipe_c:{work_order.task_id}:r{round_index}", log=log,
             )
         except (OSError, UnicodeEncodeError, RuntimeError) as exc:
@@ -590,11 +876,15 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         if not report["error"]:
             report["error"] = ("het so vong (circuit breaker) hoac khong co ban sua nao verify duoc")
 
-    # Chot ha tang: file phai dung trang thai mong doi.
+    # Chot ha tang: MOI file phai dung trang thai mong doi.
     restore_tampered()
-    if target_path.exists():
-        report["final_sha256"] = safe_writer.sha256_file(target_path)
-        report["file_changed"] = report["final_sha256"] != report["original_sha256"]
+    for item in report["files"]:
+        path = gate.project_path(item["path"])
+        item["final_sha256"] = safe_writer.sha256_file(path) if path.exists() else None
+        item["changed"] = item["final_sha256"] != item["original_sha256"]
+    if targets and gate.project_path(target_rel).exists():
+        report["final_sha256"] = report["files"][0]["final_sha256"]
+        report["file_changed"] = any(item["changed"] for item in report["files"])
     report["duration_ms"] = int((time.perf_counter() - started) * 1000)
     report["coder_calls"] = getattr(coder, "calls", 0)
     report["reviewer_calls"] = getattr(reviewer, "calls", 0) if reviewer else 0
@@ -655,6 +945,9 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                   "rounds": report["rounds"], "patch_level": report["patch_level"],
                   "requests": report["requests"], "applied": report["applied"],
                   "rolled_back": report["rolled_back"],
+                  "transaction": report["transaction"],
+                  "files": [{"path": item["path"], "changed": item["changed"]}
+                            for item in report["files"]],
                   "fallback_attempts": report["fallback"]["failures"],
                   "models": report["fallback"]["models"],
                   "budget_exceeded": report["budget"]["exceeded"],

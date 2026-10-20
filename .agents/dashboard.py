@@ -108,6 +108,66 @@ def _inside(candidate: Path, root: Path) -> bool:
         return False
 
 
+def _diff_multi(root: Path, selected: list[dict], *, run_id: str, files: list[str],
+                task_id: str) -> dict:
+    """Diff cho run Level 3: tung file (backup vs hien tai) + diff gop."""
+    entries: list[dict] = []
+    combined: list[str] = []
+    changed = 0
+    for relative in files:
+        target = root / relative
+        backup = None
+        for event in selected:
+            if event.get("event_type") != "safe_writer.backup":
+                continue
+            data = event.get("data") or {}
+            try:
+                same = Path(str(data.get("target") or "")).resolve() == target.resolve()
+            except OSError:
+                same = False
+            if same and data.get("backup_path"):
+                backup = Path(str(data["backup_path"]))
+        if backup is not None and not _inside(backup, root / ".agents"):
+            backup = None
+        draft = root / ".agents" / "draft" / task_id / relative
+        old_source = backup if (backup and backup.exists()) else (target if target.exists() else None)
+        new_source = target if target.exists() else (draft if draft.exists() else None)
+        if old_source is None or new_source is None:
+            entries.append({"target": relative, "error": "khong tim thay file de diff"})
+            continue
+        old_text = _read_text(old_source)
+        new_text = _read_text(new_source)
+        diff = "\n".join(difflib.unified_diff(
+            old_text.splitlines(), new_text.splitlines(),
+            fromfile=f"{relative} (goc)", tofile=f"{relative} (hien tai)",
+            lineterm="", n=3))
+        count = sum(1 for line in diff.splitlines()
+                    if line.startswith(("+", "-"))
+                    and not line.startswith(("+++", "---")))
+        changed += count
+        entries.append({
+            "target": relative,
+            "old_label": "backup" if old_source is backup else "hien tai",
+            "new_label": "hien tai" if new_source is target else "ban nhap",
+            "old": old_text[:MAX_CONTENT_BYTES],
+            "new": new_text[:MAX_CONTENT_BYTES],
+            "diff": diff[:MAX_CONTENT_BYTES * 2],
+            "changed_lines": count,
+        })
+        combined.append(diff)
+    return {
+        "run_id": run_id,
+        "target": ", ".join(files),
+        "files": entries,
+        "old_label": "backup",
+        "new_label": "hien tai",
+        "old": entries[0].get("old", "") if entries else "",
+        "new": entries[0].get("new", "") if entries else "",
+        "diff": "\n".join(combined)[:MAX_CONTENT_BYTES * 2],
+        "changed_lines": changed,
+    }
+
+
 def diff_for_run(root: Path, ledger: Path, run_id: str) -> dict:
     """Ban goc (backup truoc khi ghi) vs hien tai; khong co backup -> ban nhap."""
     events = schema.read_events(ledger)
@@ -119,6 +179,12 @@ def diff_for_run(root: Path, ledger: Path, run_id: str) -> dict:
                   if event.get("event_type") == "recipe.start"), {})
     target_rel = str(start.get("target") or "")
     task_id = str(start.get("task_id") or "task")
+
+    # Level 3: mot run co nhieu file -> tra ve diff cua TUNG file + diff gop.
+    file_list = [str(item) for item in (start.get("files") or []) if str(item)]
+    if len(file_list) > 1:
+        return _diff_multi(root, selected, run_id=run_id, files=file_list, task_id=task_id)
+
     target = Path(target_rel) if target_rel else None
     if target is not None and not target.is_absolute():
         target = root / target_rel

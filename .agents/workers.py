@@ -32,6 +32,12 @@ import secret_scan
 
 DEFAULT_OPENCODE_BIN = r"C:\Users\tuank\AppData\Roaming\npm\opencode.CMD"
 
+
+def _same_text(left: str, right: str) -> bool:
+    """So sanh noi dung bo qua kieu xuong dong (CRLF vs LF) va khoang trang 2 dau."""
+    normalize = lambda text: (text or "").replace("\r\n", "\n").strip()
+    return normalize(left) == normalize(right)
+
 DANGEROUS_ADDED = (
     (r"\beval\s*\(", "eval() tren du lieu moi"),
     (r"\bexec\s*\(", "exec() tren du lieu moi"),
@@ -272,6 +278,17 @@ class Coder:
               round_index: int) -> dict:
         raise NotImplementedError
 
+    def patch_set(self, work_order, *, current_files: dict, feedback: str | None,
+                  round_index: int) -> dict:
+        """Mac dinh: giao tung file mot (N request). Coder nao gop duoc thi override."""
+        patches: dict[str, dict] = {}
+        for relative, content in current_files.items():
+            patches[relative] = self.patch(
+                work_order.for_file(relative), current_content=content,
+                feedback=feedback, round_index=round_index,
+            )
+        return patches
+
     def stats(self) -> dict:
         return {"name": self.name, "kind": self.kind, "calls": self.calls,
                 "errors": list(self.errors), "usage": dict(self.usage)}
@@ -300,6 +317,27 @@ class ScriptedCoder(Coder):
             raise KeyError(f"khong co kich ban cho task {work_order.task_id}")
         index = min(round_index - 1, len(rounds) - 1)
         return normalize_patch(rounds[index])
+
+    def patch_set(self, work_order, *, current_files: dict, feedback: str | None,
+                  round_index: int) -> dict:
+        """Kich ban da file: moi vong la dict {file: patch} (hoac 1 patch don)."""
+        self.calls += 1
+        rounds = self.script.get(work_order.task_id) or []
+        if not rounds:
+            self.errors.append(f"khong co kich ban cho task {work_order.task_id}")
+            raise KeyError(f"khong co kich ban cho task {work_order.task_id}")
+        index = min(round_index - 1, len(rounds) - 1)
+        entry = rounds[index]
+        if isinstance(entry, dict) and "format" in entry:
+            first = next(iter(current_files))
+            return {first: normalize_patch(entry)}
+        patches: dict[str, dict] = {}
+        for relative in current_files:
+            raw = entry.get(relative) if isinstance(entry, dict) else None
+            if raw is None:
+                raise WorkerError(f"kich ban thieu patch cho {relative}", kind="patch")
+            patches[relative] = normalize_patch(raw)
+        return patches
 
 
 class OpenCodeCoder(Coder):
@@ -381,6 +419,24 @@ AGENTIC_PROMPT = (
     "Khi xong, tra loi ngan gon (1-3 cau).\n"
 )
 
+# Level 3: mot lan goi model, sua NHIEU file trong cung thu muc tam. Cac file
+# phai dong bo voi nhau (doi ten ham o file A thi noi goi o file B cung doi).
+AGENTIC_PROMPT_MULTI = (
+    "Ban la coder duoc giao sua NHIEU file trong thu muc lam viec hien tai.\n"
+    "Cac file can sua (dong bo voi nhau, khong duoc sua le):\n"
+    "{files}\n"
+    "\n"
+    "MUC TIEU: {objective}\n"
+    "RANG BUOC: {boundaries}\n"
+    "TIEU CHI NGHIEM THU: {criteria}\n"
+    "Lenh verify (chay cho CA du an): {verify}\n"
+    "\n"
+    "Hay sua truc tiep noi dung cac file. Ban duoc phep chay lenh verify de tu kiem tra.\n"
+    "Chi sua cac file liet ke tren; khong tao file moi, khong sua file test.\n"
+    "Neu mot file khong can doi, hay de nguyen (he thong giu ban goc).\n"
+    "Khi xong, tra loi ngan gon (1-3 cau).\n"
+)
+
 
 class SessionPolicy:
     """Chinh sach phien lam viec cua Coder (Task 3.4).
@@ -458,9 +514,11 @@ class AgenticCoder(Coder):
         return run_opencode_cli(self.binary, self.model, prompt, agent=self.agent,
                                 cwd=self._active_cwd or self.cwd, timeout=self.timeout)
 
-    def _copy_project_files(self, work_order, round_dir: Path, target: str) -> None:
+    def _copy_project_files(self, work_order, round_dir: Path, targets) -> None:
         """Copy file cua task sang thu muc tam, chan secret truoc khi model doc."""
-        for relative in work_order.sandbox_files or [target]:
+        targets = list(targets)
+        wanted = set(targets)
+        for relative in work_order.sandbox_files or targets:
             source = (self.project_root or Path.cwd()) / relative
             if not source.exists():
                 continue
@@ -470,7 +528,7 @@ class AgenticCoder(Coder):
                                              "detail": reason})
                 continue
             findings = secret_scan.scan_file(source)
-            if findings and relative == target:
+            if findings and relative in wanted:
                 raise WorkerError("file dich chua secret, khong duoc gui ra model",
                                   kind="secret")
             if findings:
@@ -484,10 +542,29 @@ class AgenticCoder(Coder):
 
     def patch(self, work_order, *, current_content: str, feedback: str | None,
               round_index: int) -> dict:
+        target = work_order.target_files[0]
+        changed = self._patch_files(work_order, {target: current_content},
+                                    feedback=feedback, round_index=round_index)
+        content = changed.get(target)
+        if content is None:
+            raise WorkerError("model khong sua gi trong file dich", kind="noop")
+        return {"format": "whole", "content": content}
+
+    def patch_set(self, work_order, *, current_files: dict, feedback: str | None,
+                  round_index: int) -> dict:
+        """Level 3: MOT lan goi model sua TAT CA file trong cung thu muc tam."""
+        changed = self._patch_files(work_order, dict(current_files),
+                                    feedback=feedback, round_index=round_index)
+        return {relative: ({"format": "whole", "content": text}
+                           if text is not None else None)
+                for relative, text in changed.items()}
+
+    def _patch_files(self, work_order, files: dict, *, feedback: str | None,
+                     round_index: int) -> dict:
         self.calls += 1
         if not self.cwd:
             raise WorkerError("chua bind_workspace -> khong co thu muc tam", kind="config")
-        target = work_order.target_files[0]
+        targets = list(files)
         round_dir = Path(self.cwd) / f"r{round_index}"
         previous_dir = Path(self.cwd) / f"r{round_index - 1}"
         shutil.rmtree(round_dir, ignore_errors=True)
@@ -500,26 +577,38 @@ class AgenticCoder(Coder):
             shutil.copytree(previous_dir, round_dir)
         else:
             round_dir.mkdir(parents=True, exist_ok=True)
-            self._copy_project_files(work_order, round_dir, target)
+            self._copy_project_files(work_order, round_dir, targets)
         fresh_session = self.session_policy.is_reset(round_index)
         self.session_events.append({"round": round_index,
                                     "mode": "resume" if reuse else "fresh",
-                                    "context_reset": fresh_session})
+                                    "context_reset": fresh_session,
+                                    "files": targets})
 
-        destination = round_dir / target
-        if not destination.exists():
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(current_content, encoding="utf-8", newline="")
+        for relative, content in files.items():
+            destination = round_dir / relative
+            if not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(content, encoding="utf-8", newline="")
 
-        prompt = AGENTIC_PROMPT.format(
-            target=target, objective=work_order.objective,
-            boundaries=work_order.boundaries, criteria=work_order.acceptance_criteria,
-            verify=work_order.render_verify_command(target),
-        )
+        if len(targets) == 1:
+            target = targets[0]
+            prompt = AGENTIC_PROMPT.format(
+                target=target, objective=work_order.objective,
+                boundaries=work_order.boundaries, criteria=work_order.acceptance_criteria,
+                verify=work_order.render_verify_command(target),
+            )
+        else:
+            listing = "\n".join(f"- {item}" for item in targets)
+            prompt = AGENTIC_PROMPT_MULTI.format(
+                files=listing, objective=work_order.objective,
+                boundaries=work_order.boundaries, criteria=work_order.acceptance_criteria,
+                verify=work_order.render_verify_command(targets[0]),
+            )
         prompt += self._hints_block()
         if fresh_session:
             prompt += "\n" + self.session_policy.brief(
-                target=target, draft=self._last_attempt or current_content,
+                target=", ".join(targets),
+                draft=self._last_attempt or "\n\n".join(files.values()),
                 feedback=feedback,
             )
         if feedback:
@@ -536,18 +625,28 @@ class AgenticCoder(Coder):
             text, usage = self.runner(prompt)
             if isinstance(usage, dict) and usage:
                 self.usage.update(usage)
-            if not destination.exists():
-                raise WorkerError("model da xoa file dich", kind="deleted")
-            new_text, _encoding = read_source_file(destination)
-            self._last_attempt = new_text
-            if new_text.strip() == current_content.strip():
-                raise WorkerError("model khong sua gi trong file dich", kind="noop")
+            changed: dict = {}
+            for relative in targets:
+                destination = round_dir / relative
+                if not destination.exists():
+                    raise WorkerError(f"model da xoa file {relative}", kind="deleted")
+                new_text, _encoding = read_source_file(destination)
+                changed[relative] = (None if _same_text(new_text, files[relative])
+                                     else new_text)
+            touched = [item for item in changed.values() if item is not None]
+            if not touched:
+                raise WorkerError("model khong sua gi trong cac file dich", kind="noop")
+            self._last_attempt = touched[0]
             if self.debug_dir is not None:
                 self.debug_dir.mkdir(parents=True, exist_ok=True)
                 (self.debug_dir / f"{stem}.prompt.txt").write_text(prompt, encoding="utf-8")
                 (self.debug_dir / f"{stem}.output.txt").write_text(text or "", encoding="utf-8")
-                (self.debug_dir / f"{stem}.file.txt").write_text(new_text, encoding="utf-8")
-            return {"format": "whole", "content": new_text}
+                for relative, new_text in changed.items():
+                    if new_text is None:
+                        continue
+                    name = f"{stem}.{relative.replace('/', '_')}.file.txt"
+                    (self.debug_dir / name).write_text(new_text, encoding="utf-8")
+            return changed
         except Exception as exc:                            # noqa: BLE001
             kind = getattr(exc, "kind", "patch")
             self.errors.append(f"[{kind}] {str(exc)[:300]}")
@@ -569,6 +668,24 @@ class Reviewer:
                level: int, sink) -> dict:
         raise NotImplementedError
 
+    def review_set(self, work_order, *, diffs: dict, new_contents: dict,
+                   old_contents: dict, level: int, sink) -> dict:
+        """Mac dinh: review tung file roi hop nhat (reject neu bat ky file reject)."""
+        findings = []
+        for relative, diff in diffs.items():
+            findings.append(self.review(
+                work_order, diff=diff, new_content=new_contents.get(relative, ""),
+                old_content=old_contents.get(relative, ""), level=level, sink=sink,
+            ))
+        reasons: list[str] = []
+        for item in findings:
+            reasons.extend(item.get("reasons") or [])
+        verdict = ("approve" if findings and all(i.get("verdict") == "approve"
+                                                for i in findings) else "reject")
+        return {"verdict": verdict, "level": level, "task_id": work_order.task_id,
+                "reasons": reasons[:10], "reviewer": self.name,
+                "files": list(diffs), "per_file": findings}
+
     def stats(self) -> dict:
         return {"name": self.name, "kind": self.kind, "calls": self.calls}
 
@@ -587,9 +704,8 @@ class HeuristicReviewer(Reviewer):
         self.name = name
         self.max_shrink_ratio = max_shrink_ratio
 
-    def review(self, work_order, *, diff: str, new_content: str, old_content: str,
-               level: int, sink) -> dict:
-        self.calls += 1
+    def _evaluate(self, diff: str, new_content: str, old_content: str,
+                  level: int) -> tuple[list[str], dict]:
         reasons: list[str] = []
         delta = changed_lines(diff)
 
@@ -610,7 +726,12 @@ class HeuristicReviewer(Reviewer):
         removed_asserts = [line for line in delta["removed"] if "assert" in line]
         if removed_asserts and not any("assert" in line for line in delta["added"]):
             reasons.append("xoa test/assert ma khong them test thay the")
+        return reasons, delta
 
+    def review(self, work_order, *, diff: str, new_content: str, old_content: str,
+               level: int, sink) -> dict:
+        self.calls += 1
+        reasons, delta = self._evaluate(diff, new_content, old_content, level)
         if level >= 2 and not diff.strip():
             reasons.append("Level 2 nhung diff rong")
 
@@ -620,6 +741,36 @@ class HeuristicReviewer(Reviewer):
             "reasons": reasons[:10],
             "checked": {"added": len(delta["added"]), "removed": len(delta["removed"])},
             "reviewer": self.name,
+        }
+        if sink is not None:
+            sink.write(findings)
+        return findings
+
+    def review_set(self, work_order, *, diffs: dict, new_contents: dict,
+                   old_contents: dict, level: int, sink) -> dict:
+        """Doc TOAN BO diff cua tap file: mot ket luan cho ca giao dich."""
+        self.calls += 1
+        reasons: list[str] = []
+        added = removed = 0
+        per_file: list[dict] = []
+        for relative, diff in diffs.items():
+            local, delta = self._evaluate(diff, new_contents.get(relative, ""),
+                                          old_contents.get(relative, ""), level)
+            added += len(delta["added"])
+            removed += len(delta["removed"])
+            reasons.extend(f"{relative}: {reason}" for reason in local)
+            per_file.append({"file": relative, "added": len(delta["added"]),
+                             "removed": len(delta["removed"]),
+                             "reasons": local[:5]})
+        if level >= 2 and not any(str(item).strip() for item in diffs.values()):
+            reasons.append("Level 2 nhung diff rong")
+
+        verdict = "reject" if reasons else "approve"
+        findings = {
+            "verdict": verdict, "level": level, "task_id": work_order.task_id,
+            "reasons": reasons[:10], "files": list(diffs),
+            "checked": {"added": added, "removed": removed},
+            "per_file": per_file, "reviewer": self.name,
         }
         if sink is not None:
             sink.write(findings)
@@ -672,6 +823,38 @@ class OpenCodeReviewer(Reviewer):
             verdict, reasons = "reject", [f"reviewer loi: {exc}"[:200]]
         findings = {"verdict": verdict, "level": level, "task_id": work_order.task_id,
                     "reasons": reasons, "reviewer": self.name}
+        if sink is not None:
+            sink.write(findings)
+        return findings
+
+    def review_set(self, work_order, *, diffs: dict, new_contents: dict,
+                   old_contents: dict, level: int, sink) -> dict:
+        """Level 3: mot request, doc ca tap diff de bat loi lech logic giua module."""
+        self.calls += 1
+        budget = max(2000, 20000 // max(len(diffs), 1))
+        blocks = [f"### {relative}\n```diff\n{str(diff)[:budget]}\n```"
+                  for relative, diff in diffs.items()]
+        prompt = (
+            "Ban la reviewer doc lap, quyen READ-ONLY. Day la mot task sua NHIEU file.\n"
+            "Doc TOAN BO diff va tim loi that, dac biet loi lech logic giua cac module\n"
+            "(doi ten ham o file nay nhung noi goi o file kia khong doi...).\n"
+            "Chi duyet khi: dung muc tieu, cac file dong bo, khong chen ma nguy hiem, khong xoa test.\n"
+            'Tra ve JSON: {"verdict":"approve"|"reject","reasons":["..."]}\n\n'
+            f"MUC TIEU: {work_order.objective}\n"
+            f"TIEU CHI: {work_order.acceptance_criteria}\n"
+            f"FILES: {', '.join(diffs)}\n\n"
+            + "\n\n".join(blocks)
+        )
+        try:
+            raw = self.runner(prompt)
+            data = parse_patch_json(raw)
+            reasons = [str(item) for item in (data.get("reasons") or [])][:10]
+            verdict = ("approve" if str(data.get("verdict", "")).lower().startswith("approve")
+                       else "reject")
+        except Exception as exc:                            # noqa: BLE001
+            verdict, reasons = "reject", [f"reviewer loi: {exc}"[:200]]
+        findings = {"verdict": verdict, "level": level, "task_id": work_order.task_id,
+                    "reasons": reasons, "files": list(diffs), "reviewer": self.name}
         if sink is not None:
             sink.write(findings)
         return findings
