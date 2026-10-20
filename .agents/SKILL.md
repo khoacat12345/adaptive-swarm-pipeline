@@ -1,6 +1,6 @@
 ---
 name: adaptive-swarm-pipeline
-description: Run, observe and harden the Adaptive Swarm Pipeline in C:\Users\tuank\.agents. Use when the user asks to run a coding task through the swarm (Recipe C), to inspect or replay a run, to open the local dashboard, to see cost/token/fallback statistics, to get memory suggestions from past runs, or to verify the pipeline health (Phase 0 / 0.5 / 1 / 2 / 3 / 4 acceptance suites).
+description: Run, observe and harden the Adaptive Swarm Pipeline in the project's `.agents/` folder. Use when the user asks to run a coding task through the swarm (Recipe C), to inspect or replay a run, to open the local dashboard, to see cost/token/fallback statistics, to get memory suggestions from past runs, or to verify the pipeline health (Phase 0 / 0.5 / 1 / 2 / 3 / 4 acceptance suites).
 ---
 
 # Adaptive Swarm Pipeline

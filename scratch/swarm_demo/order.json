@@ -6,7 +6,7 @@
   "boundaries": "Chi sua calc.py, khong doi ten ham",
   "input_context": "vong lap dang la range(n - 1) nen thieu phan tu cuoi",
   "acceptance_criteria": "python check.py exit 0, sum_range(5) == 10",
-  "verify_command": "\"C:\\Users\\tuank\\AppData\\Local\\Programs\\Python\\Python312\\python.exe\" scratch/swarm_demo/check.py",
+  "verify_command": "python scratch/swarm_demo/check.py",
   "target_files": [
     "scratch/swarm_demo/calc.py"
   ],

@@ -23,13 +23,15 @@ Dung:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-DEFAULT_BIN = shutil.which("opencode") or r"C:\Users\tuank\AppData\Roaming\npm\opencode.CMD"
+DEFAULT_BIN = (shutil.which("opencode")
+               or os.path.join(os.environ.get("APPDATA") or "", "npm", "opencode.cmd"))
 
 # Han muc $/thang cua tung model tren OpenCode Go (tai lieu Go, 2026-10).
 CAPS = {

@@ -1,11 +1,11 @@
 ---
 name: adaptive-swarm-pipeline
-description: Run, observe and harden the Adaptive Swarm Pipeline in C:\Users\tuank\.agents. Use when the user asks to run a coding task through the swarm, replay a run, open the local dashboard, read cost/token/fallback statistics, get memory suggestions from past runs, or verify pipeline health (Phase 0 / 0.5 / 1 / 2 / 3 / 4 acceptance suites).
+description: Run, observe and harden the Adaptive Swarm Pipeline in the project's `.agents/` folder. Use when the user asks to run a coding task through the swarm, replay a run, open the local dashboard, read cost/token/fallback statistics, get memory suggestions from past runs, or verify pipeline health (Phase 0 / 0.5 / 1 / 2 / 3 / 4 acceptance suites).
 ---
 
 # Adaptive Swarm Pipeline
 
-The full runbook lives in `C:\Users\tuank\.agents\SKILL.md`. Read it before doing
+The full runbook lives in `.agents/SKILL.md`. Read it before doing
 anything else; this file only exists so OpenCode can discover the skill.
 
 Quick reference:

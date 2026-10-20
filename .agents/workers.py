@@ -23,6 +23,7 @@ from __future__ import annotations
 import codecs
 import difflib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -30,7 +31,7 @@ from pathlib import Path
 
 import secret_scan
 
-DEFAULT_OPENCODE_BIN = r"C:\Users\tuank\AppData\Roaming\npm\opencode.CMD"
+DEFAULT_OPENCODE_BIN = os.path.join(os.environ.get("APPDATA") or "", "npm", "opencode.cmd")
 
 
 def _same_text(left: str, right: str) -> bool:

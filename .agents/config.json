@@ -265,13 +265,13 @@
     },
     "auth_raw": "OpenCode Console  Personal                    stored",
     "config_files": [
-      "C:\\Users\\tuank\\.config\\opencode\\opencode.json"
+      "%USERPROFILE%\\.config\\opencode\\opencode.json"
     ]
   },
   "platform": {
     "os": "nt",
     "python": "3.12.10",
-    "opencode_cli": "C:\\Users\\tuank\\AppData\\Roaming\\npm\\opencode.CMD",
+    "opencode_cli": "opencode",
     "opencode_version": "opencode v2.0.32"
   },
   "verify": {

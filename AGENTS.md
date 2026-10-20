@@ -1,6 +1,6 @@
 # USER-WIDE AGENTS.md — Quy Chuẩn Điều Phối Multi-AI & Vận Hành Cho Mọi Dự Án
 
-Tài liệu này là **Luật Bắt Buộc (Mandatory Rules)** cho Antigravity khi làm việc trên bất kỳ dự án nào của người dùng `tuank`.
+Tài liệu này là **Luật Bắt Buộc (Mandatory Rules)** cho Antigravity khi làm việc trên bất kỳ dự án nào của người dùng.
 
 ---
 
