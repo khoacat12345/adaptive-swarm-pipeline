@@ -9,6 +9,8 @@
 /scratch/*
 !/scratch/swarm_demo/
 !/AGENTS.md
+!/README.md
+!/LICENSE
 !/.gitignore
 
 # Rac he dieu hanh
