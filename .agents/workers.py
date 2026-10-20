@@ -1,0 +1,700 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Lop worker cho Recipe C: Coder sinh patch, Reviewer doc diff.
+
+Vi sao phai tach lop nay: mot script Python KHONG the goi tool `subagent` cua
+OpenCode. Neu nhet thang loi goi model vao recipe thi recipe khong test duoc va
+cung khong doi model duoc. Nen:
+
+  Coder    : ScriptedCoder (tat dinh, do engine) | OpenCodeCoder (goi CLI that)
+  Reviewer : HeuristicReviewer (luat, 0 request)  | OpenCodeReviewer (LLM)
+
+Cung mot recipe_c.py chay duoc voi ca 4 to hop. Smoke test dung ban scripted de
+do *engine*; production dung ban OpenCode.
+
+Hop dong patch (JSON):
+  {"format": "whole",   "content": "<ca file>"}
+  {"format": "replace", "edits": [{"search": "...", "replace": "..."}]}
+  {"format": "symbol",  "edits": [{"name": "ham_x", "replace": "<code moi>"}]}
+"""
+
+from __future__ import annotations
+
+import codecs
+import difflib
+import json
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+import secret_scan
+
+DEFAULT_OPENCODE_BIN = r"C:\Users\tuank\AppData\Roaming\npm\opencode.CMD"
+
+DANGEROUS_ADDED = (
+    (r"\beval\s*\(", "eval() tren du lieu moi"),
+    (r"\bexec\s*\(", "exec() tren du lieu moi"),
+    (r"\bos\.system\s*\(", "os.system() (command injection)"),
+    (r"shell\s*=\s*True", "subprocess shell=True"),
+    (r"\bpickle\.loads?\s*\(", "pickle (RCE khi doc du lieu ngoai)"),
+    (r"__import__\s*\(", "__import__ dong"),
+    (r"\bverify\s*=\s*False\b", "tat verify SSL"),
+)
+SECRET_ADDED = (
+    r"(?i)\b(password|passwd|api_key|apikey|secret|token)\s*=\s*[\"'][^\"']{8,}[\"']",
+)
+
+
+# --------------------------------------------------------------------------
+# Parse patch
+# --------------------------------------------------------------------------
+
+def _json_candidates(text: str):
+    """Quet cac object JSON can bang ngoac trong 1 doan text co nhieu rac."""
+    depth, start, in_string, escape = 0, None, False, False
+    for index, char in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}":
+            if depth:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    yield text[start:index + 1]
+                    start = None
+
+
+class WorkerError(RuntimeError):
+    """Loi khi goi model, co phan loai de ben goi quyet dinh dung hay bo."""
+
+    def __init__(self, message: str, kind: str = "error") -> None:
+        self.kind = kind
+        super().__init__(f"[{kind}] {message}")
+
+
+def classify_cli_error(blob: str) -> str:
+    """Phan loai loi CLI/model: quota, timeout, model khong ton tai, con lai la cli."""
+    text = (blob or "").lower()
+    if any(key in text for key in ("insufficient", "funds", "quota", "402",
+                                   "rate limit", "too many requests", "credit")):
+        return "quota"
+    if "timed out" in text or "timeout" in text:
+        return "timeout"
+    if "model not found" in text or "unknown model" in text or "no such model" in text:
+        return "model"
+    return "cli"
+
+
+def extract_text_events(raw: str) -> tuple[str, dict]:
+    """Doc output `opencode run --format json` (JSON Lines) -> (text, usage)."""
+    texts: list[str] = []
+    usage: dict = {}
+    saw_event = False
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        saw_event = True
+        part = event.get("part") if isinstance(event.get("part"), dict) else {}
+        if event.get("type") == "text" and isinstance(part.get("text"), str):
+            texts.append(part["text"])
+        for key in ("tokens", "usage"):
+            candidate = event.get(key) or part.get(key)
+            if isinstance(candidate, dict):
+                usage.update(candidate)
+        if isinstance(part.get("cost"), (int, float)):
+            usage["cost"] = part["cost"]
+    if texts:
+        return "\n".join(texts), usage
+    # CLI khong ho tro --format json hoac khong co event -> dung stdout tho
+    return ("" if saw_event else (raw or "")), usage
+
+
+def parse_patch_json(text: str) -> dict:
+    """Lay object JSON dau tien trong output cua model (bo qua ```json ... ```)."""
+    if isinstance(text, dict):
+        return normalize_patch(text)
+    for candidate in _json_candidates(text or ""):
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return normalize_patch(data)
+    raise ValueError("khong tim thay object JSON hop le trong output cua model")
+
+
+def normalize_patch(patch: dict) -> dict:
+    """Chuan hoa + suy ra 'format' neu model quen khai bao."""
+    data = dict(patch)
+    fmt = str(data.get("format") or "").strip().lower()
+    if fmt not in ("whole", "replace", "symbol"):
+        if "content" in data:
+            fmt = "whole"
+        elif data.get("edits"):
+            edits = data["edits"]
+            fmt = "symbol" if any("name" in edit for edit in edits) else "replace"
+        else:
+            raise ValueError(f"patch khong ro dinh dang: {sorted(data)}")
+    data["format"] = fmt
+
+    if fmt == "whole":
+        if not isinstance(data.get("content"), str):
+            raise ValueError("patch 'whole' thieu 'content' dang chuoi")
+    else:
+        edits = data.get("edits")
+        if not isinstance(edits, list) or not edits:
+            raise ValueError(f"patch '{fmt}' thieu 'edits'")
+        required = ("name", "replace") if fmt == "symbol" else ("search", "replace")
+        for edit in edits:
+            if not isinstance(edit, dict):
+                raise ValueError("moi edit phai la object")
+            for key in required:
+                if not isinstance(edit.get(key), str):
+                    raise ValueError(f"edit thieu truong '{key}' dang chuoi")
+    return data
+
+
+# --------------------------------------------------------------------------
+# Diff
+# --------------------------------------------------------------------------
+
+def unified_diff(old: str, new: str, *, path: str = "file") -> str:
+    lines = difflib.unified_diff(
+        old.splitlines(keepends=True), new.splitlines(keepends=True),
+        fromfile=f"a/{path}", tofile=f"b/{path}", n=3,
+    )
+    return "".join(lines)
+
+
+def changed_lines(diff: str) -> dict:
+    added = [line[1:] for line in diff.splitlines()
+             if line.startswith("+") and not line.startswith("+++")]
+    removed = [line[1:] for line in diff.splitlines()
+               if line.startswith("-") and not line.startswith("---")]
+    return {"added": added, "removed": removed}
+
+
+def read_source_file(path) -> tuple[str, str]:
+    """Doc file nguon: giu nguyen kieu xuong dong, do encoding thay vi doan.
+
+    `Path.read_text()` dung universal newlines (CRLF -> LF) va mac dinh utf-8;
+    ca hai deu lam hong file that. Doc bytes roi giai ma tuong minh la cach duy
+    nhat giu nguyen byte goc khi khong sua gi.
+    """
+    raw = Path(path).read_bytes()
+    if b"\x00" in raw[:4096]:
+        raise ValueError("file co byte NUL -> co ve la file binary, tu choi sua")
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig"), "utf-8-sig"
+    for encoding in ("utf-8", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeDecodeError("utf-8", raw, 0, 1, "khong giai ma duoc file nguon")
+
+
+def run_opencode_cli(binary: str, model: str, prompt: str, *, agent: str | None = None,
+                     cwd=None, timeout: int = 300) -> tuple[str, dict]:
+    """Chay `opencode run` mot lan, tra ve (text, usage).
+
+    Dung `--format json` de khong dinh spinner/ANSI, va truyen prompt qua argv
+    (khong dung shell=True) de prompt khong bi vo.
+    """
+    command = [binary, "run", "--format", "json"]
+    if agent:
+        command += ["--agent", agent]
+    command += ["-m", model, prompt]
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout, cwd=cwd,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise WorkerError(f"qua thoi gian cho ({timeout}s)", kind="timeout") from exc
+    if completed.returncode != 0:
+        blob = f"{completed.stderr or ''}\n{completed.stdout or ''}"
+        raise WorkerError(f"exit {completed.returncode}: {blob[-400:]}",
+                          kind=classify_cli_error(blob))
+    return extract_text_events(completed.stdout or "")
+
+
+# --------------------------------------------------------------------------
+# Coder
+# --------------------------------------------------------------------------
+
+class Coder:
+    name = "coder"
+    kind = "abstract"
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.errors: list[str] = []
+        self.error_kinds: list[str] = []
+        self.project_root: Path | None = None
+        self.cwd: str | None = None
+        self.usage: dict = {}
+        # Kinh nghiem tu memory.py (Phase 4), recipe tu gan truoc khi chay.
+        self.hints: list[str] = []
+
+    def bind_workspace(self, project_root, sandbox=None) -> None:
+        """Cho worker biet du an that va thu muc tam duoc phep lam viec."""
+        self.project_root = Path(project_root)
+        if sandbox is not None:
+            self.cwd = str(sandbox)
+
+    def _hints_block(self) -> str:
+        if not self.hints:
+            return ""
+        lines = "\n".join(f"- {hint}" for hint in self.hints[:5])
+        return f"\nKINH NGHIEM TU CAC LAN CHAY TRUOC (memory):\n{lines}\n"
+
+    def patch(self, work_order, *, current_content: str, feedback: str | None,
+              round_index: int) -> dict:
+        raise NotImplementedError
+
+    def stats(self) -> dict:
+        return {"name": self.name, "kind": self.kind, "calls": self.calls,
+                "errors": list(self.errors), "usage": dict(self.usage)}
+
+
+class ScriptedCoder(Coder):
+    """Coder tat dinh cho smoke test.
+
+    `script[task_id]` la danh sach patch theo tung vong. Het kich ban -> tra ve
+    lai patch cuoi (mo phong model "van khong sua duoc").
+    """
+
+    kind = "scripted"
+
+    def __init__(self, script: dict[str, list[dict]], name: str = "scripted-coder") -> None:
+        super().__init__()
+        self.name = name
+        self.script = script
+
+    def patch(self, work_order, *, current_content: str, feedback: str | None,
+              round_index: int) -> dict:
+        self.calls += 1
+        rounds = self.script.get(work_order.task_id) or []
+        if not rounds:
+            self.errors.append(f"khong co kich ban cho task {work_order.task_id}")
+            raise KeyError(f"khong co kich ban cho task {work_order.task_id}")
+        index = min(round_index - 1, len(rounds) - 1)
+        return normalize_patch(rounds[index])
+
+
+class OpenCodeCoder(Coder):
+    """Goi OpenCode CLI that de sinh patch.
+
+    - `--format json`: output la JSON Lines, khong dinh spinner/ANSI.
+    - `cwd` duoc recipe_c tro vao thu muc tam rieng cua run, nen model khong doc
+      va khong ghi duoc file du an (noi dung file da nam trong prompt).
+    - Khong dung `shell=True` de tranh vo prompt.
+    """
+
+    kind = "opencode-cli"
+
+    def __init__(self, model: str, *, binary: str | None = None, timeout: int = 300,
+                 max_content_chars: int = 20_000, runner=None, cwd=None,
+                 agent: str | None = "plan", debug_dir=None) -> None:
+        super().__init__()
+        self.name = f"opencode:{model}"
+        self.model = model
+        self.binary = binary or shutil.which("opencode") or DEFAULT_OPENCODE_BIN
+        self.timeout = timeout
+        # Windows gioi han command line ~32k ky tu, ma prompt di qua argv.
+        # 20k ky tu (~500 dong code) la nguong an toan; vuot qua thi cat bot va
+        # ghi ro trong prompt de model biet.
+        self.max_content_chars = max_content_chars
+        self.runner = runner or self._run_cli
+        self.cwd = str(cwd) if cwd else None
+        # Agent `plan` la read-only (deny edit) -> model khong sua file duoc.
+        # Day la lop chan thu 1; lop 2 la snapshot/restore trong recipe_c.
+        self.agent = agent
+        self.debug_dir = Path(debug_dir) if debug_dir else None
+
+    def _run_cli(self, prompt: str) -> tuple[str, dict]:
+        return run_opencode_cli(self.binary, self.model, prompt, agent=self.agent,
+                                cwd=self.cwd, timeout=self.timeout)
+
+    def patch(self, work_order, *, current_content: str, feedback: str | None,
+              round_index: int) -> dict:
+        self.calls += 1
+        content = current_content
+        if len(content) > self.max_content_chars:
+            content = content[: self.max_content_chars] + "\n# ... (cat bot) ...\n"
+        prompt = work_order.to_prompt(
+            current_file=work_order.target_files[0] if work_order.target_files else "",
+            content=content, feedback=feedback,
+        )
+        prompt += self._hints_block()
+        prompt, _findings = secret_scan.scan_text(prompt, filename="prompt")
+        try:
+            raw = self.runner(prompt)
+            text, usage = raw if isinstance(raw, tuple) else (raw, {})
+            if isinstance(usage, dict) and usage:
+                self.usage.update(usage)
+            if self.debug_dir is not None:
+                self.debug_dir.mkdir(parents=True, exist_ok=True)
+                stem = f"{self.calls:02d}_{work_order.task_id or 'task'}"
+                (self.debug_dir / f"{stem}.prompt.txt").write_text(prompt, encoding="utf-8")
+                (self.debug_dir / f"{stem}.output.txt").write_text(
+                    text if isinstance(text, str) else str(text), encoding="utf-8")
+            return parse_patch_json(text)
+        except Exception as exc:                            # noqa: BLE001
+            kind = getattr(exc, "kind", "parse")
+            self.errors.append(f"[{kind}] {str(exc)[:300]}")
+            self.error_kinds.append(kind)
+            raise
+
+
+AGENTIC_PROMPT = (
+    "Ban la coder duoc giao sua DUNG MOT file trong thu muc lam viec hien tai.\n"
+    "File can sua: {target}\n"
+    "\n"
+    "MUC TIEU: {objective}\n"
+    "RANG BUOC: {boundaries}\n"
+    "TIEU CHI NGHIEM THU: {criteria}\n"
+    "Lenh verify: {verify}\n"
+    "\n"
+    "Hay sua truc tiep noi dung file. Ban duoc phep chay lenh verify de tu kiem tra.\n"
+    "Chi sua file tren; khong tao file moi, khong sua file test.\n"
+    "Khi xong, tra loi ngan gon (1-3 cau).\n"
+)
+
+
+class SessionPolicy:
+    """Chinh sach phien lam viec cua Coder (Task 3.4).
+
+    Vong 1..`reuse_rounds`: giu nguyen phien (model nhin lai chinh ban sua cua no,
+    giong mot session lien tuc).
+    Tu vong `reuse_rounds + 1`: cat phien, mo moi, kem brief ngan gom ban nhap
+    gan nhat + loi chua xu ly -> chong phinh context window va ao giac.
+    """
+
+    def __init__(self, reuse_rounds: int = 2, brief_chars: int = 3000) -> None:
+        self.reuse_rounds = max(1, int(reuse_rounds))
+        self.brief_chars = max(200, int(brief_chars))
+
+    def reuse(self, round_index: int) -> bool:
+        return int(round_index) <= self.reuse_rounds
+
+    def is_reset(self, round_index: int) -> bool:
+        return int(round_index) > self.reuse_rounds
+
+    def brief(self, *, target: str, draft: str = "", feedback: str | None = None) -> str:
+        draft = (draft or "").strip()
+        if len(draft) > self.brief_chars:
+            draft = draft[: self.brief_chars] + "\n# ... (cat bot) ..."
+        parts = [
+            "PHIEN MOI (context cu da bi cat de tranh phinh to). TOM TAT NGAN:",
+            f"- File dich: {target}",
+            "- Ban nhap gan nhat (co the con loi, day la diem xuat phat):",
+            "```",
+            draft or "(chua co ban nhap)",
+            "```",
+        ]
+        if feedback:
+            parts += ["- Loi chua xu ly:", str(feedback).strip()[:1200]]
+        parts.append("Hay sua tiep tu ban nhap tren, khong lam lai tu dau.")
+        return "\n".join(parts)
+
+
+class AgenticCoder(Coder):
+    """Coder kieu agent: de model sua file truc tiep trong mot ban sao tam.
+
+    Vi sao can lop nay: qua `opencode run`, cac model hanh xu nhu agent — chung
+    goi tool edit/shell de sua file chu khong tra ve JSON. Ep tra JSON thi vua
+    mat cong suat vua de ra prose (da do bang thuc nghiem). Nen:
+
+      1. copy cac file cua task sang thu muc tam (model tha ho sua, ke ca chay test)
+      2. doc lai file sau khi model sua -> dua ve dang patch `whole`
+      3. phan con lai giu nguyen hop dong cu: ladder -> verify ban nhap ->
+         reviewer -> safe_writer (Lead van la nguoi ghi file duy nhat)
+
+    Nho vay model duoc dung tool (loi the cua no) ma bat bien "chi Lead ghi file"
+    van dung: moi thay doi deu phai di qua kiem chung doc lap.
+    """
+
+    kind = "opencode-agentic"
+
+    def __init__(self, model: str, *, binary: str | None = None, timeout: int = 300,
+                 agent: str = "build", debug_dir=None, runner=None,
+                 session_policy: SessionPolicy | None = None) -> None:
+        super().__init__()
+        self.name = f"agentic:{model}"
+        self.model = model
+        self.binary = binary or shutil.which("opencode") or DEFAULT_OPENCODE_BIN
+        self.timeout = timeout
+        self.agent = agent
+        self.debug_dir = Path(debug_dir) if debug_dir else None
+        self.runner = runner or self._run_cli
+        self._active_cwd: str | None = None
+        self.session_policy = session_policy or SessionPolicy()
+        self.session_events: list[dict] = []
+        self.secrets_blocked: list[dict] = []
+        self._last_attempt: str = ""
+
+    def _run_cli(self, prompt: str) -> tuple[str, dict]:
+        return run_opencode_cli(self.binary, self.model, prompt, agent=self.agent,
+                                cwd=self._active_cwd or self.cwd, timeout=self.timeout)
+
+    def _copy_project_files(self, work_order, round_dir: Path, target: str) -> None:
+        """Copy file cua task sang thu muc tam, chan secret truoc khi model doc."""
+        for relative in work_order.sandbox_files or [target]:
+            source = (self.project_root or Path.cwd()) / relative
+            if not source.exists():
+                continue
+            reason = secret_scan.is_sensitive_path(source)
+            if reason:
+                self.secrets_blocked.append({"file": relative, "kind": "sensitive_path",
+                                             "detail": reason})
+                continue
+            findings = secret_scan.scan_file(source)
+            if findings and relative == target:
+                raise WorkerError("file dich chua secret, khong duoc gui ra model",
+                                  kind="secret")
+            if findings:
+                self.secrets_blocked.append({"file": relative, "kind": "content",
+                                             "count": len(findings),
+                                             "preview": secret_scan.summarize(findings)})
+                continue
+            destination = round_dir / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+
+    def patch(self, work_order, *, current_content: str, feedback: str | None,
+              round_index: int) -> dict:
+        self.calls += 1
+        if not self.cwd:
+            raise WorkerError("chua bind_workspace -> khong co thu muc tam", kind="config")
+        target = work_order.target_files[0]
+        round_dir = Path(self.cwd) / f"r{round_index}"
+        previous_dir = Path(self.cwd) / f"r{round_index - 1}"
+        shutil.rmtree(round_dir, ignore_errors=True)
+
+        # Session policy: vong 1..2 noi tiep phien (xuat phat tu ban sua truoc);
+        # tu vong 3 cat phien, xuat phat lai tu ban goc + brief.
+        reuse = (round_index > 1 and self.session_policy.reuse(round_index)
+                 and previous_dir.exists())
+        if reuse:
+            shutil.copytree(previous_dir, round_dir)
+        else:
+            round_dir.mkdir(parents=True, exist_ok=True)
+            self._copy_project_files(work_order, round_dir, target)
+        fresh_session = self.session_policy.is_reset(round_index)
+        self.session_events.append({"round": round_index,
+                                    "mode": "resume" if reuse else "fresh",
+                                    "context_reset": fresh_session})
+
+        destination = round_dir / target
+        if not destination.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(current_content, encoding="utf-8", newline="")
+
+        prompt = AGENTIC_PROMPT.format(
+            target=target, objective=work_order.objective,
+            boundaries=work_order.boundaries, criteria=work_order.acceptance_criteria,
+            verify=work_order.render_verify_command(target),
+        )
+        prompt += self._hints_block()
+        if fresh_session:
+            prompt += "\n" + self.session_policy.brief(
+                target=target, draft=self._last_attempt or current_content,
+                feedback=feedback,
+            )
+        if feedback:
+            prompt += f"\nLAN TRUOC THAT BAI, SUA THEO PHAN HOI NAY:\n{feedback}\n"
+        prompt, prompt_findings = secret_scan.scan_text(prompt, filename="prompt")
+        if prompt_findings:
+            self.secrets_blocked.append({"file": "prompt", "kind": "content",
+                                         "count": len(prompt_findings),
+                                         "preview": secret_scan.summarize(prompt_findings)})
+
+        stem = f"{self.calls:02d}_{work_order.task_id or 'task'}"
+        self._active_cwd = str(round_dir)
+        try:
+            text, usage = self.runner(prompt)
+            if isinstance(usage, dict) and usage:
+                self.usage.update(usage)
+            if not destination.exists():
+                raise WorkerError("model da xoa file dich", kind="deleted")
+            new_text, _encoding = read_source_file(destination)
+            self._last_attempt = new_text
+            if new_text.strip() == current_content.strip():
+                raise WorkerError("model khong sua gi trong file dich", kind="noop")
+            if self.debug_dir is not None:
+                self.debug_dir.mkdir(parents=True, exist_ok=True)
+                (self.debug_dir / f"{stem}.prompt.txt").write_text(prompt, encoding="utf-8")
+                (self.debug_dir / f"{stem}.output.txt").write_text(text or "", encoding="utf-8")
+                (self.debug_dir / f"{stem}.file.txt").write_text(new_text, encoding="utf-8")
+            return {"format": "whole", "content": new_text}
+        except Exception as exc:                            # noqa: BLE001
+            kind = getattr(exc, "kind", "patch")
+            self.errors.append(f"[{kind}] {str(exc)[:300]}")
+            self.error_kinds.append(kind)
+            raise
+
+
+# --------------------------------------------------------------------------
+# Reviewer
+# --------------------------------------------------------------------------
+class Reviewer:
+    name = "reviewer"
+    kind = "abstract"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def review(self, work_order, *, diff: str, new_content: str, old_content: str,
+               level: int, sink) -> dict:
+        raise NotImplementedError
+
+    def stats(self) -> dict:
+        return {"name": self.name, "kind": self.kind, "calls": self.calls}
+
+
+class HeuristicReviewer(Reviewer):
+    """Reviewer bang luat: doc diff, chan cac mau nguy hiem. 0 request.
+
+    Khong thay the duoc con nguoi, nhung chan duoc nhom loi hay gap nhat:
+    chen eval/exec, tat verify, hardcode secret, xoa test, xoa qua nhieu code.
+    """
+
+    kind = "heuristic"
+
+    def __init__(self, *, max_shrink_ratio: float = 0.5, name: str = "heuristic-reviewer") -> None:
+        super().__init__()
+        self.name = name
+        self.max_shrink_ratio = max_shrink_ratio
+
+    def review(self, work_order, *, diff: str, new_content: str, old_content: str,
+               level: int, sink) -> dict:
+        self.calls += 1
+        reasons: list[str] = []
+        delta = changed_lines(diff)
+
+        for line in delta["added"]:
+            for pattern, label in DANGEROUS_ADDED:
+                if re.search(pattern, line):
+                    reasons.append(f"chen ma nguy hiem: {label}")
+            for pattern in SECRET_ADDED:
+                if re.search(pattern, line):
+                    reasons.append("hardcode secret/token trong code")
+                    break
+
+        if not new_content.strip():
+            reasons.append("ket qua rong")
+        if len(new_content.splitlines()) < len(old_content.splitlines()) * self.max_shrink_ratio:
+            reasons.append("xoa qua nhieu code (>50% so dong)")
+
+        removed_asserts = [line for line in delta["removed"] if "assert" in line]
+        if removed_asserts and not any("assert" in line for line in delta["added"]):
+            reasons.append("xoa test/assert ma khong them test thay the")
+
+        if level >= 2 and not diff.strip():
+            reasons.append("Level 2 nhung diff rong")
+
+        verdict = "reject" if reasons else "approve"
+        findings = {
+            "verdict": verdict, "level": level, "task_id": work_order.task_id,
+            "reasons": reasons[:10],
+            "checked": {"added": len(delta["added"]), "removed": len(delta["removed"])},
+            "reviewer": self.name,
+        }
+        if sink is not None:
+            sink.write(findings)
+        return findings
+
+
+class OpenCodeReviewer(Reviewer):
+    """Reviewer bang LLM (tuy chon). Chi duoc trao `sink`, khong co quyen ghi file."""
+
+    kind = "opencode-cli"
+
+    def __init__(self, model: str, *, binary: str | None = None, timeout: int = 240,
+                 runner=None) -> None:
+        super().__init__()
+        self.name = f"opencode-review:{model}"
+        self.model = model
+        self.binary = binary or shutil.which("opencode") or DEFAULT_OPENCODE_BIN
+        self.timeout = timeout
+        self.runner = runner or self._run_cli
+
+    def _run_cli(self, prompt: str) -> str:
+        completed = subprocess.run(
+            [self.binary, "run", "--format", "json", "-m", self.model, prompt],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=self.timeout,
+        )
+        if completed.returncode != 0:
+            blob = f"{completed.stderr or ''}\n{completed.stdout or ''}"
+            raise WorkerError(f"exit {completed.returncode}: {blob[-400:]}",
+                              kind=classify_cli_error(blob))
+        return extract_text_events(completed.stdout or "")[0]
+
+    def review(self, work_order, *, diff: str, new_content: str, old_content: str,
+               level: int, sink) -> dict:
+        self.calls += 1
+        prompt = (
+            "Ban la reviewer doc lap, quyen READ-ONLY. Doc diff sau va tim loi that.\n"
+            "Chi duyet khi: dung muc tieu, khong chen ma nguy hiem, khong xoa test.\n"
+            'Tra ve JSON: {"verdict":"approve"|"reject","reasons":["..."]}\n\n'
+            f"MUC TIEU: {work_order.objective}\n"
+            f"TIEU CHI: {work_order.acceptance_criteria}\n\n"
+            f"```diff\n{diff[:20000]}\n```"
+        )
+        try:
+            raw = self.runner(prompt)
+            data = parse_patch_json(raw)
+            reasons = [str(item) for item in (data.get("reasons") or [])][:10]
+            verdict = "approve" if str(data.get("verdict", "")).lower().startswith("approve") else "reject"
+        except Exception as exc:                            # noqa: BLE001
+            verdict, reasons = "reject", [f"reviewer loi: {exc}"[:200]]
+        findings = {"verdict": verdict, "level": level, "task_id": work_order.task_id,
+                    "reasons": reasons, "reviewer": self.name}
+        if sink is not None:
+            sink.write(findings)
+        return findings
+
+
+# --------------------------------------------------------------------------
+def build_reviewer(kind: str, *, model: str | None = None) -> Reviewer:
+    if kind == "none":
+        return None
+    if kind == "llm":
+        if not model:
+            raise ValueError("reviewer llm can --model")
+        return OpenCodeReviewer(model)
+    return HeuristicReviewer()
+
+
+def build_coder(kind: str, *, model: str | None = None, script: dict | None = None) -> Coder:
+    if kind == "scripted":
+        if not script:
+            raise ValueError("coder scripted can ScriptedCoder(script)")
+        return ScriptedCoder(script)
+    if kind == "opencode":
+        if not model:
+            raise ValueError("coder opencode can model")
+        return OpenCodeCoder(model)
+    raise ValueError(f"coder khong ho tro: {kind}")

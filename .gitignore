@@ -1,0 +1,22 @@
+# Repo nay nam trong thu muc home (C:\Users\tuank), nen CHI track du an
+# Adaptive Swarm. Moi thu khac (AppData, Documents, .config, .claude, ...)
+# bi loai truoc khi git add.
+/*
+!/.agents/
+!/agents/
+!/.opencode/
+!/scratch/
+/scratch/*
+!/scratch/swarm_demo/
+!/AGENTS.md
+!/.gitignore
+
+# Rac he dieu hanh
+Thumbs.db
+desktop.ini
+*.lnk
+
+# Python
+__pycache__/
+*.py[cod]
+

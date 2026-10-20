@@ -1,0 +1,3 @@
+# Chi la cau noi `python -m agents.<module>` — khong chua logic.
+__pycache__/
+*.py[cod]

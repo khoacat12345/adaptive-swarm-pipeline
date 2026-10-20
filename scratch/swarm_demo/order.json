@@ -1,0 +1,33 @@
+{
+  "task_id": "DEMO4",
+  "title": "off-by-one trong sum_range",
+  "level": 1,
+  "objective": "Sua sum_range de tra ve tong 0..n-1 (sum_range(5) == 10)",
+  "boundaries": "Chi sua calc.py, khong doi ten ham",
+  "input_context": "vong lap dang la range(n - 1) nen thieu phan tu cuoi",
+  "acceptance_criteria": "python check.py exit 0, sum_range(5) == 10",
+  "verify_command": "\"C:\\Users\\tuank\\AppData\\Local\\Programs\\Python\\Python312\\python.exe\" scratch/swarm_demo/check.py",
+  "target_files": [
+    "scratch/swarm_demo/calc.py"
+  ],
+  "sandbox_files": [
+    "scratch/swarm_demo/calc.py",
+    "scratch/swarm_demo/check.py"
+  ],
+  "max_rounds": 2,
+  "scripted_patches": [
+    {
+      "format": "whole",
+      "content": "def sum_range(n):\n    total = 0\n    for i in range(n - 1):\n        total += i\n    return total\n"
+    },
+    {
+      "format": "replace",
+      "edits": [
+        {
+          "search": "    for i in range(n - 1):",
+          "replace": "    for i in range(n):"
+        }
+      ]
+    }
+  ]
+}

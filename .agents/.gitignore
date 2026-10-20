@@ -1,0 +1,34 @@
+# Runtime artifacts — khong commit
+tmp/
+backups/
+eval/*/debug/
+*.lock
+.ledger.lock
+ledger.jsonl
+profile.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Secrets — TUYET DOI khong commit
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*credential*
+*credentials*
+*secret*
+*password*
+.npmrc
+.pypirc
+.netrc
+id_rsa
+id_ed25519
+.aws/
+.ssh/
