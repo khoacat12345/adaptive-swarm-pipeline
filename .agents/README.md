@@ -505,6 +505,27 @@ thu tu apply (file nen / dependency truoc). Level 1/2 chi nhan 1 file (validator
 - **Nghiem thu:** `tests/test_level3.py` (47 check): apply da file, rollback toan dien,
   crash recovery, patch_set, fallback, va hoi quy Phase 0-4.
 
+### Router W0-W8 (Phase 5B)
+
+`router.py` chon chuoi coder theo LOAI CONG VIEC, khong theo ten du an. Tin hieu
+do duoc: so file, risk keyword, context token, modality, so lan fail/reject.
+
+| Ma | Loai viec | MAIN | ESCALATE |
+|---|---|---|---|
+| W0 | phan loai | rules (0 request) | GLM-5.3-Flash Free |
+| W1 | sua nho 1 file | DeepSeek Flash Free | GLM-5.3-Flash Free |
+| W2 | logic / da file | DeepSeek V4 Pro | Kimi K2.7 Code |
+| W3 | kiem toan / bao mat | GLM-5.3 | Claude Haiku 5.5 |
+| W4 | thiet ke / chia viec | Qwen3.8 Max | GLM-5.3 |
+| W5 | viet test | Kimi K2.7 Code | GLM-5.3 |
+| W6 | giao dien / multimodal | GPT-6 Luna | Qwen3.8 Max (Kimi K3 on-demand) |
+| W7 | tai lieu / context lon | Claude Haiku 5.5 | MiniMax M3 |
+| W8 | trong tai khi bat dong | Qwen3.8 Max | GLM-5.3 |
+
+Thu tu uu tien tin hieu: W8 > W6 > W3 > W5 > W4 > W0 > W7 > W2 > W1.
+`validate_roles()` bat buoc main/escalate khac ho o W3/W5/W8. Dung:
+`python .agents/recipe_c.py --order order.json --route`.
+
 ### Work Order (5 truong)
 
 `objective`, `boundaries`, `input_context`, `acceptance_criteria`, `verify_command`.
@@ -1160,6 +1181,12 @@ CLI (timeline mau, 0 request), dashboard 3 cot bang `http.server`, memory engine
 -> ghi het -> verify -> commit / batch rollback) + journal + `recover_open_transactions()`,
 classifier/clarify cap nhat; nghiem thu **47/47 PASS** (gom 5 suite hoi quy Phase 0/0.5/1/3/4).
 
+**Phase 5B — router theo loai viec (da lam):** `router.py` chia W0-W8 theo tin hieu
+do duoc (so file, risk keyword, context, modality, fail count) va bang dinh tuyen
+main/escalate uu tien ngon-bo-re; `validate_roles()` chan trung ho o vai kiem toan;
+`FallbackReviewer` cho reviewer co chuoi du phong; `recipe_c --route` ghi event
+`router.decided`. Nghiem thu **57/57 PASS** (gom Level 3 + Phase 4).
+
 **Chua lam (co y):** executor song song (Level 3 chay tuan tu trong 1 giao dich),
-backoff luy tien cho cooldown, router theo domain (Phase 5B), do model tra phi
-(tai khoan chua co quota).
+backoff luy tien cho cooldown, do model tra phi tren task that (benchmark hien chi
+la smoke vi chi phi agentic cao).

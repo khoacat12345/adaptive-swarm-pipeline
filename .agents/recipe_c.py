@@ -298,7 +298,8 @@ def _apply_transaction(work_order, *, gate, root: Path, run_id: str, round_index
 def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = None,
         dry_run: bool = False, verify_timeout: int | None = None,
         log: bool = True, max_requests: int | None = None,
-        max_seconds: int | None = None, use_memory: bool = True) -> dict:
+        max_seconds: int | None = None, use_memory: bool = True,
+        route_plan: dict | None = None) -> dict:
     """Chay Recipe C cho 1 Work Order. Tra ve bao cao (khong raise nghiep vu)."""
     if not isinstance(work_order, work_order_module.WorkOrder):
         work_order = work_order_module.WorkOrder.from_dict(work_order)
@@ -326,6 +327,19 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                   "files": list(work_order.target_files),
                   "max_rounds": work_order.max_rounds,
                   "verify_command": work_order.verify_command, "dry_run": dry_run},
+            root=root_path,
+        )
+
+    if log and route_plan:
+        ledger.append_event(
+            "router.decided", run_id=run_id, result={"status": "info"},
+            data={"work_type": route_plan.get("work_type"),
+                  "label": route_plan.get("label"),
+                  "main": route_plan.get("main"),
+                  "escalate": route_plan.get("escalate"),
+                  "chain": route_plan.get("chain"),
+                  "why": route_plan.get("why"),
+                  "signals": route_plan.get("signals")},
             root=root_path,
         )
 
@@ -477,6 +491,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         "worker_edited_files": [],
         "plan_ok": True,
         "hints": [],
+        "route": route_plan,
         "budget": {
             "max_requests": max_requests,
             "max_seconds": max_seconds,
@@ -980,11 +995,23 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"tran request moi run (toi da {BUDGET_MAX_REQUESTS}, chi ha duoc)")
     parser.add_argument("--max-seconds", type=int, default=None,
                         help=f"tran thoi gian moi run (toi da {BUDGET_MAX_SECONDS}s, chi ha duoc)")
+    parser.add_argument("--route", action="store_true",
+                        help="chon chain coder theo router W0-W8 thay vi config.json")
+    parser.add_argument("--reviewer-chain", default=None,
+                        help="chuoi reviewer du phong, vd: modelA,modelB")
     args = parser.parse_args(argv)
 
     order_data = json.loads(Path(args.order).read_text(encoding="utf-8"))
     order = work_order_module.WorkOrder.from_dict(order_data)
     order.validate()
+
+    route_plan = None
+    if args.route:
+        import router
+        route_plan = router.route(order)
+        problems = router.validate_roles()
+        if problems:
+            raise SystemExit("router khong hop le: " + "; ".join(problems[:5]))
 
     import workers
     if args.coder == "scripted":
@@ -993,7 +1020,10 @@ def main(argv: list[str] | None = None) -> int:
         model = args.model or _model_from_config("coder")
         coder = workers.OpenCodeCoder(model)
     else:
-        models = [args.model] if args.model else _chain_from_config("coder")
+        if route_plan:
+            models = list(route_plan["chain"])
+        else:
+            models = [args.model] if args.model else _chain_from_config("coder")
         if args.no_fallback or len(models) <= 1:
             coder = workers.AgenticCoder(models[0])
         else:
@@ -1002,11 +1032,17 @@ def main(argv: list[str] | None = None) -> int:
             health = fallback.HealthRegistry(health_path)
             coder = fallback.FallbackCoder(
                 models, factory=lambda model: workers.AgenticCoder(model), health=health)
-    reviewer = workers.build_reviewer(args.reviewer, model=_model_from_config("reviewer")
-                                      if args.reviewer == "llm" else None)
+    if args.reviewer_chain:
+        reviewer_models = [item.strip() for item in args.reviewer_chain.split(",")
+                          if item.strip()]
+        reviewer = workers.FallbackReviewer(reviewer_models)
+    else:
+        reviewer = workers.build_reviewer(args.reviewer, model=_model_from_config("reviewer")
+                                          if args.reviewer == "llm" else None)
 
     report = run(order, coder=coder, reviewer=reviewer, root=args.root, dry_run=args.dry_run,
-                 max_requests=args.max_requests, max_seconds=args.max_seconds)
+                 max_requests=args.max_requests, max_seconds=args.max_seconds,
+                 route_plan=route_plan)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

@@ -148,6 +148,20 @@ def parse_patch_json(text: str) -> dict:
     raise ValueError("khong tim thay object JSON hop le trong output cua model")
 
 
+def parse_json_object(text: str) -> dict:
+    """Lay object JSON dau tien (KHONG chuan hoa patch) - dung cho reviewer."""
+    if isinstance(text, dict):
+        return text
+    for candidate in _json_candidates(text or ""):
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    raise ValueError("khong tim thay object JSON hop le trong output cua model")
+
+
 def normalize_patch(patch: dict) -> dict:
     """Chuan hoa + suy ra 'format' neu model quen khai bao."""
     data = dict(patch)
@@ -783,13 +797,15 @@ class OpenCodeReviewer(Reviewer):
     kind = "opencode-cli"
 
     def __init__(self, model: str, *, binary: str | None = None, timeout: int = 240,
-                 runner=None) -> None:
+                 runner=None, raise_on_error: bool = False) -> None:
         super().__init__()
         self.name = f"opencode-review:{model}"
         self.model = model
         self.binary = binary or shutil.which("opencode") or DEFAULT_OPENCODE_BIN
         self.timeout = timeout
         self.runner = runner or self._run_cli
+        # True: loi ha tang (429/timeout) -> raise de FallbackReviewer chuyen model.
+        self.raise_on_error = raise_on_error
 
     def _run_cli(self, prompt: str) -> str:
         completed = subprocess.run(
@@ -816,10 +832,12 @@ class OpenCodeReviewer(Reviewer):
         )
         try:
             raw = self.runner(prompt)
-            data = parse_patch_json(raw)
+            data = parse_json_object(raw)
             reasons = [str(item) for item in (data.get("reasons") or [])][:10]
             verdict = "approve" if str(data.get("verdict", "")).lower().startswith("approve") else "reject"
         except Exception as exc:                            # noqa: BLE001
+            if self.raise_on_error:
+                raise
             verdict, reasons = "reject", [f"reviewer loi: {exc}"[:200]]
         findings = {"verdict": verdict, "level": level, "task_id": work_order.task_id,
                     "reasons": reasons, "reviewer": self.name}
@@ -847,11 +865,13 @@ class OpenCodeReviewer(Reviewer):
         )
         try:
             raw = self.runner(prompt)
-            data = parse_patch_json(raw)
+            data = parse_json_object(raw)
             reasons = [str(item) for item in (data.get("reasons") or [])][:10]
             verdict = ("approve" if str(data.get("verdict", "")).lower().startswith("approve")
                        else "reject")
         except Exception as exc:                            # noqa: BLE001
+            if self.raise_on_error:
+                raise
             verdict, reasons = "reject", [f"reviewer loi: {exc}"[:200]]
         findings = {"verdict": verdict, "level": level, "task_id": work_order.task_id,
                     "reasons": reasons, "files": list(diffs), "reviewer": self.name}
@@ -881,3 +901,54 @@ def build_coder(kind: str, *, model: str | None = None, script: dict | None = No
             raise ValueError("coder opencode can model")
         return OpenCodeCoder(model)
     raise ValueError(f"coder khong ho tro: {kind}")
+
+class FallbackReviewer(Reviewer):
+    """Chuoi reviewer: thu tung model, ket qua dau tien thang.
+
+    Cung nguyen tac voi FallbackCoder: khong ping truoc; loi/quota moi chuyen
+    con ke tiep. Dung cho vai kiem toan khi model chinh bi 429.
+    """
+
+    kind = "fallback-reviewer"
+
+    def __init__(self, models, *, factory=None, name: str = "fallback-reviewer") -> None:
+        super().__init__()
+        self.models = [str(model) for model in models if str(model).strip()]
+        if not self.models:
+            raise ValueError("FallbackReviewer can it nhat 1 model")
+        self.name = f"{name}:" + "->".join(self.models)
+        self.factory = factory or (lambda model: OpenCodeReviewer(model, raise_on_error=True))
+        self.attempts: list[dict] = []
+        self.errors: list[str] = []
+
+    def _run(self, method: str, *args, **kwargs):
+        failures: list[str] = []
+        for model in self.models:
+            child = self.factory(model)
+            self.calls += 1
+            try:
+                result = getattr(child, method)(*args, **kwargs)
+            except Exception as exc:                    # noqa: BLE001
+                failures.append(f"{model}: {exc}")
+                self.errors.append(f"{model}: {str(exc)[:200]}")
+                self.attempts.append({"model": model, "status": "fail",
+                                      "error": str(exc)[:200]})
+                continue
+            self.attempts.append({"model": model, "status": "ok"})
+            return result
+        raise WorkerError("tat ca reviewer that bai: " + " | ".join(failures)[:500],
+                          kind="exhausted")
+
+    def review(self, work_order, *, diff, new_content, old_content, level, sink):
+        return self._run("review", work_order, diff=diff, new_content=new_content,
+                         old_content=old_content, level=level, sink=sink)
+
+    def review_set(self, work_order, *, diffs, new_contents, old_contents, level, sink):
+        return self._run("review_set", work_order, diffs=diffs,
+                         new_contents=new_contents, old_contents=old_contents,
+                         level=level, sink=sink)
+
+    def stats(self) -> dict:
+        base = super().stats()
+        base.update({"models": list(self.models), "attempts": list(self.attempts)})
+        return base

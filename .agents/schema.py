@@ -38,6 +38,7 @@ VALID_STATUS = ("info", "ok", "pass", "fail", "error", "blocked", "timeout", "sk
 NODE_BY_EVENT = {
     "recipe.start": "lead",
     "recipe.done": "lead",
+    "router.decided": "lead",
     "recipe.ladder": "coder",
     "recipe.coder": "coder",
     "recipe.fallback": "coder",
