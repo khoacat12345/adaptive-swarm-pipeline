@@ -336,10 +336,12 @@ const NODE = {
   security:{c:'#f87171',n:'Security',a:'SC'}, qa:{c:'#94a3b8',n:'QA',a:'QA'},
   system:{c:'#64748b',n:'System',a:'SY'}
 };
-let state = {runs:[], selected:null, data:null, timer:null, showAll:false};
+let state = {runs:[], selected:null, data:null, timer:null, showAll:false,
+             sig:{runs:'', detail:''}};
 
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '');
+const sigOf = (value) => { try { return JSON.stringify(value); } catch (_) { return String(value); } };
 const fmt = (ms) => ms >= 60000 ? (ms/60000).toFixed(1)+'m' : ms >= 1000 ? (ms/1000).toFixed(1)+'s' : (ms||0)+'ms';
 const num = (n) => (n||0).toLocaleString('en-US');
 
@@ -356,7 +358,11 @@ async function getJSON(url){
   return await r.json();
 }
 
-function renderRuns(){
+function renderRuns(force=false){
+  // Poll 3s: neu danh sach + selected khong doi thi khong dung lai DOM.
+  const sig = sigOf({runs: state.runs, selected: state.selected});
+  if(!force && sig === state.sig.runs) return;
+  state.sig.runs = sig;
   const box = el('runs');
   if(!state.runs.length){ box.innerHTML = '<div class="empty">Chua co task nao<br><span style="font-size:11px">bat "tat ca" de xem run scout/acceptance</span></div>'; return; }
   box.innerHTML = state.runs.map(r=>{
@@ -425,15 +431,19 @@ function renderInspector(diff){
     <pre class="diff">${rendered || '<div class="ctx">Khong co thay doi / chua co file</div>'}</pre>`;
 }
 
-async function selectRun(runId){
-  state.selected = runId;
+async function selectRun(runId, force=false){
+  if(state.selected !== runId){ state.selected = runId; force = true; }
   renderRuns();
-  el('statusMessage').innerHTML = '<span class="dot"></span>dang tai run...';
+  if(force) el('statusMessage').innerHTML = '<span class="dot"></span>dang tai run...';
   try{
     const [data, diff] = await Promise.all([
       getJSON('/api/runs/'+encodeURIComponent(runId)),
       getJSON('/api/diff?run_id='+encodeURIComponent(runId)).catch(()=>({}))
     ]);
+    // Poll: data + diff y nguyen -> bo qua toan bo phan ve lai (chat/inspector/status).
+    const sig = sigOf({data, diff});
+    if(!force && sig === state.sig.detail) return;
+    state.sig.detail = sig;
     state.data = data;
     renderChat(); renderInspector(diff);
     const run = data.run || {};
@@ -443,15 +453,16 @@ async function selectRun(runId){
   }
 }
 
-async function refresh(){
+async function refresh(force=false){
   try{
     const data = await getJSON('/api/runs?filter=' + (state.showAll ? 'all' : 'recipe'));
     state.runs = data.runs || [];
-    renderRuns();
-    if(!state.selected && state.runs.length) await selectRun(state.runs[0].run_id);
+    renderRuns(force);          // chi ve lai khi danh sach hoac selected doi
+    if(!state.selected && state.runs.length) await selectRun(state.runs[0].run_id, true);
     else if(state.selected) await selectRun(state.selected);
   }catch(err){
-    el('statusMessage').textContent = 'mat ket noi: '+err.message;
+    const message = 'mat ket noi: '+err.message;
+    if(el('statusMessage').textContent !== message) el('statusMessage').textContent = message;
   }
 }
 
