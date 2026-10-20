@@ -93,7 +93,14 @@ def _message(event: dict, norm: dict) -> str:
         state = "nhap ban sua" if norm["status"] in ("ok", "pass") else "that bai"
         return f"{state} (vong {data.get('round')})"
     if kind == "router.decided":
-        extra = " [HET QUOTA]" if data.get("exhausted") else ""
+        if data.get("exhausted"):
+            extra = " [HET QUOTA]"
+        elif data.get("mode") == "fallback":
+            extra = " [HA CAP - free/re]"
+        elif data.get("mode") == "escalate":
+            extra = " [ESCALATE]"
+        else:
+            extra = ""
         return (f"router chon {data.get('work_type')} ({data.get('label')}): "
                 f"{' -> '.join(data.get('chain') or [])}{extra}")
     if kind == "recipe.ladder":

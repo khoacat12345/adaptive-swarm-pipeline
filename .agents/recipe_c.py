@@ -338,6 +338,8 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                   "main": route_plan.get("main"),
                   "escalate": route_plan.get("escalate"),
                   "chain": route_plan.get("chain"),
+                  "mode": route_plan.get("mode"),
+                  "degraded": route_plan.get("degraded"),
                   "why": route_plan.get("why"),
                   "signals": route_plan.get("signals"),
                   "quota": route_plan.get("quota"),
@@ -1004,6 +1006,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="chuoi reviewer du phong, vd: modelA,modelB")
     parser.add_argument("--force", action="store_true",
                         help="van chay du router bao het quota")
+    parser.add_argument("--allow-escalate", action="store_true",
+                        help="cho phep nang len escalate du quota khong that su doi dao")
     args = parser.parse_args(argv)
 
     order_data = json.loads(Path(args.order).read_text(encoding="utf-8"))
@@ -1015,7 +1019,8 @@ def main(argv: list[str] | None = None) -> int:
         import router
         import quota as quota_module
         tracker = quota_module.QuotaTracker(root=args.root).refresh()
-        route_plan = router.route(order, quota=tracker)
+        route_plan = router.route(order, quota=tracker,
+                                  allow_escalate=args.allow_escalate)
         problems = router.validate_roles()
         if problems:
             raise SystemExit("router khong hop le: " + "; ".join(problems[:5]))
@@ -1032,10 +1037,12 @@ def main(argv: list[str] | None = None) -> int:
         model = args.model or _model_from_config("coder")
         coder = workers.OpenCodeCoder(model)
     else:
-        if route_plan:
+        if args.model:
+            models = [args.model]
+        elif route_plan:
             models = list(route_plan["chain"])
         else:
-            models = [args.model] if args.model else _chain_from_config("coder")
+            models = _chain_from_config("coder")
         if args.no_fallback or len(models) <= 1:
             coder = workers.AgenticCoder(models[0])
         else:

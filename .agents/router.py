@@ -63,7 +63,12 @@ WORK_TYPES = {
     "W8": "trong-tai/bat-dong",
 }
 
-# main/escalate: uu tien ngon-bo-re (free -> re -> trung -> dat).
+# Fallback RE (khong bao gio tu nang cap): dung khi main/escalate khong du quota.
+FALLBACKS = [MODELS["deepseek-flash-free"], MODELS["glm-flash-free"]]
+
+# Nguong con lai toi thieu (% cua cua so chat nhat) de duoc dung.
+MAIN_MIN_REMAINING = 10.0
+ESCALATE_MIN_REMAINING = 50.0
 ROUTES = {
     "W0": {"main": MODELS["glm-flash-free"], "escalate": None,
            "why": "rules-first, 0 request; chi dung model khi rules moi ho"},
@@ -150,29 +155,68 @@ def classify_work(work_order, *, context_tokens: int = 0, has_image: bool = Fals
     return "W1", signals
 
 
-def route(work_order, *, quota=None, **signals) -> dict:
-    """Tra ke hoach dinh tuyen: work_type, main, escalate, chain, ly do.
+def _remaining_pct(entry: dict) -> float:
+    """% con lai cua cua so chat nhat (100 = con day, 0 = het)."""
+    if entry.get("unlimited"):
+        return 100.0
+    windows = entry.get("windows") or {}
+    worst = max((float(window.get("pct", 0.0)) for window in windows.values()), default=0.0)
+    return max(0.0, 100.0 - worst)
 
-    `quota` (tuy chon): QuotaTracker da refresh. Neu main sap can, router tu
-    day escalate len va loai model het dia khoi chain.
+
+def route(work_order, *, quota=None, allow_escalate: bool = False, **signals) -> dict:
+    """Tra ke hoach dinh tuyen: work_type, mode, chain, ly do, quota.
+
+    Chinh sach khi co quota:
+      1. main neu con >= MAIN_MIN_REMAINING% cua cua so hep nhat.
+      2. escalate CHI khi con >= ESCALATE_MIN_REMAINING% (do dao) hoac
+         `allow_escalate=True`. Escalate khong bao gio la mac dinh khi main can.
+      3. khong du -> ha xuong FALLBACKS (re/free), mode="fallback".
+      4. het ca -> exhausted=True (recipe chan, tru --force).
     """
     work_type, detected = classify_work(work_order, **signals)
     entry = ROUTES[work_type]
-    chain = [model for model in (entry["main"], entry["escalate"]) if model]
+    main, escalate = entry["main"], entry.get("escalate")
+    chain = [model for model in (main, escalate) if model]
     quota_info: dict = {}
+    mode = "main"
     exhausted = False
+
     if quota is not None:
-        chosen, quota_info = quota.choose(chain)
-        if chosen:
-            chain = [model for model in chain if quota_info.get(model, {}).get("ok")]
+        for model in chain + FALLBACKS:
+            quota_info.setdefault(model, quota.remaining(model))
+        main_ok = (quota_info[main]["ok"]
+                   and _remaining_pct(quota_info[main]) >= MAIN_MIN_REMAINING)
+        esc_ok = bool(escalate) and (quota_info[escalate]["ok"]
+                                     and _remaining_pct(quota_info[escalate])
+                                     >= ESCALATE_MIN_REMAINING)
+        fallback_ok = [model for model in FALLBACKS if quota_info[model]["ok"]]
+
+        if main_ok:
+            chosen, mode = main, "main"
+        elif escalate and (esc_ok or (allow_escalate and quota_info[escalate]["ok"])):
+            chosen, mode = escalate, "escalate"
+        elif fallback_ok:
+            chosen, mode = fallback_ok[0], "fallback"
         else:
-            exhausted = True
+            chosen, mode, exhausted = None, "exhausted", True
+
+        if chosen:
+            chain = [chosen]
+            if mode == "main" and escalate and esc_ok:
+                chain.append(escalate)
+            for model in fallback_ok:
+                if model not in chain:
+                    chain.append(model)
+
     return {
         "work_type": work_type,
         "label": WORK_TYPES[work_type],
-        "main": chain[0] if chain else entry["main"],
+        "main": chain[0] if chain else main,
         "escalate": chain[1] if len(chain) > 1 else None,
         "chain": chain,
+        "mode": mode,
+        "degraded": mode == "fallback",
         "why": entry["why"],
         "signals": detected,
         "family": [FAMILY.get(model, "?") for model in chain],

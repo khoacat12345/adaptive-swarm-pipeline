@@ -66,23 +66,22 @@ def make_order(**overrides) -> work_order_module.WorkOrder:
 
 
 class FakeQuota:
-    """Quota gia: used>=1.0 nghia la het dia."""
+    """Quota gia: remaining_pct[model] = % con lai; ok[model] = con dung duoc."""
 
     available = True
 
-    def __init__(self, used: dict) -> None:
-        self.used = used
+    def __init__(self, remaining_pct: dict | None = None, ok: dict | None = None) -> None:
+        self.remaining_pct = remaining_pct or {}
+        self.ok_map = ok or {}
 
-    def choose(self, chain):
-        info = {}
-        for model in chain:
-            ok = float(self.used.get(model, 0.0)) < 1.0
-            info[model] = {"model": model, "unlimited": False, "ok": ok,
-                           "windows": {}, "worst_pct": 0.0}
-        for model in chain:
-            if info[model]["ok"]:
-                return model, info
-        return None, info
+    def remaining(self, model: str) -> dict:
+        remaining = float(self.remaining_pct.get(model, 100.0))
+        ok = bool(self.ok_map.get(model, True))
+        pct = 100.0 - remaining
+        return {"model": model, "unlimited": False, "ok": ok,
+                "windows": {"today": {"pct": pct}, "week": {"pct": pct},
+                            "month": {"pct": pct}},
+                "worst_pct": pct}
 
 
 def test_cost_by_model(checks: Checks) -> None:
@@ -125,21 +124,40 @@ def test_router_quota(checks: Checks) -> None:
     order = make_order(level=2)          # W2: deepseek-v4-pro -> kimi-k2.7-code
     main = router.ROUTES["W2"]["main"]
     escalate = router.ROUTES["W2"]["escalate"]
+    free = router.FALLBACKS[0]
 
-    plan = router.route(order, quota=FakeQuota({}))
+    plan = router.route(order, quota=FakeQuota())
     checks.check("router-quota: du dia -> giu main", plan["chain"][0] == main, plan)
+    checks.check("router-quota: mode main", plan["mode"] == "main", plan["mode"])
 
-    plan = router.route(order, quota=FakeQuota({main: 2.0}))
-    checks.check("router-quota: main het -> day escalate", plan["chain"][0] == escalate,
-                 plan["chain"])
-    checks.check("router-quota: khong con escalate", plan["escalate"] is None, plan)
-    checks.check("router-quota: main moi = escalate",
-                 plan["main"] == escalate, plan["main"])
+    plan = router.route(order, quota=FakeQuota({main: 5}))
+    checks.check("router-quota: main can + escalate doi dao -> escalate",
+                 plan["chain"][0] == escalate and plan["mode"] == "escalate", plan)
 
-    plan = router.route(order, quota=FakeQuota({main: 2.0, escalate: 2.0}))
-    checks.check("router-quota: ca 2 het -> exhausted", plan["exhausted"] is True, plan)
-    checks.check("router-quota: van giu chain de nguoi doc thay",
-                 plan["chain"] == [main, escalate], plan["chain"])
+    plan = router.route(order, quota=FakeQuota({main: 5, escalate: 20}))
+    checks.check("router-quota: main can + escalate khong doi dao -> fallback",
+                 plan["chain"][0] == free and plan["mode"] == "fallback", plan)
+    checks.check("router-quota: bao degraded", plan["degraded"] is True, plan)
+
+    plan = router.route(order, quota=FakeQuota({main: 5, escalate: 20}),
+                        allow_escalate=True)
+    checks.check("router-quota: allow_escalate -> nang len",
+                 plan["chain"][0] == escalate and plan["mode"] == "escalate", plan)
+
+    plan = router.route(order, quota=FakeQuota({main: 11}))
+    checks.check("router-quota: main 11% van dung duoc", plan["mode"] == "main", plan)
+    plan = router.route(order, quota=FakeQuota({main: 9}))
+    checks.check("router-quota: main 9% bi coi la can", plan["mode"] != "main", plan)
+
+    all_off = {main: 0, escalate: 0, free: 0, router.FALLBACKS[1]: 0}
+    plan = router.route(order, quota=FakeQuota(ok=all_off))
+    checks.check("router-quota: het ca main/escalate/free -> exhausted",
+                 plan["exhausted"] is True and plan["mode"] == "exhausted", plan)
+
+    plan = router.route(order, quota=FakeQuota(ok={main: True, escalate: False,
+                                                   free: True}))
+    checks.check("router-quota: escalate tat nhung free con -> van chay main",
+                 plan["chain"][0] == main, plan)
 
     plan = router.route(order)
     checks.check("router-quota: khong truyen quota -> khong loc",
