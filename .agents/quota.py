@@ -49,6 +49,10 @@ CAPS = {
 WINDOW_RATIO = {"today": 0.20, "week": 0.50, "month": 1.00}
 WINDOW_DAYS = {"today": 1, "week": 7, "month": 30}
 
+# Ngan sach CHUNG cua plan (console hien Rolling/Weekly/Monthly dung chung).
+# Uoc tu console Go ($10 plan, Monthly 8% ~ $1.11 -> ~$14). Co the override.
+PLAN_MONTHLY_USD = 14.0
+
 
 def _bin(binary: str | None = None) -> str:
     return binary or DEFAULT_BIN
@@ -94,10 +98,12 @@ class QuotaTracker:
     """
 
     def __init__(self, *, root=None, binary: str | None = None,
-                 caps: dict | None = None, cache_ttl: int = 60) -> None:
+                 caps: dict | None = None, cache_ttl: int = 60,
+                 plan_cap: float = PLAN_MONTHLY_USD) -> None:
         self.root = Path(root).resolve() if root else Path.cwd()
         self.binary = binary
         self.caps = dict(caps or CAPS)
+        self.plan_cap = float(plan_cap)
         self.cache_ttl = cache_ttl
         self.usage: dict[str, dict[str, float]] = {name: {} for name in WINDOW_DAYS}
         self.available = False
@@ -152,17 +158,15 @@ class QuotaTracker:
         except OSError:
             pass
 
-    def remaining(self, model: str) -> dict:
-        cap = self.caps.get(model)
-        if not cap:
-            return {"model": model, "unlimited": True, "ok": True,
-                    "windows": {}, "worst_pct": 0.0}
+    def shared(self) -> dict:
+        """Ngan sach CHUNG cua plan: tong cost cac model tra tien (opencode-go/)."""
         windows: dict[str, dict] = {}
         ok = True
         worst = 0.0
         for window, ratio in WINDOW_RATIO.items():
-            used = float(self.usage.get(window, {}).get(model, 0.0))
-            limit = cap * ratio
+            used = sum(float(cost) for model, cost in self.usage.get(window, {}).items()
+                       if str(model).startswith("opencode-go/"))
+            limit = self.plan_cap * ratio
             pct = (used / limit * 100.0) if limit else 0.0
             worst = max(worst, pct)
             if used >= limit:
@@ -170,8 +174,33 @@ class QuotaTracker:
             windows[window] = {"used": round(used, 4), "limit": round(limit, 4),
                                "remaining": round(max(0.0, limit - used), 4),
                                "pct": round(pct, 1)}
-        return {"model": model, "unlimited": False, "ok": ok,
+        return {"ok": ok, "cap": round(self.plan_cap, 2),
                 "windows": windows, "worst_pct": round(worst, 1)}
+
+    def remaining(self, model: str) -> dict:
+        cap = self.caps.get(model)
+        if not cap:
+            return {"model": model, "unlimited": True, "ok": True,
+                    "windows": {}, "worst_pct": 0.0}
+        windows: dict[str, dict] = {}
+        model_ok = True
+        worst = 0.0
+        for window, ratio in WINDOW_RATIO.items():
+            used = float(self.usage.get(window, {}).get(model, 0.0))
+            limit = cap * ratio
+            pct = (used / limit * 100.0) if limit else 0.0
+            worst = max(worst, pct)
+            if used >= limit:
+                model_ok = False
+            windows[window] = {"used": round(used, 4), "limit": round(limit, 4),
+                               "remaining": round(max(0.0, limit - used), 4),
+                               "pct": round(pct, 1)}
+        shared = self.shared()
+        return {"model": model, "unlimited": False,
+                "ok": bool(model_ok and shared["ok"]),
+                "model_ok": model_ok, "shared_ok": shared["ok"],
+                "windows": windows, "worst_pct": round(worst, 1),
+                "shared": shared}
 
     def choose(self, chain: list[str], *, refresh: bool = True) -> tuple[str | None, dict]:
         """Chon model dau tien con du dia; tra (model, info) cho TOAN BO chain."""
@@ -185,7 +214,8 @@ class QuotaTracker:
 
     def snapshot(self) -> dict:
         return {"available": self.available, "error": self.error,
-                "fetched_at": self.fetched_at,
+                "fetched_at": self.fetched_at, "plan_cap": self.plan_cap,
+                "shared": self.shared(),
                 "usage": {window: dict(values) for window, values in self.usage.items()}}
 
 
@@ -208,6 +238,13 @@ def _cli(argv=None) -> int:
     else:
         if not tracker.available:
             print(f"CANH BAO: {tracker.error or 'khong co du lieu'}")
+        shared = tracker.shared()
+        print(f"NGAN SACH CHUNG (plan ${shared['cap']:.2f}/thang): "
+              f"5h {shared['windows']['today']['pct']:.1f}% / "
+              f"tuan {shared['windows']['week']['pct']:.1f}% / "
+              f"thang {shared['windows']['month']['pct']:.1f}% "
+              f"{'OK' if shared['ok'] else 'CAN'}")
+        print("")
         print(f"{'MODEL':<40} {'5H%':>6} {'TUAN%':>6} {'THANG%':>7}  OK")
         for model, entry in report.items():
             if entry["unlimited"]:

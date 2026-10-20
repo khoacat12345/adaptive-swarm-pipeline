@@ -146,6 +146,26 @@ def test_router_quota(checks: Checks) -> None:
                  plan["chain"] == [main, escalate] and plan["quota"] == {}, plan)
 
 
+def test_shared_budget(checks: Checks) -> None:
+    tracker = quota.QuotaTracker(caps={"opencode-go/a": 15.0}, plan_cap=1.0)
+    tracker.available = True
+    tracker.usage = {"today": {}, "week": {},
+                     "month": {"opencode-go/a": 0.6, "opencode-go/b": 0.5}}
+    entry = tracker.remaining("opencode-go/a")
+    checks.check("shared: per-model con nhung plan can -> khong ok",
+                 entry["model_ok"] and not entry["shared_ok"] and not entry["ok"], entry)
+    checks.check("shared: pct thang > 100", entry["shared"]["windows"]["month"]["pct"] > 100,
+                 entry["shared"])
+
+    free = tracker.remaining("opencode/deepseek-v4.1-flash-free")
+    checks.check("shared: free van ok khi plan can", free["unlimited"] and free["ok"], free)
+
+    tracker.usage = {"today": {}, "week": {"opencode/deepseek-v4.1-flash-free": 99.0},
+                     "month": {}}
+    checks.check("shared: usage free khong tinh vao plan",
+                 tracker.shared()["ok"] is True, tracker.shared())
+
+
 def test_no_regression(checks: Checks, *, fast: bool = False) -> None:
     if fast:
         print("[skip] hoi quy Phase 5 (--fast)")
@@ -163,13 +183,15 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     checks = Checks()
-    print("[1/4] cost_by_model ...")
+    print("[1/5] cost_by_model ...")
     test_cost_by_model(checks)
-    print("[2/4] remaining/choose ...")
+    print("[2/5] remaining/choose ...")
     test_remaining(checks)
-    print("[3/4] router + quota ...")
+    print("[3/5] shared budget ...")
+    test_shared_budget(checks)
+    print("[4/5] router + quota ...")
     test_router_quota(checks)
-    print("[4/4] khong hoi quy ...")
+    print("[5/5] khong hoi quy ...")
     test_no_regression(checks, fast=args.fast)
 
     print("")

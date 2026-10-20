@@ -527,8 +527,10 @@ Thu tu uu tien tin hieu: W8 > W6 > W3 > W5 > W4 > W0 > W7 > W2 > W1.
 `python .agents/recipe_c.py --order order.json --route`.
 
 **Quota that:** `quota.py` doc `opencode stats --models --cost --json` (cung so lieu
-console), cat theo tran Go: 5h=20%, tuan=50%, thang=100%; free = vo han. `--route`
-tu day escalate len khi main sap can va bao `exhausted` khi ca 2 het. Xem nhanh:
+console) va cat theo HAI tran: (1) **ngan sach CHUNG cua plan** (~$14/thang; console
+hien Rolling/Weekly/Monthly dung chung cho moi model) va (2) **tran rieng tung model**
+($15/$60/$80). Ty le: 5h=20%, tuan=50%, thang=100%; free = vo han. `--route` tu day
+escalate len khi main sap can va bao `exhausted` khi ca hai tran het. Xem nhanh:
 `python .agents/quota.py`.
 
 ### Work Order (5 truong)
