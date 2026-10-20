@@ -112,4 +112,4 @@ This repository was originally developed inside a home directory, so the root
 
 ## License
 
-MIT (add a `LICENSE` file before distributing).
+MIT — see [LICENSE](LICENSE).
