@@ -95,6 +95,13 @@ verdicts are aggregated: any reject blocks the apply. The wave is **budget-aware
 it runs only as many reviewers as the 8-request cap allows and records the rest as
 `skipped`. Default remains the 0-request heuristic reviewer.
 
+Free dry-run (same free model for all four roles, $0):
+
+```cmd
+set SWARM_WAVE_ROLES=security=opencode/deepseek-v4.1-flash-free,qa=opencode/deepseek-v4.1-flash-free,perf=opencode/deepseek-v4.1-flash-free,docs=opencode/deepseek-v4.1-flash-free
+python .agents/job.py --plan scratch/swarm_demo/plan_wave.json --root . --reviewer wave --decision approve
+```
+
 ## Notifications (one-way)
 
 Create `.agents/notify.json`:

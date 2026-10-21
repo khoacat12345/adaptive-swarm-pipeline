@@ -181,6 +181,9 @@ class FindingsSink:
             "task_id": findings.get("task_id"),
             "reasons": list(findings.get("reasons") or [])[:10],
         }
+        for key in ("files", "skipped", "per_role"):
+            if key in findings:
+                entry[key] = findings[key]
         self.written.append(entry)
         if self.log:
             ledger.append_event(

@@ -935,7 +935,15 @@ def build_reviewer(kind: str, *, model: str | None = None) -> Reviewer:
             raise ValueError("reviewer llm can --model")
         return OpenCodeReviewer(model)
     if kind == "wave":
-        return WaveReviewer()
+        roles = None
+        raw = os.environ.get("SWARM_WAVE_ROLES")
+        if raw:
+            roles = {}
+            for item in raw.split(","):
+                role, _, model = item.partition("=")
+                if role.strip() and model.strip():
+                    roles[role.strip()] = model.strip()
+        return WaveReviewer(roles or None)
     return HeuristicReviewer()
 
 

@@ -181,6 +181,26 @@ def test_recipe_integration(checks: Checks) -> None:
                  report.get("review"))
 
 
+def test_sink(checks: Checks) -> None:
+    import json
+    import permissions
+    root = TEMP_ROOT / "sink"
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    sink = permissions.FindingsSink(root, run_id="wave-sink", log=True)
+    roles = {role: "approve" for role in ("security", "qa", "perf", "docs")}
+    wave = make_wave(roles)
+    wave.review(make_order(), diff="+x", new_content="x", old_content="",
+                level=2, sink=sink)
+    events = [json.loads(line) for line in
+              (root / ".agents" / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+              if line.strip()]
+    event = next((item for item in events
+                  if item.get("event_type") == "reviewer.findings"), {})
+    checks.check("wave: ledger giu per_role",
+                 len((event.get("data") or {}).get("per_role") or []) == 4, event)
+
+
 def test_no_regression(checks: Checks, *, fast: bool = False) -> None:
     if fast:
         print("[skip] hoi quy Phase 6 (--fast)")
@@ -198,17 +218,19 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     checks = Checks()
-    print("[1/6] aggregate ...")
+    print("[1/7] aggregate ...")
     test_aggregate(checks)
-    print("[2/6] budget ...")
+    print("[2/7] budget ...")
     test_budget(checks)
-    print("[3/6] parallel ...")
+    print("[3/7] parallel ...")
     test_parallel(checks)
-    print("[4/6] review_set ...")
+    print("[4/7] review_set ...")
     test_review_set(checks)
-    print("[5/6] recipe integration ...")
+    print("[5/7] recipe integration ...")
     test_recipe_integration(checks)
-    print("[6/6] khong hoi quy ...")
+    print("[6/7] ledger findings ...")
+    test_sink(checks)
+    print("[7/7] khong hoi quy ...")
     test_no_regression(checks, fast=args.fast)
 
     print("")
