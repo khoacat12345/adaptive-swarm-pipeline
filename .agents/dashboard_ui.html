@@ -425,7 +425,10 @@ function toast(text){
 }
 function authToken(){ return state.sessionToken || state.token; }
 
+let inFlight = false;
 async function refreshAll(){
+  if(inFlight) return;
+  inFlight = true;
   try{
     const runs = await api('/api/runs?filter=all');
     state.runs = runs.runs || [];
@@ -434,7 +437,10 @@ async function refreshAll(){
     ]);
     state.job = job; state.planState = plan; state.health = health;
     if(Date.now() - state.lastQuota > 15000){
-      state.quota = await api('/api/quota'); state.lastQuota = Date.now();
+      try{
+        state.quota = await api('/api/quota');
+        state.lastQuota = Date.now();
+      }catch(_){ /* keep the previous quota snapshot */ }
     }
     if(!state.selected){
       const first = state.runs.find((run) => run.task_id) || state.runs[0];
@@ -446,6 +452,8 @@ async function refreshAll(){
   }catch(error){
     $('#connDot').classList.add('off');
     $('#updatedAt').textContent = 'offline';
+  }finally{
+    inFlight = false;
   }
 }
 
@@ -735,7 +743,7 @@ function renderUsage(){
   $('#requestLog').innerHTML = `<table><thead><tr><th>Time</th><th>Workspace</th>
     <th>Model</th><th>Tokens in / out</th><th>Duration</th><th>Cost</th></tr></thead><tbody>
     ${requests.map((item) => `<tr>
-      <td class="mono">${new Date(item.t).toLocaleTimeString()}</td>
+      <td class="mono">${new Date(item.t).toLocaleString()}</td>
       <td class="mono muted">${esc((item.project || '').split(/[\\/]/).pop() || '-')}</td>
       <td class="mono">${esc(item.model.split('/').pop())}</td>
       <td class="mono">${num(item.tokens_in)} / ${num(item.tokens_out)}</td>

@@ -105,10 +105,10 @@ def _connect() -> sqlite3.Connection:
     path = db_path()
     if not path.exists():
         raise FileNotFoundError(str(path))
-    return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
 
 
-def read_messages(days: int = 31) -> list[dict]:
+def read_messages(days: int = 30) -> list[dict]:
     """Doc cost/token tung assistant message (rolling window chinh xac)."""
     cutoff = int((time.time() - days * 86400) * 1000)
     con = _connect()
@@ -173,7 +173,7 @@ def workspaces(*, limit: int = 50) -> list[dict]:
             left join session_v2 s on s.project_id = p.id
             where lower(replace(p.worktree, '\\', '/')) not like '%/appdata/local/temp/%'
               and lower(replace(p.worktree, '\\', '/')) not like '%/temp/%'
-              and lower(replace(p.worktree, '\\', '/')) not like '%/swarm_worker_%'
+              and instr(lower(replace(p.worktree, '\\', '/')), '/swarm_worker_') = 0
             group by lower(replace(p.worktree, '\\', '/'))
             having count(s.id) > 0
             order by coalesce(max(p.time_active), max(p.time_created)) desc
@@ -225,27 +225,23 @@ class QuotaTracker:
             self.requests = cached.get("requests") or []
             self.message_count = int(cached.get("message_count") or 0)
             self.available = bool(cached.get("available"))
+            self.error = cached.get("error")
             self.fetched_at = float(cached.get("at") or now)
             return self
 
         try:
-            messages = read_messages()
+            messages = read_messages(days=30)
             self._load(messages)
             self.available = True
             self.error = None
         except Exception as exc:                    # noqa: BLE001
+            self.usage = {window: {} for window in WINDOW_DAYS}
+            self.spend = {}
+            self.requests = []
+            self.message_count = 0
+            self.available = False
             self.error = f"db: {str(exc)[:160]}"
-            ok = False
-            for window, days in WINDOW_DAYS.items():
-                stats = read_stats(days, binary=self.binary)
-                if stats is None:
-                    continue
-                self.usage[window] = cost_by_model(stats)
-                ok = True
-            self.available = ok
         self.fetched_at = now
-        if not self.available:
-            self.error = self.error or "khong doc duoc usage"
         self._write_cache()
         return self
 
@@ -256,7 +252,7 @@ class QuotaTracker:
                    "month": now - 30 * 86400 * 1000}
         local = time.localtime()
         midnight = time.mktime((local.tm_year, local.tm_mon, local.tm_mday,
-                                0, 0, 0, 0, 0, 0)) * 1000
+                                0, 0, 0, 0, 0, -1)) * 1000
         self.usage = {window: {} for window in windows}
         for message in messages:
             for window, cutoff in windows.items():
@@ -289,11 +285,13 @@ class QuotaTracker:
     def _write_cache(self) -> None:
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-            self.cache_path.write_text(json.dumps(
-                {"at": self.fetched_at, "available": self.available,
-                 "usage": self.usage, "spend": self.spend,
-                 "requests": self.requests, "message_count": self.message_count},
-                ensure_ascii=False, indent=2), encoding="utf-8")
+            payload = {"at": self.fetched_at, "available": self.available,
+                       "error": self.error, "usage": self.usage, "spend": self.spend,
+                       "requests": self.requests, "message_count": self.message_count}
+            tmp = self.cache_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                           encoding="utf-8")
+            os.replace(tmp, self.cache_path)
         except OSError:
             pass
 
@@ -321,6 +319,9 @@ class QuotaTracker:
         if not cap:
             return {"model": model, "unlimited": True, "ok": True,
                     "windows": {}, "worst_pct": 0.0}
+        if not self.available:
+            return {"model": model, "unlimited": False, "ok": False,
+                    "unknown": True, "windows": {}, "worst_pct": 0.0}
         windows: dict[str, dict] = {}
         model_ok = True
         worst = 0.0
