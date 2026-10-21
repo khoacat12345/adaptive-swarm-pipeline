@@ -1,6 +1,7 @@
 # Runtime artifacts — khong commit
 tmp/
 backups/
+draft/
 eval/*/debug/
 eval/bench/
 *.lock
