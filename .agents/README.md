@@ -538,11 +538,16 @@ cung khan. Xem nhanh: `python .agents/quota.py`.
 
 ### Job plan + duyet (Phase 6A)
 
-```bash
-python .agents/job.py --plan plan.json --root <du an> --wait --open
-# --open: tu khoi dong dashboard neu port trong + mo trinh duyet kem token
-# khong co --open: chi in URL de ban tu mo
+```powershell
+# chay demo co san (plan nam trong repo):
+python .agents/job.py --plan scratch/swarm_demo/plan.json --root . --wait --open
+
+# du an khac (thay bang duong dan that, KHONG dung dau < >):
+python .agents/job.py --plan plan.json --root "C:\path\to\project" --wait --open
 ```
+
+`--open`: tu khoi dong dashboard neu port trong + mo trinh duyet kem token.
+Khong co `--open`: chi in URL de ban tu mo.
 
 Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objective`,
 `verify_command`, `target_files`, `sandbox_files`, `level`, `max_rounds`, `depends_on`.

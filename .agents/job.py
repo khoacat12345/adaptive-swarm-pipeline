@@ -383,7 +383,12 @@ def main(argv=None) -> int:
                         help="tu khoi dong dashboard neu can va mo trinh duyet")
     args = parser.parse_args(argv)
 
-    plan = load_plan(args.plan)
+    try:
+        plan = load_plan(args.plan)
+    except OSError as exc:
+        print(f"khong doc duoc plan: {args.plan} ({exc})")
+        print("vi du: python .agents/job.py --plan scratch/swarm_demo/plan.json --root . --wait --open")
+        return 2
     info = submit_plan(plan, args.root, token=args.token)
     url = f"http://127.0.0.1:{args.port}/?token={info['token']}"
     print(f"job     : {info['job_id']} ({info['subtasks']} subtask)")

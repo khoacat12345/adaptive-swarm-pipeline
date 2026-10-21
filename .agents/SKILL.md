@@ -64,7 +64,7 @@ python .agents/replay.py --last              # timeline run gan nhat
 python .agents/replay.py --list              # liet ke cac run (moi nhat truoc)
 python .agents/replay.py <run_id> --json     # may doc
 python .agents/dashboard.py --port 8080 --open
-python .agents/job.py --plan plan.json --wait --open   # plan + duyet tren web
+python .agents/job.py --plan scratch/swarm_demo/plan.json --root . --wait --open   # plan + duyet tren web
 python .agents/cost_report.py                # token / request / fallback
 python .agents/memory.py                     # loi hay gap + goi y
 ```

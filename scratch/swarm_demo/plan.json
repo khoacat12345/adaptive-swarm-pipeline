@@ -1,0 +1,23 @@
+{
+  "job_id": "DEMO6",
+  "objective": "Sua ham add trong plan_calc.py de tra ve tong a + b",
+  "subtasks": [
+    {
+      "id": "S1",
+      "title": "fix add",
+      "objective": "Sua ham add trong plan_calc.py de tra ve tong a + b",
+      "boundaries": "Chi sua plan_calc.py",
+      "input_context": "plan_calc.py co ham add tra ve hieu",
+      "acceptance_criteria": "plan_check.py exit 0 va add(2,3)==5",
+      "verify_command": "python scratch/swarm_demo/plan_check.py",
+      "target_files": ["scratch/swarm_demo/plan_calc.py"],
+      "sandbox_files": [
+        "scratch/swarm_demo/plan_calc.py",
+        "scratch/swarm_demo/plan_check.py"
+      ],
+      "level": 1,
+      "max_rounds": 1,
+      "depends_on": []
+    }
+  ]
+}
