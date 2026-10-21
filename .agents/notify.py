@@ -52,7 +52,13 @@ def format_message(event: str, payload: dict) -> str:
 
 
 def send(text: str, *, config: dict | None = None, timeout: int = 10) -> dict:
-    config = config or {}
+    config = dict(config or {})
+    telegram = config.get("telegram") or {}
+    if not config.get("url") and telegram.get("bot_token"):
+        config["enabled"] = True
+        config["kind"] = "telegram"
+        config["url"] = f"https://api.telegram.org/bot{telegram['bot_token']}/sendMessage"
+        config["chat_id"] = telegram.get("chat_id") or config.get("chat_id")
     url = config.get("url")
     if not config.get("enabled") or not url:
         return {"ok": False, "skipped": True}
