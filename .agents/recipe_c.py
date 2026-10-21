@@ -541,6 +541,9 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
     # FallbackCoder tu kiem tra ngan sach truoc MOI lan doi model.
     if hasattr(coder, "limit_check"):
         coder.limit_check = lambda: requests_used() < max_requests
+    # Wave reviewer can biet con bao nhieu request truoc khi bat 4 con song song.
+    if reviewer is not None and hasattr(reviewer, "budget_left"):
+        reviewer.budget_left = lambda: max(0, max_requests - requests_used())
 
     # Doc file nguon: giu nguyen byte-level (xem _read_source).
     originals: dict[str, str] = {}
@@ -991,7 +994,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--coder", default="agentic",
                         choices=("agentic", "opencode", "scripted"))
     parser.add_argument("--model", default=None)
-    parser.add_argument("--reviewer", default="heuristic", choices=("heuristic", "llm", "none"))
+    parser.add_argument("--reviewer", default="heuristic",
+                        choices=("heuristic", "llm", "wave", "none"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-fallback", action="store_true",

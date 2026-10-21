@@ -84,6 +84,17 @@ exists and that dependencies are acyclic, then submits the plan for approval.
 Planner chain: Qwen3.8 Max -> GLM-5.3 -> free fallbacks. If the first plan is
 invalid it retries once with the validation errors attached.
 
+## Wave reviewers (parallel audit)
+
+```bash
+python .agents/job.py --plan plan.json --root . --reviewer wave --wait --open
+```
+
+Four read-only reviewers run **in parallel** (security, QA, perf, docs) and their
+verdicts are aggregated: any reject blocks the apply. The wave is **budget-aware**:
+it runs only as many reviewers as the 8-request cap allows and records the rest as
+`skipped`. Default remains the 0-request heuristic reviewer.
+
 ## Notifications (one-way)
 
 Create `.agents/notify.json`:
@@ -96,6 +107,19 @@ Kinds: `discord` (`content`), `telegram` (`chat_id` + `text`; `url` is the bot
 `sendMessage` endpoint), `generic` (`text`). Events: `plan.submitted`,
 `plan.approved`, `plan.rejected`, `job.done`. Notification failures never break a job.
 
+### Telegram bot (two-way)
+
+```json
+{"telegram": {"bot_token": "123:ABC", "chat_id": 123456}}
+```
+
+```bash
+python .agents/telegram_bot.py --root .
+```
+
+Only the configured `chat_id` is accepted. Commands: `/status`, `/approve`,
+`/reject`, `/pause`, `/resume`, `/stop`, `/say <direction>`, `/help`.
+
 ## Tests
 
 ```bash
@@ -105,6 +129,8 @@ python .agents/tests/test_phase5.py      # router + fallback reviewer + regressi
 python .agents/tests/test_quota.py       # quota math + quota-aware routing
 python .agents/tests/test_phase6.py      # plan approval + job executor
 python .agents/tests/test_planner.py     # goal -> plan + webhook notifications
+python .agents/tests/test_wave.py        # 4 parallel reviewers + budget
+python .agents/tests/test_telegram.py    # telegram bot commands/auth
 python .agents/tests/smoke_suite.py      # engine + 10 real tasks
 ```
 
@@ -122,6 +148,7 @@ Hard model-selection tasks live in `.agents/tests/hard_tasks.py`; see
 | `.agents/job.py` | plan approval, state/control, sequential executor |
 | `.agents/planner.py` | goal -> plan.json (W4 planner) |
 | `.agents/notify.py` | one-way Discord/Telegram/generic webhooks |
+| `.agents/telegram_bot.py` | two-way Telegram control (/approve, /pause, /say) |
 | `.agents/workers.py` | coders/reviewers (agentic CLI, scripted, fallback) |
 | `.agents/ledger.py`, `schema.py`, `replay.py`, `dashboard.py` | evidence + observability |
 | `.agents/tests/` | acceptance suites and hard tasks |

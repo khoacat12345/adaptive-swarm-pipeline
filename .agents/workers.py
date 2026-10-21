@@ -27,6 +27,8 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import secret_scan
@@ -61,6 +63,14 @@ def resolve_binary(binary: str | None = None) -> str:
 
 
 DEFAULT_OPENCODE_BIN = unwrap_cmd_shim(_SHIM)
+
+# 4 reviewer cho wave (Level 2/3, opt-in). Moi role 1 request.
+WAVE_ROLES = {
+    "security": "opencode-go/glm-5.3",
+    "qa": "opencode-go/claude-haiku-5-5",
+    "perf": "opencode/deepseek-v4.1-flash-free",
+    "docs": "opencode-go/gpt-6-luna",
+}
 
 
 def _same_text(left: str, right: str) -> bool:
@@ -918,6 +928,8 @@ def build_reviewer(kind: str, *, model: str | None = None) -> Reviewer:
         if not model:
             raise ValueError("reviewer llm can --model")
         return OpenCodeReviewer(model)
+    if kind == "wave":
+        return WaveReviewer()
     return HeuristicReviewer()
 
 
@@ -982,3 +994,157 @@ class FallbackReviewer(Reviewer):
         base = super().stats()
         base.update({"models": list(self.models), "attempts": list(self.attempts)})
         return base
+
+
+# --------------------------------------------------------------------------
+# Wave: 4 reviewer chay song song (chi doc, khong ghi file)
+# --------------------------------------------------------------------------
+ROLE_PROMPTS = {
+    "security": ("auth bypass, injection (SQL/command/path), secret leakage, unsafe "
+                 "deserialization, missing permission checks, SSRF"),
+    "qa": ("missing edge cases, boundary values, None/empty inputs, error handling, "
+           "regressions, tests that do not actually catch the bug"),
+    "perf": ("quadratic loops, repeated IO, unnecessary allocations, blocking calls, "
+             "N+1 queries, unbounded growth"),
+    "docs": ("wrong or missing docstrings, misleading comments, type hints, API docs "
+             "that no longer match the code"),
+}
+
+
+class RoleReviewer(Reviewer):
+    """Mot reviewer theo vai (security/qa/perf/docs), read-only, 1 request."""
+
+    kind = "role-reviewer"
+
+    def __init__(self, role: str, model: str, *, binary=None, timeout: int = 180,
+                 runner=None) -> None:
+        super().__init__()
+        self.role = str(role)
+        self.model = str(model)
+        self.name = f"{self.role}:{self.model}"
+        self.binary = resolve_binary(binary)
+        self.timeout = timeout
+        self.runner = runner or self._run_cli
+
+    def _run_cli(self, prompt: str) -> str:
+        base = Path(tempfile.gettempdir()) / "opencode"
+        base.mkdir(parents=True, exist_ok=True)
+        workdir = tempfile.mkdtemp(prefix="review_", dir=str(base))
+        text, _usage = run_opencode_cli(self.binary, self.model, prompt,
+                                        agent="build", cwd=workdir,
+                                        timeout=self.timeout)
+        return text
+
+    def _prompt(self, work_order, diff: str) -> str:
+        focus = ROLE_PROMPTS.get(self.role, "general correctness")
+        return (
+            f"Ban la reviewer {self.role.upper()}, quyen READ-ONLY.\n"
+            f"Chi tap trung: {focus}.\n"
+            "Chi bao loi THAT, co bang chung trong diff. Khong binh luan style.\n"
+            f"MUC TIEU: {work_order.objective}\n"
+            f"TIEU CHI: {work_order.acceptance_criteria}\n"
+            f"```diff\n{diff[:20000]}\n```\n"
+            'Tra ve JSON: {"verdict":"approve"|"reject","reasons":["..."]}'
+        )
+
+    def review(self, work_order, *, diff: str, new_content: str, old_content: str,
+               level: int, sink) -> dict:
+        self.calls += 1
+        try:
+            data = parse_json_object(self.runner(self._prompt(work_order, diff)))
+            reasons = [str(item) for item in (data.get("reasons") or [])][:6]
+            verdict = ("approve" if str(data.get("verdict", "")).lower().startswith("approve")
+                       else "reject")
+            if verdict == "reject" and not reasons:
+                reasons = ["reject without a reason"]
+        except Exception as exc:                    # noqa: BLE001
+            verdict, reasons = "error", [f"{type(exc).__name__}: {str(exc)[:160]}"]
+        return {"verdict": verdict, "level": level, "task_id": work_order.task_id,
+                "reasons": reasons, "role": self.role, "model": self.model,
+                "reviewer": self.name}
+
+    def review_set(self, work_order, *, diffs: dict, new_contents: dict,
+                   old_contents: dict, level: int, sink) -> dict:
+        combined = "\n".join(f"### {path}\n{diff}" for path, diff in diffs.items())
+        return self.review(work_order, diff=combined,
+                           new_content="\n".join(new_contents.values()),
+                           old_content="\n".join(old_contents.values()),
+                           level=level, sink=sink)
+
+
+class WaveReviewer(Reviewer):
+    """4 reviewer chay SONG SONG, chi doc; tong hop thanh 1 ket luan.
+
+    `budget_left()` (tuy chon) tra so request con lai; wave chi chay toi da
+    so do, phan con lai ghi vao `skipped` - khong bao gio vuot tran 8.
+    """
+
+    kind = "wave-reviewer"
+
+    def __init__(self, roles: dict | None = None, *, factory=None,
+                 name: str = "wave-reviewer", max_parallel: int = 4) -> None:
+        super().__init__()
+        self.roles = dict(roles or WAVE_ROLES)
+        self.factory = factory or (lambda role, model: RoleReviewer(role, model))
+        self.name = name
+        self.max_parallel = max(1, int(max_parallel))
+        self.budget_left = None
+        self.last_results: list[dict] = []
+
+    def _run(self, method: str, work_order, **kwargs) -> dict:
+        all_roles = list(self.roles)
+        reviewers = [(role, self.factory(role, self.roles[role])) for role in all_roles]
+        allowed = len(reviewers)
+        if self.budget_left is not None:
+            try:
+                allowed = max(0, min(allowed, int(self.budget_left())))
+            except Exception:                       # noqa: BLE001
+                allowed = 0
+        reviewers = reviewers[:allowed]
+        skipped = all_roles[len(reviewers):]
+
+        if not reviewers:
+            findings = {"verdict": "reject", "level": work_order.level,
+                        "task_id": work_order.task_id,
+                        "reasons": ["no reviewer budget left"], "reviewer": self.name,
+                        "per_role": [], "skipped": skipped}
+            sink = kwargs.get("sink")
+            if sink is not None:
+                sink.write(findings)
+            return findings
+
+        results: list[dict] = []
+        with ThreadPoolExecutor(max_workers=min(self.max_parallel, len(reviewers))) as pool:
+            futures = {pool.submit(getattr(reviewer, method), work_order, **kwargs): role
+                       for role, reviewer in reviewers}
+            for future in as_completed(futures):
+                role = futures[future]
+                try:
+                    results.append(future.result())
+                except Exception as exc:            # noqa: BLE001
+                    results.append({"verdict": "error", "role": role,
+                                    "reasons": [f"{type(exc).__name__}: {str(exc)[:160]}"]})
+        self.calls += len(reviewers)
+        self.last_results = results
+
+        reasons: list[str] = []
+        for item in results:
+            for reason in item.get("reasons") or []:
+                reasons.append(f"[{item.get('role', '?')}] {reason}")
+        verdict = "approve" if all(item.get("verdict") == "approve" for item in results) else "reject"
+        findings = {"verdict": verdict, "level": work_order.level,
+                    "task_id": work_order.task_id, "reasons": reasons[:10],
+                    "reviewer": self.name, "per_role": results, "skipped": skipped}
+        sink = kwargs.get("sink")
+        if sink is not None:
+            sink.write(findings)
+        return findings
+
+    def review(self, work_order, *, diff, new_content, old_content, level, sink) -> dict:
+        return self._run("review", work_order, diff=diff, new_content=new_content,
+                         old_content=old_content, level=level, sink=sink)
+
+    def review_set(self, work_order, *, diffs, new_contents, old_contents, level, sink) -> dict:
+        return self._run("review_set", work_order, diffs=diffs,
+                         new_contents=new_contents, old_contents=old_contents,
+                         level=level, sink=sink)

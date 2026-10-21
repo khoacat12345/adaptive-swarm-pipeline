@@ -377,6 +377,20 @@ HTML = r"""<!doctype html>
   #modalBody{overflow:auto;padding:12px 14px;font:12px/1.5 Consolas,monospace;white-space:pre-wrap}
   .draftrow{padding:6px 4px;border-bottom:1px solid var(--line);cursor:pointer;color:#9fe3c0}
   body{padding-bottom:52px}
+  /* motion */
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #38bdf855}50%{box-shadow:0 0 0 4px #38bdf800}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .step{transition:background .15s,border-color .15s,color .15s}
+  .step.active .num{animation:pulse 1.6s ease-in-out infinite}
+  .bubble{animation:fadeUp .18s ease-out}
+  .qchip{transition:background .2s,color .2s}
+  .plan button,.ctl{transition:filter .15s,transform .05s}
+  .plan button:hover,.ctl:hover{filter:brightness(1.15)}
+  .plan button:active,.ctl:active{transform:translateY(1px)}
+  .goalbar input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 2px #38bdf833}
+  .run,.roadmap .ritem{transition:background .15s}
+  .run:hover,.roadmap .ritem:hover{background:#0e1c29}
+  html{scroll-behavior:smooth}
   ::-webkit-scrollbar{width:10px;height:10px}
   ::-webkit-scrollbar-thumb{background:#1c2937;border-radius:8px}
   ::-webkit-scrollbar-track{background:transparent}

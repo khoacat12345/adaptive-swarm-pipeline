@@ -433,7 +433,8 @@ def _default_coder(chain: list[str]):
 def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             verify_timeout: int | None = None, log: bool = True,
             use_router: bool = True, allow_escalate: bool = False,
-            force: bool = False, dry_run: bool = False) -> dict:
+            force: bool = False, dry_run: bool = False,
+            reviewer_kind: str = "heuristic") -> dict:
     problems = validate_plan(plan)
     if problems:
         raise ValueError("plan khong hop le: " + "; ".join(problems[:8]))
@@ -465,6 +466,9 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
         ledger.append_event("job.start", run_id=f"job_{plan.get('job_id')}", result={"status": "info"},
                             data={"job_id": plan.get("job_id"),
                                   "subtasks": len(plan["subtasks"])}, root=root)
+
+    review = (reviewer if reviewer is not None
+              else workers.build_reviewer(reviewer_kind))
 
     for index, item in enumerate(ordered, start=1):
         control = read_control(root)
@@ -499,7 +503,6 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
         chain = route_plan["chain"] if route_plan else []
         coder = (coder_factory(order, chain) if coder_factory
                  else _default_coder(chain))
-        review = reviewer if reviewer is not None else workers.HeuristicReviewer()
         sub_started = time.perf_counter()
         try:
             report = recipe_c.run(order, coder=coder, reviewer=review,
@@ -576,6 +579,8 @@ def main(argv=None) -> int:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--allow-escalate", action="store_true")
+    parser.add_argument("--reviewer", default="heuristic",
+                        choices=("heuristic", "wave", "none"))
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -619,7 +624,8 @@ def main(argv=None) -> int:
             return 2
 
         report = run_job(plan, root=args.root, allow_escalate=args.allow_escalate,
-                         force=args.force, dry_run=args.dry_run)
+                         force=args.force, dry_run=args.dry_run,
+                         reviewer_kind=args.reviewer)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:

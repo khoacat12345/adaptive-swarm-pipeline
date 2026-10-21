@@ -85,6 +85,8 @@ python .agents/tests/test_phase5.py         # 57/57 (router + FallbackReviewer +
 python .agents/tests/test_quota.py          # 15/15 (quota that + route theo quota)
 python .agents/tests/test_phase6.py         # 57/57 (plan + duyet + state/control + chay)
 python .agents/tests/test_planner.py        # 16/16 (goal -> plan + webhook)
+python .agents/tests/test_wave.py           # 19/19 (4 reviewer song song)
+python .agents/tests/test_telegram.py       # 14/14 (bot 2 chieu)
 ```
 
 ## Bat bien (khong duoc vi pham)
@@ -124,6 +126,7 @@ python .agents/tests/test_planner.py        # 16/16 (goal -> plan + webhook)
 | `.agents/job.py` | plan + duyet tren dashboard + chay tuan tu |
 | `.agents/planner.py` | goal -> plan.json (W4 planner) |
 | `.agents/notify.py` | webhook 1 chieu (Discord/Telegram/generic) |
+| `.agents/telegram_bot.py` | bot Telegram 2 chieu (/approve /pause /say) |
 | `.agents/fallback.py` | chuoi du phong + health thu dong |
 | `.agents/safe_writer.py` | nguoi ghi file duy nhat (backup/atomic/rollback) |
 | `.agents/draft/` | ban nhap cua Coder (de xem diff) |
