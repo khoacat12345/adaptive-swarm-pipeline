@@ -70,6 +70,14 @@ def token_path(root) -> Path:
     return _dir(root) / "plan_token.txt"
 
 
+def state_path(root) -> Path:
+    return _dir(root) / "job_state.json"
+
+
+def control_path(root) -> Path:
+    return _dir(root) / "control.json"
+
+
 def load_plan(path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -90,8 +98,118 @@ def read_plan_state(root) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Validate + topo
+# State + control (dashboard <-> job)
 # --------------------------------------------------------------------------
+DEFAULT_CONTROL = {"paused": False, "stop": False, "opinion": ""}
+
+
+def read_state(root) -> dict:
+    try:
+        return json.loads(state_path(root).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def write_state(root, payload: dict) -> dict:
+    payload = dict(payload)
+    payload["updated_at"] = ledger.utc_now_iso()
+    path = state_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
+
+def read_control(root) -> dict:
+    try:
+        data = json.loads(control_path(root).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return dict(DEFAULT_CONTROL)
+    return {**DEFAULT_CONTROL, **data} if isinstance(data, dict) else dict(DEFAULT_CONTROL)
+
+
+def write_control(root, payload: dict) -> dict:
+    payload = dict(payload)
+    payload["updated_at"] = ledger.utc_now_iso()
+    path = control_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
+
+def _require_token(root, token: str) -> None:
+    try:
+        expected = token_path(root).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ValueError("no plan submitted yet") from exc
+    if not token or token != expected:
+        raise PermissionError("token mismatch")
+
+
+def set_control(root, action: str, *, token: str, value: str | None = None) -> dict:
+    """Dashboard -> job: pause / resume / stop / opinion (token bat buoc)."""
+    _require_token(root, token)
+    control = read_control(root)
+    action = str(action or "").lower()
+    if action == "pause":
+        control["paused"] = True
+    elif action == "resume":
+        control["paused"] = False
+    elif action == "stop":
+        control["stop"] = True
+    elif action == "opinion":
+        control["opinion"] = str(value or "")[:2000]
+    else:
+        raise ValueError(f"unknown action: {action}")
+    write_control(root, control)
+    ledger.append_event("control.updated", run_id=f"job_{read_state(root).get('job_id')}",
+                        result={"status": "info"},
+                        data={"action": action, "paused": control["paused"],
+                              "stop": control["stop"],
+                              "opinion": control["opinion"][:200]}, root=root)
+    return control
+
+
+def wait_for_resume(root, *, timeout: float = 900, poll: float = 1.0) -> str:
+    """Cho nguoi dung Resume tren dashboard. Tra resumed / stop / timeout."""
+    deadline = time.time() + max(1.0, float(timeout))
+    while time.time() < deadline:
+        control = read_control(root)
+        if control.get("stop"):
+            return "stop"
+        if not control.get("paused"):
+            return "resumed"
+        time.sleep(poll)
+    return "timeout"
+
+
+# --------------------------------------------------------------------------
+# Drafts (read-only for the dashboard)
+# --------------------------------------------------------------------------
+def drafts_root(root) -> Path:
+    return Path(root).resolve() / ".agents" / "draft"
+
+
+def list_drafts(root, job_id: str) -> list[dict]:
+    base = drafts_root(root)
+    items: list[dict] = []
+    if not base.exists():
+        return items
+    for path in base.glob(f"{job_id}-*/**/*"):
+        if not path.is_file():
+            continue
+        items.append({"path": str(path.relative_to(base)).replace("\\", "/"),
+                      "size": path.stat().st_size})
+    return sorted(items, key=lambda item: item["path"])
+
+
+def read_draft(root, relative: str) -> str:
+    base = drafts_root(root).resolve()
+    target = (base / relative).resolve()
+    if base != target and base not in target.parents:
+        raise ValueError("path escapes draft directory")
+    if not target.is_file():
+        raise FileNotFoundError(relative)
+    return target.read_text(encoding="utf-8", errors="replace")
 def validate_plan(plan: dict) -> list[str]:
     problems: list[str] = []
     if not isinstance(plan, dict):
@@ -224,6 +342,18 @@ def submit_plan(plan: dict, root, *, token: str | None = None, source: str | Non
                             data={"job_id": plan.get("job_id"),
                                   "subtasks": [item.get("id") for item in plan["subtasks"]]},
                             root=root)
+    write_control(root, dict(DEFAULT_CONTROL))
+    write_state(root, {
+        "job_id": plan.get("job_id"),
+        "phase": "awaiting_approval",
+        "index": 0,
+        "total": len(plan["subtasks"]),
+        "current": None,
+        "subtasks": [{"id": item.get("id"), "status": "pending",
+                      "files": item.get("target_files") or []}
+                     for item in plan["subtasks"]],
+        "team": {},
+    })
     return {"job_id": plan.get("job_id"), "token": token,
             "plan_path": str(plan_path(root)), "subtasks": len(plan["subtasks"])}
 
@@ -253,6 +383,9 @@ def decide(root, decision: str, *, token: str, log: bool = True) -> dict:
                             run_id=f"job_{payload.get('job_id')}",
                             result={"status": "pass" if status == "approved" else "fail"},
                             data={"job_id": payload["job_id"]}, root=root)
+    job_state = read_state(root)
+    if job_state:
+        write_state(root, {**job_state, "phase": status})
     return payload
 
 
@@ -305,20 +438,57 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
     started = time.perf_counter()
     records: list[dict] = []
     status = "applied"
+    ordered = topo_order(plan["subtasks"])
+
+    state = write_state(root, {
+        "job_id": plan.get("job_id"),
+        "phase": "running",
+        "index": 0,
+        "total": len(ordered),
+        "current": None,
+        "subtasks": [{"id": item["id"], "status": "pending",
+                      "files": item.get("target_files") or []} for item in ordered],
+        "team": {},
+    })
+
+    def update_state(**changes) -> dict:
+        nonlocal state
+        state = write_state(root, {**state, **changes})
+        return state
 
     if log:
         ledger.append_event("job.start", run_id=f"job_{plan.get('job_id')}", result={"status": "info"},
                             data={"job_id": plan.get("job_id"),
                                   "subtasks": len(plan["subtasks"])}, root=root)
 
-    for item in topo_order(plan["subtasks"]):
+    for index, item in enumerate(ordered, start=1):
+        control = read_control(root)
+        if control.get("stop"):
+            status = "stopped"
+            update_state(phase="stopped", current=None)
+            break
+        if control.get("paused"):
+            update_state(phase="paused", current=item["id"], index=index)
+            waited = wait_for_resume(root)
+            if waited != "resumed":
+                status = "stopped" if waited == "stop" else "paused"
+                update_state(phase="stopped" if waited == "stop" else "paused")
+                break
+            update_state(phase="running")
+
+        update_state(phase="running", index=index, current=item["id"])
         order = to_order(item, plan)
+        opinion = str(control.get("opinion") or "").strip()
+        if opinion:
+            order.input_context = (f"USER DIRECTION (must follow): {opinion}\n"
+                                   f"{order.input_context}")
         route_plan = (router.route(order, quota=tracker, allow_escalate=allow_escalate)
                       if use_router else None)
         if route_plan and route_plan.get("exhausted") and not force:
             records.append({"id": item["id"], "status": "blocked",
-                            "error": "het quota", "route": route_plan})
+                            "error": "out of quota", "route": route_plan})
             status = "blocked"
+            update_state(phase="stopped", current=None)
             break
 
         chain = route_plan["chain"] if route_plan else []
@@ -334,6 +504,7 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             records.append({"id": item["id"], "status": "error",
                             "error": str(exc)[:300], "route": route_plan})
             status = "error"
+            update_state(phase="stopped", current=None)
             break
         records.append({
             "id": item["id"],
@@ -345,8 +516,22 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             "route": route_plan,
             "error": report.get("error"),
         })
+        entry = records[-1]
+        team = state.get("team") or {}
+        if chain:
+            team = {"coder": chain[0],
+                    "fallback": chain[1] if len(chain) > 1 else None,
+                    "reviewer": getattr(review, "kind", "reviewer"),
+                    "verify": order.verify_command}
+        subtasks_state = [dict(sub) for sub in state.get("subtasks", [])]
+        for sub in subtasks_state:
+            if sub["id"] == item["id"]:
+                sub.update({"status": entry["status"], "file": entry.get("file"),
+                            "requests": entry.get("requests"), "chain": list(chain)})
+        update_state(subtasks=subtasks_state, team=team)
         if report.get("status") not in ("applied", "dry-run"):
             status = "stopped"
+            update_state(phase="stopped", current=None)
             break
 
     payload = {
@@ -355,6 +540,9 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
         "subtasks": records,
         "duration_ms": int((time.perf_counter() - started) * 1000),
     }
+    final_phase = ("done" if status in ("applied", "dry-run")
+                   else "paused" if status == "paused" else "stopped")
+    update_state(phase=final_phase, status=status, current=None)
     if log:
         ledger.append_event("job.done", run_id=f"job_{plan.get('job_id')}",
                             result={"status": "pass" if status == "applied" else "fail",

@@ -564,6 +564,18 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
 - **Timestamps**: gio bat dau run, gio tung event trong chat, gio cap nhat plan, gio
   doc quota (checked).
 
+### Mission control (stepper / roadmap / control bar)
+
+- **Stepper 5 buoc**: Analyze -> Plan -> War room -> Verify -> Done (bam de xem tom tat).
+- **Project roadmap**: checklist subtask + file, tu cap nhat theo `job_state.json`.
+- **Team lineup**: coder / fallback / reviewer cua buoc hien tai.
+- **Drafts**: xem ban nhap trong `.agents/draft/` (read-only, chan path escape).
+- **Control bar**: Pause/Resume, Stop, va o "Leader direction" — y kien duoc chen vao
+  `input_context` cua subtask ke tiep.
+
+State: `.agents/tmp/job_state.json`; control: `.agents/tmp/control.json` (ghi bang token
+tu plan; dashboard khong tra token). Pause co hieu luc **sau subtask hien tai**.
+
 ### Work Order (5 truong)
 
 `objective`, `boundaries`, `input_context`, `acceptance_criteria`, `verify_command`.
@@ -1234,5 +1246,6 @@ subtask 1 Work Order + transaction va tu route W0-W8 + quota. Timeout = tu choi.
 Nghiem thu **32/32 PASS** (gom Phase 5 hoi quy).
 
 **Chua lam (co y):** executor song song (Level 3 chay tuan tu trong 1 giao dich),
-backoff luy tien cho cooldown, do model tra phi tren task that (benchmark hien chi
-la smoke vi chi phi agentic cao).
+backoff luy tien cho cooldown, 5 sub-agent song song (QA/security/perf/doc), bridge
+Telegram/Discord, va do model tra phi tren task that (benchmark hien chi la smoke vi
+chi phi agentic cao).

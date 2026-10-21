@@ -185,14 +185,22 @@ def test_approval(checks: Checks) -> None:
 
 def test_run_job(checks: Checks) -> None:
     root = make_root("run")
+    captured: list[str] = []
 
     def factory(order, chain):
+        captured.append(order.input_context)
         sub = order.task_id.split("-")[-1]
         return workers.ScriptedCoder({order.task_id: [
             {"format": "whole", "content": FIXES[sub]}]})
 
+    job.write_control(root, {"paused": False, "stop": False, "opinion": "use pandas"})
     report = job.run_job(make_plan(), root=root, coder_factory=factory,
                          use_router=False, log=True)
+    checks.check("run: opinion injected",
+                 bool(captured) and all("USER DIRECTION" in item for item in captured),
+                 captured)
+    checks.check("run: state done", job.read_state(root).get("phase") == "done",
+                 job.read_state(root))
     checks.check("run: applied", report["status"] == "applied", report)
     checks.check("run: 2 subtask", len(report["subtasks"]) == 2, report["subtasks"])
     checks.check("run: ca 2 file doi",
@@ -218,6 +226,52 @@ def test_run_job(checks: Checks) -> None:
                  report["subtasks"][0]["status"] == "applied", report["subtasks"])
     checks.check("run: buoc 2 khong applied",
                  report["subtasks"][1]["status"] != "applied", report["subtasks"])
+
+
+def test_state_control(checks: Checks) -> None:
+    root = make_root("state")
+    job.submit_plan(make_plan(), root, token="tokstate", source="plan.json")
+    state = job.read_state(root)
+    checks.check("state: awaiting_approval", state.get("phase") == "awaiting_approval", state)
+    checks.check("state: 2 subtasks pending", len(state.get("subtasks") or []) == 2, state)
+
+    job.decide(root, "approve", token="tokstate")
+    checks.check("state: approved", job.read_state(root).get("phase") == "approved",
+                 job.read_state(root))
+
+    try:
+        job.set_control(root, "pause", token="bad")
+        blocked = False
+    except PermissionError:
+        blocked = True
+    checks.check("control: bad token blocked", blocked)
+
+    job.set_control(root, "pause", token="tokstate")
+    checks.check("control: paused", job.read_control(root)["paused"] is True)
+    job.set_control(root, "opinion", token="tokstate", value="use pandas")
+    checks.check("control: opinion", job.read_control(root)["opinion"] == "use pandas")
+    job.set_control(root, "resume", token="tokstate")
+    checks.check("control: resumed", job.read_control(root)["paused"] is False)
+    checks.check("control: wait_for_resume",
+                 job.wait_for_resume(root, timeout=1, poll=0.05) == "resumed")
+    job.set_control(root, "stop", token="tokstate")
+    checks.check("control: stop", job.wait_for_resume(root, timeout=1, poll=0.05) == "stop")
+
+
+def test_drafts(checks: Checks) -> None:
+    root = make_root("drafts")
+    path = root / ".agents" / "draft" / "J1-S1" / "a.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("x = 1\n", encoding="utf-8")
+    items = job.list_drafts(root, "J1")
+    checks.check("drafts: list", any(item["path"].endswith("a.py") for item in items), items)
+    checks.check("drafts: read", job.read_draft(root, "J1-S1/a.py") == "x = 1\n")
+    try:
+        job.read_draft(root, "../../../etc/passwd")
+        raised = False
+    except (ValueError, FileNotFoundError):
+        raised = True
+    checks.check("drafts: chan path escape", raised)
 
 
 def test_dashboard_api(checks: Checks) -> None:
@@ -248,9 +302,26 @@ def test_dashboard_api(checks: Checks) -> None:
             html = response.read().decode("utf-8")
         checks.check("dashboard: HTML co planPanel", 'id="planPanel"' in html)
 
-        def post(payload):
+        with urllib.request.urlopen(base + "/api/job", timeout=5) as response:
+            job_data = json.loads(response.read().decode("utf-8"))
+        checks.check("dashboard: /api/job state",
+                     (job_data.get("state") or {}).get("phase") == "awaiting_approval",
+                     job_data.get("state"))
+        checks.check("dashboard: /api/job control",
+                     "paused" in (job_data.get("control") or {}), job_data.get("control"))
+
+        draft = root / ".agents" / "draft" / "J1-S1" / "a.py"
+        draft.parent.mkdir(parents=True, exist_ok=True)
+        draft.write_text("draft\n", encoding="utf-8")
+        with urllib.request.urlopen(base + "/api/draft?job_id=J1", timeout=5) as response:
+            drafts = json.loads(response.read().decode("utf-8"))
+        checks.check("dashboard: draft list",
+                     any(item["path"].endswith("a.py") for item in drafts.get("drafts") or []),
+                     drafts)
+
+        def post(payload, path="/api/plan/decision"):
             request = urllib.request.Request(
-                base + "/api/plan/decision", method="POST",
+                base + path, method="POST",
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"})
             try:
@@ -265,6 +336,12 @@ def test_dashboard_api(checks: Checks) -> None:
         checks.check("dashboard: dung token -> 200", status == 200, body)
         checks.check("dashboard: decision approved",
                      job.read_plan_state(root)["decision"]["status"] == "approved")
+
+        status, _ = post({"action": "pause", "token": "sai"}, "/api/control")
+        checks.check("dashboard: control sai token -> 403", status == 403, status)
+        status, body = post({"action": "pause", "token": "dash-token"}, "/api/control")
+        checks.check("dashboard: control pause -> 200", status == 200, body)
+        checks.check("dashboard: paused", job.read_control(root)["paused"] is True)
     finally:
         server.shutdown()
         server.server_close()
@@ -303,19 +380,23 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     checks = Checks()
-    print("[1/7] validate plan ...")
+    print("[1/9] validate plan ...")
     test_validate(checks)
-    print("[2/7] topo order ...")
+    print("[2/9] topo order ...")
     test_topo(checks)
-    print("[3/7] approval flow ...")
+    print("[3/9] approval flow ...")
     test_approval(checks)
-    print("[4/7] run job ...")
+    print("[4/9] state + control ...")
+    test_state_control(checks)
+    print("[5/9] drafts ...")
+    test_drafts(checks)
+    print("[6/9] run job ...")
     test_run_job(checks)
-    print("[5/7] dashboard API ...")
+    print("[7/9] dashboard API ...")
     test_dashboard_api(checks)
-    print("[6/7] auto-open dashboard ...")
+    print("[8/9] auto-open dashboard ...")
     test_auto_dashboard(checks)
-    print("[7/7] khong hoi quy ...")
+    print("[9/9] khong hoi quy ...")
     test_no_regression(checks, fast=args.fast)
 
     print("")

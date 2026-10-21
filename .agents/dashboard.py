@@ -331,6 +331,46 @@ HTML = r"""<!doctype html>
   .plan .quick .copy{margin-left:8px;background:#1c2937;color:#c7d2fe;border:0;border-radius:6px;
                      padding:2px 8px;font-size:10px;cursor:pointer}
   .plan .quick .copy.copied{background:#14532d;color:#9be7c4}
+  /* stepper */
+  .stepper{display:flex;align-items:center;gap:6px;margin:12px 18px 0;flex-wrap:wrap}
+  .step{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;
+        background:var(--panel);border:1px solid var(--line);color:var(--dim);font-size:11px;cursor:pointer}
+  .step .num{display:inline-flex;width:16px;height:16px;align-items:center;justify-content:center;
+             border-radius:50%;background:#16202c;font-size:9px}
+  .step.active{border-color:#38bdf8;color:#e2f3ff;background:#0e1c29}
+  .step.active .num{background:#38bdf8;color:#04121f}
+  .step.done{border-color:#14532d;color:#9be7c4}
+  .step.done .num{background:#14532d;color:#9be7c4}
+  .arrow{color:#334155;font-size:12px}
+  /* roadmap */
+  .roadmap{padding:6px 10px 10px;max-height:34vh;overflow:auto}
+  .roadmap .rhead{font-size:11px;color:#c7d2fe;margin:4px 0 8px}
+  .roadmap .ritem{display:flex;gap:8px;align-items:flex-start;padding:5px 0;
+                  border-bottom:1px solid var(--line);font-size:11px}
+  .roadmap .ricon{width:14px;text-align:center;color:var(--dim)}
+  .roadmap .ritem.applied .ricon{color:#34d399}
+  .roadmap .ritem.stopped .ricon,.roadmap .ritem.error .ricon{color:#f87171}
+  .roadmap .ritem .meta{font-size:10px;color:var(--dim);margin-top:2px}
+  /* control bar */
+  .controls{position:fixed;left:0;right:0;bottom:0;display:flex;gap:8px;align-items:center;
+            padding:8px 16px;background:#0b1220ee;border-top:1px solid var(--line);
+            backdrop-filter:blur(6px);z-index:20}
+  .controls input{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+                  color:var(--fg);padding:7px 10px;font-size:12px}
+  .ctl{background:#1c2937;color:#c7d2fe;border:0;border-radius:8px;padding:7px 14px;
+       font-size:11px;cursor:pointer;font-weight:600}
+  .ctl.danger{background:#4c1d1d;color:#ffb4b4}
+  .ctl.copied{background:#14532d;color:#9be7c4}
+  /* modal */
+  .modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;
+         justify-content:center;z-index:30}
+  .modalbox{width:min(900px,92vw);max-height:80vh;background:var(--panel);
+            border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;overflow:hidden}
+  .modalhead{display:flex;justify-content:space-between;align-items:center;
+             padding:10px 14px;border-bottom:1px solid var(--line)}
+  #modalBody{overflow:auto;padding:12px 14px;font:12px/1.5 Consolas,monospace;white-space:pre-wrap}
+  .draftrow{padding:6px 4px;border-bottom:1px solid var(--line);cursor:pointer;color:#9fe3c0}
+  body{padding-bottom:52px}
   ::-webkit-scrollbar{width:10px;height:10px}
   ::-webkit-scrollbar-thumb{background:#1c2937;border-radius:8px}
   ::-webkit-scrollbar-track{background:transparent}
@@ -341,10 +381,14 @@ HTML = r"""<!doctype html>
   <h1><span>&#9679;</span> Adaptive Swarm <span>Pipeline</span></h1>
   <div id="statusMessage"><span class="dot"></span>loading...</div>
 </header>
+<div id="stepper" class="stepper"></div>
 <div id="planPanel" class="plan" style="display:none"></div>
 <div id="quotaBar" class="quota"></div>
+<div id="teamBar" class="quota" style="display:none"></div>
 <main>
   <section class="col" id="sidebar">
+    <div class="colhead">Project roadmap</div>
+    <div id="roadmap" class="roadmap"><div class="empty">No active plan</div></div>
     <div class="colhead">Run history
       <label style="float:right;text-transform:none;letter-spacing:0;color:var(--dim);cursor:pointer">
         <input type="checkbox" id="showAll"> all</label>
@@ -362,6 +406,20 @@ HTML = r"""<!doctype html>
     <div id="inspector"><div class="empty">No data yet</div></div>
   </section>
 </main>
+<div id="controls" class="controls">
+  <button id="pauseBtn" class="ctl" onclick="togglePause()">Pause</button>
+  <button class="ctl danger" onclick="stopJob()">Stop</button>
+  <input id="opinion" placeholder="Leader direction for the next subtask...">
+  <button class="ctl" onclick="sendOpinion()">Send</button>
+  <span id="controlMsg" class="qk"></span>
+</div>
+<div id="modal" class="modal" onclick="if(event.target.id==='modal') closeModal()">
+  <div class="modalbox">
+    <div class="modalhead"><b id="modalTitle">Drafts</b>
+      <button class="ctl" onclick="closeModal()">Close</button></div>
+    <div id="modalBody"></div>
+  </div>
+</div>
 <script>
 const NODE = {
   lead:{c:'#38bdf8',n:'Lead',a:'LD'}, coder:{c:'#a78bfa',n:'Coder',a:'CD'},
@@ -373,11 +431,16 @@ let state = {runs:[], selected:null, data:null, timer:null, showAll:false,
              sig:{runs:'', detail:''}};
 
 const el = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+  '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+}[c]));
 const sigOf = (value) => { try { return JSON.stringify(value); } catch (_) { return String(value); } };
 const token = new URLSearchParams(location.search).get('token') || '';
 let planSig = '';
 let quotaSig = '';
+let jobSig = '';
+let jobState = null;
+let currentJobId = '';
 const fmt = (ms) => ms >= 60000 ? (ms/60000).toFixed(1)+'m' : ms >= 1000 ? (ms/1000).toFixed(1)+'s' : (ms||0)+'ms';
 const num = (n) => (n||0).toLocaleString('en-US');
 const clock = (iso) => iso ? new Date(iso).toLocaleTimeString() : '';
@@ -569,6 +632,181 @@ async function renderQuota(){
   }catch(_){ /* quota endpoint optional */ }
 }
 
+const STEPS = ['Analyze', 'Plan', 'War room', 'Verify', 'Done'];
+
+function phaseStep(phase){
+  if(!phase) return 0;
+  if(phase === 'awaiting_approval' || phase === 'rejected') return 1;
+  if(phase === 'approved' || phase === 'running' || phase === 'paused') return 2;
+  if(phase === 'done') return 4;
+  if(phase === 'stopped') return 3;
+  return 2;
+}
+
+function renderStepper(data){
+  const phase = (data.state && data.state.phase)
+    || (data.decision && data.decision.status) || '';
+  const step = phaseStep(phase);
+  el('stepper').innerHTML = STEPS.map((name, index) => {
+    const cls = index < step ? 'done' : (index === step ? 'active' : '');
+    return `<div class="step ${cls}" onclick="showStep(${index})">
+      <span class="num">${index + 1}</span>${name}</div>`;
+  }).join('<span class="arrow">&#8250;</span>');
+}
+
+function showStep(index){
+  const data = jobState || {};
+  const plan = data.plan || {};
+  const state = data.state || {};
+  const subtasks = state.subtasks || plan.subtasks || [];
+  let text = '';
+  if(index === 0) text = `Analyze: ${plan.objective || 'no plan'}`;
+  else if(index === 1) text = `Plan: ${subtasks.length} subtask(s)`;
+  else if(index === 2){
+    text = state.current ? `War room: working on ${state.current}` : 'War room: idle';
+  } else if(index === 3){
+    text = `Verify: ${(state.team && state.team.verify) || 'machine verify per subtask'}`;
+  } else {
+    text = `Done: ${state.status || state.phase || 'pending'}`;
+  }
+  el('controlMsg').textContent = text;
+}
+
+function renderRoadmap(data){
+  const box = el('roadmap');
+  const plan = data.plan;
+  const state = data.state || {};
+  if(!plan){
+    box.innerHTML = '<div class="empty">No active plan</div>';
+    return;
+  }
+  const subs = (state.subtasks && state.subtasks.length)
+    ? state.subtasks
+    : (plan.subtasks || []).map((item) => ({...item, status: 'pending'}));
+  const icon = (status) => (status === 'applied' || status === 'done') ? '&#10003;'
+    : (status === 'stopped' || status === 'error' || status === 'blocked') ? '&#10007;'
+    : (status === 'running') ? '&#8230;' : '&#8226;';
+  box.innerHTML = `<div class="rhead">${esc(plan.job_id)} &middot; ${esc(plan.objective || '')}</div>`
+    + subs.map((sub) => {
+      const files = (sub.files || sub.target_files || []).join(', ');
+      const status = sub.status || 'pending';
+      return `<div class="ritem ${esc(status)}">
+        <span class="ricon">${icon(status)}</span>
+        <div><b>${esc(sub.id)}</b> ${esc(sub.title || '')}
+          <div class="meta">${esc(files)}</div></div></div>`;
+    }).join('')
+    + `<div style="margin-top:8px"><button class="ctl" onclick="showDrafts()">View drafts</button></div>`;
+}
+
+function renderTeam(data){
+  const team = (data.state && data.state.team) || {};
+  const bar = el('teamBar');
+  if(!team.coder && !team.reviewer){
+    bar.style.display = 'none';
+    return;
+  }
+  const short = (model) => model ? model.split('/').pop() : '-';
+  bar.style.display = 'flex';
+  bar.innerHTML = `<span class="qk">team lineup</span>
+    <span class="qchip">coder ${esc(short(team.coder))}</span>
+    ${team.fallback ? `<span class="qchip">fallback ${esc(short(team.fallback))}</span>` : ''}
+    <span class="qchip">reviewer ${esc(team.reviewer || 'heuristic')}</span>
+    <span class="qchip">verify machine</span>`;
+}
+
+function renderControlState(data){
+  const control = data.control || {};
+  const button = el('pauseBtn');
+  button.textContent = control.paused ? 'Resume' : 'Pause';
+  button.classList.toggle('danger', !!control.paused);
+  el('opinion').placeholder = control.opinion
+    ? `Current direction: ${control.opinion}`
+    : 'Leader direction for the next subtask...';
+}
+
+async function renderJob(){
+  try{
+    const data = await getJSON('/api/job');
+    jobState = data;
+    currentJobId = (data.state && data.state.job_id)
+      || (data.plan && data.plan.job_id) || '';
+    const sig = sigOf(data);
+    if(sig === jobSig) return;
+    jobSig = sig;
+    renderStepper(data);
+    renderRoadmap(data);
+    renderTeam(data);
+    renderControlState(data);
+  }catch(_){ /* job endpoint optional */ }
+}
+
+async function setControl(action, value){
+  try{
+    const response = await fetch('/api/control', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: action, token: token, value: value || ''})
+    });
+    const data = await response.json();
+    if(!response.ok){
+      el('controlMsg').textContent = data.error || ('HTTP ' + response.status);
+      return;
+    }
+    el('controlMsg').textContent = action + ' ok';
+    jobSig = '';
+    await renderJob();
+  }catch(err){ el('controlMsg').textContent = err.message; }
+}
+
+function togglePause(){
+  const paused = !!(jobState && jobState.control && jobState.control.paused);
+  setControl(paused ? 'resume' : 'pause');
+}
+
+function stopJob(){
+  if(confirm('Stop after the current subtask?')) setControl('stop');
+}
+
+function sendOpinion(){
+  const input = el('opinion');
+  const value = input.value.trim();
+  if(!value) return;
+  setControl('opinion', value);
+  input.value = '';
+}
+
+function openModal(html, title){
+  el('modalTitle').textContent = title || 'Drafts';
+  el('modalBody').innerHTML = html;
+  el('modal').style.display = 'flex';
+}
+
+function closeModal(){
+  el('modal').style.display = 'none';
+  el('modalBody').innerHTML = '';
+}
+
+async function showDrafts(){
+  if(!currentJobId){ openModal('No active job', 'Drafts'); return; }
+  try{
+    const data = await getJSON('/api/draft?job_id=' + encodeURIComponent(currentJobId));
+    const drafts = data.drafts || [];
+    if(!drafts.length){ openModal('No drafts yet', 'Drafts'); return; }
+    openModal(drafts.map((item) => `<div class="draftrow" data-path="${esc(item.path)}">
+      ${esc(item.path)} <span class="qk">${item.size} B</span></div>`).join('')
+      + '<div class="qk" style="margin-top:8px">Click a file to preview</div>', 'Drafts');
+    el('modalBody').querySelectorAll('.draftrow').forEach((node) => {
+      node.onclick = () => openDraft(node.dataset.path);
+    });
+  }catch(err){ openModal(esc(err.message), 'Drafts'); }
+}
+
+async function openDraft(path){
+  try{
+    const data = await getJSON('/api/draft?path=' + encodeURIComponent(path));
+    openModal(`<pre>${esc(data.content || '')}</pre>`, path);
+  }catch(err){ openModal(esc(err.message), path); }
+}
+
 async function selectRun(runId, force=false){  if(state.selected !== runId){ state.selected = runId; force = true; }
   renderRuns();
   if(force) el('statusMessage').innerHTML = '<span class="dot"></span>loading run...';
@@ -597,6 +835,7 @@ async function refresh(force=false){
     renderRuns(force);          // chi ve lai khi danh sach hoac selected doi
     renderPlan();
     renderQuota();
+    renderJob();
     if(!state.selected && state.runs.length) await selectRun(state.runs[0].run_id, true);
     else if(state.selected) await selectRun(state.selected);
   }catch(err){
@@ -698,6 +937,29 @@ def make_handler(root: Path, ledger: Path):
                                 "fetched_at": tracker.fetched_at,
                                 "shared": tracker.shared(),
                                 "models": entries})
+                elif route == "/api/job":
+                    import job as job_module
+                    plan_state = job_module.read_plan_state(root)
+                    self._json({
+                        "state": job_module.read_state(root),
+                        "plan": plan_state.get("plan"),
+                        "decision": plan_state.get("decision"),
+                        "control": job_module.read_control(root),
+                    })
+                elif route == "/api/draft":
+                    import job as job_module
+                    query = parse_qs(parsed.query)
+                    relative = (query.get("path") or [""])[0]
+                    job_id = (query.get("job_id") or [""])[0]
+                    try:
+                        if relative:
+                            self._json({"path": relative,
+                                        "content": job_module.read_draft(root, relative)})
+                        else:
+                            self._json({"job_id": job_id,
+                                        "drafts": job_module.list_drafts(root, job_id)})
+                    except (ValueError, FileNotFoundError) as exc:
+                        self._json({"error": str(exc)}, 404)
                 else:
                     self._send(404, b"not found", "text/plain; charset=utf-8")
             except Exception as exc:            # noqa: BLE001
@@ -716,6 +978,20 @@ def make_handler(root: Path, ledger: Path):
                         result = job_module.decide(
                             root, payload.get("decision") or "",
                             token=str(payload.get("token") or ""))
+                    except PermissionError as exc:
+                        self._json({"error": str(exc)}, 403)
+                        return
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 400)
+                        return
+                    self._json(result)
+                elif route == "/api/control":
+                    import job as job_module
+                    try:
+                        result = job_module.set_control(
+                            root, payload.get("action") or "",
+                            token=str(payload.get("token") or ""),
+                            value=payload.get("value"))
                     except PermissionError as exc:
                         self._json({"error": str(exc)}, 403)
                         return

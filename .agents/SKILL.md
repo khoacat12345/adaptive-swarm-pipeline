@@ -83,7 +83,7 @@ python .agents/tests/test_phase4.py         # 36/36 (gom ca 4 suite tren)
 python .agents/tests/test_level3.py         # 47/47 (Level 3 + hoi quy 5 suite)
 python .agents/tests/test_phase5.py         # 57/57 (router + FallbackReviewer + hoi quy)
 python .agents/tests/test_quota.py          # 15/15 (quota that + route theo quota)
-python .agents/tests/test_phase6.py         # 32/32 (plan + duyet + chay tuan tu)
+python .agents/tests/test_phase6.py         # 57/57 (plan + duyet + state/control + chay)
 ```
 
 ## Bat bien (khong duoc vi pham)
