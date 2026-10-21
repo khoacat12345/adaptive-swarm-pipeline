@@ -123,6 +123,13 @@ def _message(event: dict, norm: dict) -> str:
         return f"verify ban nhap ({data.get('mode', '?')}) exit={code}"
     if kind == "reviewer.findings":
         verdict = data.get("verdict") or norm["status"]
+        per_role = data.get("per_role") or []
+        if per_role:
+            roles = ", ".join(
+                f"{item.get('role')}({str(item.get('model') or '').split('/')[-1]})="
+                f"{item.get('verdict')}"
+                for item in per_role if isinstance(item, dict))
+            return f"wave {verdict}: {roles}"
         reasons = data.get("reasons") or []
         return f"ket luan {verdict}" + (f": {_short('; '.join(map(str, reasons)), 90)}"
                                         if reasons else "")

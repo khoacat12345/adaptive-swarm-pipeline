@@ -71,6 +71,22 @@ Without `--route`, the coder chain comes from `.agents/config.json`.
 Missing `verify_command` is rejected immediately. Level 1/2 take one target file;
 Level 3 takes two or more and runs as one atomic transaction.
 
+## Dashboard (mission control)
+
+Open it with `dashboard.cmd` (view-only) or `job.py --wait --open` (full control with a token).
+
+Left sidebar: **Overview, Plan, Chat, History, Quota, Drafts, Settings**.
+
+- **Chat** is a chronological timeline (oldest first) with `HH:MM:SS` on every event;
+  logs are not shown on the overview.
+- **History** reopens any run.
+- **Quota** has the shared plan budget and per-model bars.
+- Deep links: `/#overview`, `/#plan`, `/#chat`, `/#history`, `/#quota`, `/#drafts`, `/#settings`.
+
+![Quota view](docs/quota.png)
+
+![Swarm chat](docs/chat.png)
+
 ## Goal -> plan (W4 planner)
 
 ```bash

@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adaptive Swarm - Mission Control</title>
+<style>
+  :root{
+    --bg:#0a111a; --side:#080e16; --panel:#0f1926; --panel2:#0c1520;
+    --line:#1b2a3a; --fg:#e6eef7; --dim:#8ba0b6; --dim2:#5f7488;
+    --accent:#38bdf8; --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.55 "Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  button,input,select{font:inherit}
+  .app{display:flex;min-height:100vh}
+  /* sidebar */
+  .side{position:fixed;inset:0 auto 0 0;width:224px;background:var(--side);
+        border-right:1px solid var(--line);display:flex;flex-direction:column;
+        padding:16px 12px}
+  .brand{display:flex;gap:10px;align-items:center;padding:4px 6px 16px}
+  .logo{width:32px;height:32px;border-radius:9px;
+        background:linear-gradient(135deg,#38bdf8,#6366f1);display:grid;
+        place-items:center;font-weight:800;color:#04121f}
+  .brand b{display:block;font-size:13px;line-height:1.2}
+  .brand span{display:block;color:var(--dim2);font-size:10px;letter-spacing:.6px}
+  .nav{display:flex;flex-direction:column;gap:2px}
+  .nav button{display:flex;align-items:center;gap:10px;background:transparent;
+              border:0;color:var(--dim);padding:9px 10px;border-radius:8px;
+              cursor:pointer;font-size:12px;text-align:left;transition:background .15s,color .15s}
+  .nav button:hover{background:#0e1a27;color:var(--fg)}
+  .nav button.active{background:#122436;color:#e2f3ff;box-shadow:inset 2px 0 0 var(--accent)}
+  .nav svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;
+           stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+  .nav .badge{margin-left:auto;font-size:9px;padding:1px 6px;border-radius:999px;
+              background:#2a2310;color:#fbbf24}
+  .sidefoot{margin-top:auto;padding:10px 6px;font-size:10px;color:var(--dim2)}
+  .sidefoot b{color:var(--dim)}
+  /* main */
+  .main{margin-left:224px;flex:1;padding-bottom:64px;min-width:0}
+  .topbar{position:sticky;top:0;z-index:6;display:flex;justify-content:space-between;
+          align-items:center;gap:12px;padding:13px 22px;background:#0a111aee;
+          border-bottom:1px solid var(--line);backdrop-filter:blur(8px)}
+  .topbar h1{margin:0;font-size:15px;font-weight:650}
+  .topbar p{margin:1px 0 0;font-size:10.5px;color:var(--dim2)}
+  .topright{display:flex;align-items:center;gap:10px;font-size:10.5px;color:var(--dim)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);
+       box-shadow:0 0 8px #34d39988;display:inline-block}
+  .dot.off{background:var(--bad);box-shadow:0 0 8px #f8717188}
+  .view{display:none;padding:18px 22px 6px;animation:fade .16s ease-out}
+  .view.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:minmax(0,1.45fr) minmax(260px,1fr)}
+  .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        padding:14px;min-width:0}
+  .card h2{margin:0 0 10px;font-size:11px;text-transform:uppercase;
+           letter-spacing:1.1px;color:var(--dim);font-weight:650}
+  .muted{color:var(--dim2)}
+  .mono{font-family:Consolas,ui-monospace,monospace;font-size:11px}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .spread{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .pill{font-size:9.5px;padding:2px 8px;border-radius:999px;text-transform:uppercase;
+        letter-spacing:.5px;background:#16202c;color:var(--dim)}
+  .pill.ok,.pill.applied,.pill.pass,.pill.approved{background:#0f2a22;color:#9be7c4}
+  .pill.bad,.pill.failed,.pill.aborted,.pill.rejected{background:#2a1010;color:#ffb4b4}
+  .pill.warn,.pill.pending,.pill.paused{background:#2a2310;color:#fbbf24}
+  /* stepper */
+  .stepper{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .step{display:flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;
+        background:var(--panel);border:1px solid var(--line);color:var(--dim);
+        font-size:11px;cursor:pointer;transition:all .16s}
+  .step .n{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;
+           background:#16202c;font-size:9px}
+  .step.done{border-color:#14532d;color:#9be7c4}
+  .step.done .n{background:#14532d;color:#9be7c4}
+  .step.active{border-color:var(--accent);background:#0e1c29;color:#e2f3ff}
+  .step.active .n{background:var(--accent);color:#04121f;animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #38bdf855}50%{box-shadow:0 0 0 4px #38bdf800}}
+  /* goal */
+  .goal{display:flex;gap:8px;align-items:center}
+  .goal input{flex:1;background:var(--panel2);border:1px solid var(--line);
+              border-radius:9px;color:var(--fg);padding:9px 12px}
+  .goal input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px #38bdf822}
+  .btn{background:#16283a;color:#cfe3f6;border:0;border-radius:8px;padding:8px 14px;
+       font-size:11.5px;font-weight:600;cursor:pointer;transition:filter .15s,transform .05s}
+  .btn:hover{filter:brightness(1.18)}
+  .btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.55;cursor:default}
+  .btn.primary{background:#0b6d96;color:#e8f7ff}
+  .btn.ok{background:#14532d;color:#9be7c4}
+  .btn.bad{background:#4c1d1d;color:#ffb4b4}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
+  /* tables */
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;color:var(--dim2);font-size:9.5px;text-transform:uppercase;
+     letter-spacing:.7px;padding:6px;border-bottom:1px solid var(--line);font-weight:600}
+  td{padding:7px 6px;border-bottom:1px solid #12202e;vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  tbody tr.click{cursor:pointer;transition:background .12s}
+  tbody tr.click:hover{background:#0d1a27}
+  /* plan */
+  .planbox{display:flex;flex-direction:column;gap:10px}
+  .quick{background:var(--panel2);border:1px solid var(--line);border-radius:9px;
+         padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+  .quick .k{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--dim2)}
+  .quick code{font-family:Consolas,monospace;font-size:11px;color:#9fe3c0;
+              overflow-wrap:anywhere}
+  .copy{background:#1a2b3d;color:#c7d2fe;border:0;border-radius:6px;
+        padding:3px 9px;font-size:10px;cursor:pointer;margin-left:6px}
+  .copy.done{background:#14532d;color:#9be7c4}
+  /* chat */
+  .chathead{display:flex;justify-content:space-between;align-items:center;gap:10px;
+            margin-bottom:10px;flex-wrap:wrap}
+  .tabs{display:flex;gap:4px;background:var(--panel2);padding:3px;border-radius:8px}
+  .tabs button{background:transparent;border:0;color:var(--dim);padding:5px 12px;
+               border-radius:6px;font-size:11px;cursor:pointer}
+  .tabs button.active{background:#16283a;color:#e2f3ff}
+  .timeline{display:flex;flex-direction:column;max-height:calc(100vh - 285px);
+            overflow:auto;padding-right:4px}
+  .ev{display:grid;grid-template-columns:64px 18px minmax(0,1fr);gap:8px;
+      padding:5px 0;animation:fade .15s ease-out}
+  .ev-time{font:10.5px Consolas,monospace;color:var(--dim2);padding-top:6px;text-align:right}
+  .ev-line{position:relative;display:flex;justify-content:center}
+  .ev-line:before{content:"";position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+  .ev-dot{position:relative;width:8px;height:8px;border-radius:50%;margin-top:8px;
+          background:var(--c,#64748b);box-shadow:0 0 0 3px #0a111a}
+  .ev-card{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+           padding:8px 12px;min-width:0}
+  .ev-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px}
+  .ev-msg{font-size:12px;color:#d7e3ef;overflow-wrap:anywhere;white-space:pre-wrap}
+  .empty{color:var(--dim2);padding:26px;text-align:center;font-size:12px}
+  pre.diff{margin:0;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+           padding:10px 0;overflow:auto;font:11.5px/1.55 Consolas,monospace;
+           max-height:calc(100vh - 285px)}
+  pre.diff div{padding:0 12px;white-space:pre}
+  .add{background:#0f2a22;color:#9be7c4}.del{background:#2a1010;color:#ffb4b4}
+  .hunk{color:#7dd3fc;background:#0e1c29}.ctx{color:#9aa9ba}
+  /* quota */
+  .qbar{display:flex;align-items:center;gap:10px;margin:7px 0}
+  .qbar .lab{width:52px;font-size:10.5px;color:var(--dim2)}
+  .track{flex:1;height:8px;background:#0c1520;border:1px solid var(--line);
+         border-radius:999px;overflow:hidden}
+  .track i{display:block;height:100%;border-radius:999px;background:var(--ok);
+           transition:width .4s ease}
+  .track i.warn{background:var(--warn)}.track i.bad{background:var(--bad)}
+  .qbar .val{width:52px;text-align:right;font:10.5px Consolas,monospace;color:var(--dim)}
+  .qhead{display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center}
+  /* drafts */
+  .draftrow{display:flex;justify-content:space-between;gap:10px;padding:9px 10px;
+            border:1px solid var(--line);border-radius:8px;margin-bottom:6px;
+            cursor:pointer;transition:background .12s}
+  .draftrow:hover{background:#0d1a27}
+  /* settings */
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;font-size:12px}
+  .kv .k{color:var(--dim2);font-size:11px}
+  /* bottom control */
+  .control{position:fixed;left:224px;right:0;bottom:0;z-index:7;display:flex;
+           gap:8px;align-items:center;padding:9px 18px;background:#080e16ee;
+           border-top:1px solid var(--line);backdrop-filter:blur(8px)}
+  .control input{flex:1;background:var(--panel2);border:1px solid var(--line);
+                 border-radius:8px;color:var(--fg);padding:8px 11px}
+  .control input:focus{outline:none;border-color:var(--accent)}
+  .control .msg{font-size:10.5px;color:var(--dim2);min-width:90px}
+  /* modal + toast */
+  .modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;
+         justify-content:center;z-index:20}
+  .modal.open{display:flex}
+  .modalbox{width:min(860px,92vw);max-height:82vh;background:var(--panel);
+            border:1px solid var(--line);border-radius:12px;display:flex;
+            flex-direction:column;overflow:hidden;animation:fade .15s}
+  .modalhead{display:flex;justify-content:space-between;align-items:center;
+             padding:11px 14px;border-bottom:1px solid var(--line)}
+  #modalBody{overflow:auto;padding:12px 14px;font:11.5px/1.55 Consolas,monospace;
+             white-space:pre-wrap}
+  .toast{position:fixed;right:18px;bottom:70px;z-index:30;background:#122436;
+         border:1px solid var(--line);border-left:3px solid var(--accent);
+         border-radius:8px;padding:9px 14px;font-size:11.5px;max-width:360px;
+         opacity:0;transform:translateY(6px);transition:all .2s;pointer-events:none}
+  .toast.show{opacity:1;transform:none}
+  @media (max-width:1100px){
+    .g2{grid-template-columns:1fr}.g3{grid-template-columns:1fr}
+    .side{width:64px;padding:14px 8px}.brand b,.brand span,.nav span,.sidefoot{display:none}
+    .nav button{justify-content:center}.main{margin-left:64px}
+    .control{left:64px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="logo">S</div>
+      <div><b>Adaptive Swarm</b><span>MISSION CONTROL</span></div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-view="overview" class="active">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        <span>Overview</span></button>
+      <button data-view="plan">
+        <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg>
+        <span>Plan</span><span class="badge" id="planBadge" style="display:none">1</span></button>
+      <button data-view="chat">
+        <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>
+        <span>Chat</span></button>
+      <button data-view="history">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span>History</span></button>
+      <button data-view="quota">
+        <svg viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4"/><path d="M6 10v4"/></svg>
+        <span>Quota</span></button>
+      <button data-view="drafts">
+        <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+        <span>Drafts</span></button>
+      <button data-view="settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.3 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 2.6h5l.3-2.6a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1z"/></svg>
+        <span>Settings</span></button>
+    </nav>
+    <div class="sidefoot">
+      <div class="row" style="gap:6px"><span class="dot" id="sideDot"></span>
+        <b id="sideState">connecting</b></div>
+      <div id="sideJob" class="mono">no job</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div><h1 id="pageTitle">Overview</h1><p id="pageSub">Mission control</p></div>
+      <div class="topright">
+        <span id="updatedAt">-</span>
+        <span class="dot" id="connDot"></span>
+      </div>
+    </header>
+
+    <!-- OVERVIEW -->
+    <section class="view active" id="view-overview">
+      <div class="stepper" id="stepper"></div>
+      <div class="card" style="margin-bottom:14px">
+        <h2>New goal</h2>
+        <div class="goal">
+          <input id="goal" placeholder="Describe a goal, e.g. add JWT auth and tests...">
+          <button class="btn primary" id="goalBtn" onclick="planGoal()">Plan</button>
+        </div>
+        <div class="muted" id="goalMsg" style="margin-top:7px;font-size:10.5px">
+          The planner reads the project tree, proposes 1-5 verified subtasks, then waits for your approval.
+        </div>
+      </div>
+      <div class="grid g2">
+        <div class="card">
+          <h2>Current plan</h2>
+          <div id="overviewPlan" class="muted">No plan yet.</div>
+        </div>
+        <div class="card">
+          <h2>Team</h2>
+          <div id="overviewTeam" class="muted">No active job.</div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h2>Recent activity</h2>
+        <div id="overviewFeed" class="muted">No events.</div>
+      </div>
+    </section>
+
+    <!-- PLAN -->
+    <section class="view" id="view-plan">
+      <div class="card">
+        <div class="spread" style="margin-bottom:8px">
+          <h2 style="margin:0">Plan</h2>
+          <span id="planStatus" class="pill">none</span>
+        </div>
+        <div id="planBody" class="muted">No plan submitted.</div>
+      </div>
+    </section>
+
+    <!-- CHAT -->
+    <section class="view" id="view-chat">
+      <div class="card">
+        <div class="chathead">
+          <div class="row">
+            <select id="runSelect" class="btn ghost" onchange="selectRun(this.value)"></select>
+            <span id="chatMeta" class="muted mono"></span>
+          </div>
+          <div class="row">
+            <div class="tabs">
+              <button id="tabTimeline" class="active" onclick="chatTab('timeline')">Timeline</button>
+              <button id="tabDiff" onclick="chatTab('diff')">Diff</button>
+            </div>
+            <button class="btn ghost" id="followBtn" onclick="toggleFollow()">Follow: off</button>
+          </div>
+        </div>
+        <div id="timeline" class="timeline"><div class="empty">Select a run</div></div>
+        <div id="diffPane" style="display:none"></div>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section class="view" id="view-history">
+      <div class="card">
+        <h2>Run history</h2>
+        <div id="historyTable" class="muted">No runs.</div>
+      </div>
+    </section>
+
+    <!-- QUOTA -->
+    <section class="view" id="view-quota">
+      <div class="grid g2">
+        <div class="card">
+          <div class="spread"><h2 style="margin:0">Shared plan budget</h2>
+            <span id="quotaChecked" class="muted mono"></span></div>
+          <div id="sharedQuota" class="muted">No data.</div>
+        </div>
+        <div class="card">
+          <h2>Legend</h2>
+          <div class="muted" style="font-size:11.5px">
+            <p><span class="pill ok">ok</span> under 60% of the window.</p>
+            <p><span class="pill warn">warn</span> 60-85%.</p>
+            <p><span class="pill bad">hot</span> above 85% or exhausted.</p>
+            <p class="mono" style="margin-top:10px">windows: 5h / 7d / 30d</p>
+            <p class="muted">Source: <b>opencode stats</b> (same numbers as the console).</p>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h2>Models</h2>
+        <div id="modelQuota" class="muted">No data.</div>
+      </div>
+    </section>
+
+    <!-- DRAFTS -->
+    <section class="view" id="view-drafts">
+      <div class="card">
+        <div class="spread"><h2 style="margin:0">Drafts</h2>
+          <button class="btn ghost" onclick="loadDrafts()">Refresh</button></div>
+        <div id="draftList" class="muted">No drafts.</div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="view" id="view-settings">
+      <div class="grid g2">
+        <div class="card">
+          <h2>Control</h2>
+          <div class="kv">
+            <div class="k">Access</div><div id="tokenState">view only</div>
+            <div class="k">Job</div><div id="setJob" class="mono">-</div>
+            <div class="k">Phase</div><div id="setPhase" class="mono">-</div>
+            <div class="k">Paused</div><div id="setPaused" class="mono">-</div>
+            <div class="k">Direction</div><div id="setOpinion" class="mono">-</div>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn" id="pauseBtn" onclick="togglePause()">Pause</button>
+            <button class="btn bad" onclick="stopJob()">Stop</button>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Connections</h2>
+          <div class="kv">
+            <div class="k">Dashboard</div><div class="mono">127.0.0.1</div>
+            <div class="k">Notify config</div><div id="notifyState" class="mono">-</div>
+            <div class="k">Telegram bot</div><div id="telegramState" class="mono">-</div>
+            <div class="k">Ledger</div><div class="mono">.agents/ledger.jsonl</div>
+          </div>
+          <div class="muted" style="margin-top:12px;font-size:11px">
+            Telegram: add <span class="mono">.agents/notify.json</span> then run
+            <span class="mono">python .agents/telegram_bot.py --root .</span>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h2>Quick access</h2>
+        <div id="setCommand" class="quick"><span class="k">command</span><code>-</code></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="control">
+  <button class="btn" id="pauseBtn2" onclick="togglePause()">Pause</button>
+  <button class="btn bad" onclick="stopJob()">Stop</button>
+  <input id="opinion" placeholder="Leader direction for the next subtask...">
+  <button class="btn" onclick="sendOpinion()">Send</button>
+  <span class="msg" id="controlMsg"></span>
+</div>
+
+<div class="modal" id="modal" onclick="if(event.target.id==='modal') closeModal()">
+  <div class="modalbox">
+    <div class="modalhead"><b id="modalTitle">Preview</b>
+      <button class="btn ghost" onclick="closeModal()">Close</button></div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (selector, scope=document) => scope.querySelector(selector);
+const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sigOf = (value) => { try { return JSON.stringify(value); } catch (_) { return String(value); } };
+const clock = (iso) => iso ? new Date(iso).toLocaleTimeString() : '';
+const num = (n) => (n || 0).toLocaleString('en-US');
+const fmtMs = (ms) => ms >= 60000 ? (ms/60000).toFixed(1)+'m' : ms >= 1000 ? (ms/1000).toFixed(1)+'s' : (ms||0)+'ms';
+const NODE = {
+  lead:{c:'#38bdf8',n:'Lead',a:'LD'}, coder:{c:'#a78bfa',n:'Coder',a:'CD'},
+  reviewer:{c:'#fbbf24',n:'Reviewer',a:'RV'}, systembot:{c:'#34d399',n:'SystemBot',a:'SB'},
+  security:{c:'#f87171',n:'Security',a:'SC'}, qa:{c:'#94a3b8',n:'QA',a:'QA'},
+  system:{c:'#64748b',n:'System',a:'SY'}
+};
+const STATUS_CLASS = (s) => ['applied','pass','ok','approved','done'].includes(s) ? 'ok'
+  : ['aborted','failed','fail','rejected','error','stopped'].includes(s) ? 'bad'
+  : ['pending','paused','blocked','warn'].includes(s) ? 'warn' : '';
+const state = {
+  view:'overview', runs:[], selected:null, run:null, diff:null, job:null, planState:null,
+  quota:null, health:null, drafts:null, chatTab:'timeline', follow:false,
+  token:new URLSearchParams(location.search).get('token') || '', sessionToken:'',
+  lastQuota:0, sig:{}
+};
+
+/* ---------- data ---------- */
+async function api(url, options){
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if(!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+  return data;
+}
+function toast(text){
+  const node = $('#toast'); node.textContent = text; node.classList.add('show');
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => node.classList.remove('show'), 3200);
+}
+function authToken(){ return state.sessionToken || state.token; }
+
+async function refreshAll(){
+  try{
+    const runs = await api('/api/runs?filter=all');
+    state.runs = runs.runs || [];
+    const [job, plan, health] = await Promise.all([
+      api('/api/job'), api('/api/plan'), api('/api/health')
+    ]);
+    state.job = job; state.planState = plan; state.health = health;
+    if(Date.now() - state.lastQuota > 15000){
+      state.quota = await api('/api/quota'); state.lastQuota = Date.now();
+    }
+    if(!state.selected){
+      const first = state.runs.find((run) => run.task_id) || state.runs[0];
+      if(first) state.selected = first.run_id;
+    }
+    if(state.selected) await loadRun(state.selected, true);
+    $('#connDot').classList.remove('off');
+    render();
+  }catch(error){
+    $('#connDot').classList.add('off');
+    $('#updatedAt').textContent = 'offline';
+  }
+}
+
+async function loadRun(runId, silent=false){
+  if(!runId) return;
+  const [detail, diff] = await Promise.all([
+    api('/api/runs/' + encodeURIComponent(runId)),
+    api('/api/diff?run_id=' + encodeURIComponent(runId)).catch(() => ({}))
+  ]);
+  const sig = sigOf({detail, diff});
+  if(sig === state.sig.run && silent) return;
+  state.sig.run = sig;
+  state.run = detail; state.diff = diff; state.selected = runId;
+  if(!silent){ state.chatTab = 'timeline'; renderChat(); }
+}
+
+/* ---------- navigation ---------- */
+function switchView(view){
+  state.view = view;
+  if(location.hash !== '#' + view) history.replaceState(null, '', '#' + view);
+  document.querySelectorAll('.nav button').forEach((button) =>
+    button.classList.toggle('active', button.dataset.view === view));
+  document.querySelectorAll('.view').forEach((section) =>
+    section.classList.toggle('active', section.id === 'view-' + view));
+  const titles = {overview:['Overview','Mission control'], plan:['Plan','Approve or reject the current plan'],
+    chat:['Chat','Chronological timeline, oldest first'], history:['History','Reopen any run'],
+    quota:['Quota','Shared plan budget and per-model usage'], drafts:['Drafts','Read-only previews'],
+    settings:['Settings','Control, connections and quick access']};
+  $('#pageTitle').textContent = titles[view][0];
+  $('#pageSub').textContent = titles[view][1];
+  if(view === 'drafts') loadDrafts();
+  if(view === 'history' || view === 'quota') render();
+  if(view === 'chat') renderChat();
+}
+
+/* ---------- render ---------- */
+function render(){
+  const job = state.job || {};
+  const jobState = job.state || {};
+  const plan = job.plan || (state.planState || {}).plan || null;
+  const control = job.control || {};
+  const decision = job.decision || (state.planState || {}).decision || {};
+
+  $('#sideState').textContent = jobState.phase || 'idle';
+  $('#sideDot').classList.toggle('off', !jobState.phase);
+  $('#sideJob').textContent = jobState.job_id ? jobState.job_id : 'no job';
+  $('#updatedAt').textContent = 'updated ' + new Date().toLocaleTimeString();
+  const badge = $('#planBadge');
+  badge.style.display = decision.status === 'pending' ? 'inline-block' : 'none';
+
+  renderStepper(jobState);
+  if(state.view === 'overview') renderOverview(plan, jobState, control);
+  if(state.view === 'plan') renderPlan(plan, decision, jobState);
+  if(state.view === 'history') renderHistory();
+  if(state.view === 'quota') renderQuota();
+  if(state.view === 'settings') renderSettings(plan, jobState, control);
+  if(state.view === 'chat') renderChat();
+  renderControls(control);
+}
+
+function renderStepper(jobState){
+  const steps = ['Analyze','Plan','War room','Verify','Done'];
+  const phase = jobState.phase || '';
+  let current = 0;
+  if(['awaiting_approval','rejected'].includes(phase)) current = 1;
+  else if(['approved','running','paused'].includes(phase)) current = 2;
+  else if(phase === 'stopped') current = 3;
+  else if(phase === 'done') current = 4;
+  $('#stepper').innerHTML = steps.map((name, index) => {
+    const cls = index < current ? 'done' : index === current ? 'active' : '';
+    return `<div class="step ${cls}"><span class="n">${index + 1}</span>${name}</div>`;
+  }).join('<span class="muted">&#8250;</span>');
+}
+
+function renderOverview(plan, jobState, control){
+  const box = $('#overviewPlan');
+  if(!plan){
+    box.innerHTML = '<p>No plan yet. Type a goal above.</p>';
+  } else {
+    const subtasks = (jobState.subtasks && jobState.subtasks.length)
+      ? jobState.subtasks : (plan.subtasks || []);
+    const approval = (state.job && state.job.decision) || (state.planState || {}).decision || {};
+    const done = subtasks.filter((item) => ['applied','done'].includes(item.status)).length;
+    box.innerHTML = `<div class="spread">
+        <div><b>${esc(plan.job_id)}</b> <span class="pill ${STATUS_CLASS(approval.status)}">${esc(approval.status || 'pending')}</span></div>
+        <button class="btn ghost" onclick="switchView('plan')">Open plan</button>
+      </div>
+      <p>${esc(plan.objective || '')}</p>
+      <div class="muted mono">${done}/${subtasks.length} subtasks done</div>
+      ${approval.status === 'pending' ? `<div class="row" style="margin-top:10px">
+        <button class="btn ok" onclick="decide('approve')">Approve</button>
+        <button class="btn bad" onclick="decide('reject')">Reject</button></div>` : ''}`;
+  }
+  const team = (jobState.team || {});
+  $('#overviewTeam').innerHTML = team.coder ? `
+    <div class="kv">
+      <div class="k">Coder</div><div class="mono">${esc(team.coder)}</div>
+      <div class="k">Fallback</div><div class="mono">${esc(team.fallback || '-')}</div>
+      <div class="k">Reviewer</div><div class="mono">${esc(team.reviewer || 'heuristic')}</div>
+      <div class="k">Verify</div><div class="mono">${esc(team.verify || 'machine')}</div>
+    </div>` : '<p>No active job.</p>';
+  const tl = (state.run && state.run.timeline) || [];
+  const recent = tl.slice(-6);
+  $('#overviewFeed').innerHTML = recent.length ? recent.map((item) => {
+    const meta = NODE[item.node] || NODE.system;
+    return `<div class="row" style="gap:8px;padding:3px 0">
+      <span class="mono" style="width:62px;color:var(--dim2)">${clock(item.timestamp)}</span>
+      <b style="color:${meta.c};font-size:11px">${meta.n}</b>
+      <span style="font-size:11.5px">${esc(item.message)}</span></div>`;
+  }).join('') : '<p>No events yet.</p>';
+}
+
+function renderPlan(plan, decision, jobState){
+  const status = $('#planStatus');
+  status.className = 'pill ' + STATUS_CLASS(decision.status || jobState.phase);
+  status.textContent = decision.status || jobState.phase || 'none';
+  if(!plan){ $('#planBody').innerHTML = 'No plan submitted.'; $('#setCommand') && null; return; }
+  const source = plan._source || '.agents/tmp/plan.json';
+  const root = (state.planState && state.planState.root) || '.';
+  const command = `python .agents/job.py --plan ${source} --root "${root}" --wait --open`;
+  const rows = (plan.subtasks || []).map((item) => `<tr>
+    <td><b>${esc(item.id)}</b></td><td>${esc(item.title || '')}</td>
+    <td class="mono">${esc((item.target_files || []).join(', '))}</td>
+    <td class="mono">${esc(item.verify_command || '')}</td>
+    <td class="mono">${esc((item.depends_on || []).join(', ') || '-')}</td>
+    <td><span class="pill ${STATUS_CLASS(item.status)}">${esc(item.status || 'pending')}</span></td></tr>`).join('');
+  const actions = decision.status === 'pending' ? `<div class="row">
+      <button class="btn ok" onclick="decide('approve')">Approve</button>
+      <button class="btn bad" onclick="decide('reject')">Reject</button></div>` : '';
+  $('#planBody').innerHTML = `<div class="planbox">
+    <div><b>${esc(plan.job_id)}</b> <span class="muted">&middot; ${esc(plan.objective || '')}</span></div>
+    <div class="quick"><span class="k">plan file</span><code>${esc(source)}</code>
+      <span class="k" style="margin-top:4px">quick access</span>
+      <code id="planCmd">${esc(command)}</code>
+      <button class="copy" onclick="copyCommand(this)">Copy</button></div>
+    <table><thead><tr><th>ID</th><th>Task</th><th>Files</th><th>Verify</th><th>Depends</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody></table>${actions}</div>`;
+  // keep settings command in sync
+  const setCmd = $('#setCommand');
+  if(setCmd) setCmd.innerHTML = `<span class="k">command</span><code id="planCmd2">${esc(command)}</code>
+    <button class="copy" onclick="copyText('${esc(command).replace(/'/g, "\\'")}', this)">Copy</button>`;
+}
+
+function renderHistory(){
+  if(!state.runs.length){ $('#historyTable').innerHTML = 'No runs.'; return; }
+  const rows = state.runs.map((run) => `<tr class="click" onclick="selectRun('${esc(run.run_id)}')">
+    <td class="mono">${esc(run.run_id)}</td>
+    <td class="mono">${esc(run.task_id || '-')}</td>
+    <td>${esc(run.level ?? '-')}</td>
+    <td><span class="pill ${STATUS_CLASS(run.status)}">${esc(run.status || '?')}</span></td>
+    <td class="mono">${run.events || 0}</td>
+    <td class="mono">${fmtMs(run.duration_ms)}</td>
+    <td class="mono">${num(run.requests)}</td>
+    <td class="mono">${clock(run.start)}</td></tr>`).join('');
+  $('#historyTable').innerHTML = `<table><thead><tr><th>Run</th><th>Task</th><th>Lvl</th>
+    <th>Status</th><th>Events</th><th>Time</th><th>Req</th><th>Started</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+
+function renderChat(){
+  const select = $('#runSelect');
+  const runs = state.runs.filter((run) => run.task_id).slice(0, 30);
+  select.innerHTML = runs.map((run) =>
+    `<option value="${esc(run.run_id)}" ${run.run_id === state.selected ? 'selected' : ''}>${esc(run.run_id)}</option>`
+  ).join('') || '<option>no runs</option>';
+  const run = (state.run && state.run.run) || {};
+  $('#chatMeta').textContent = state.selected
+    ? `${run.status || '?'} · ${run.events || 0} events · ${num(run.requests)} req · ${fmtMs(run.duration_ms)}`
+    : '';
+  $('#followBtn').textContent = 'Follow: ' + (state.follow ? 'on' : 'off');
+  $('#followBtn').classList.toggle('primary', state.follow);
+
+  const timeline = $('#timeline'), diffPane = $('#diffPane');
+  const isTimeline = state.chatTab === 'timeline';
+  timeline.style.display = isTimeline ? 'flex' : 'none';
+  diffPane.style.display = isTimeline ? 'none' : 'block';
+  $('#tabTimeline').classList.toggle('active', isTimeline);
+  $('#tabDiff').classList.toggle('active', !isTimeline);
+
+  if(!isTimeline){
+    const diff = state.diff || {};
+    const lines = (diff.diff || '').split('\n');
+    const rendered = lines.map((line) => {
+      let cls = 'ctx';
+      if(line.startsWith('+++') || line.startsWith('---')) cls = 'ctx';
+      else if(line.startsWith('@@')) cls = 'hunk';
+      else if(line.startsWith('+')) cls = 'add';
+      else if(line.startsWith('-')) cls = 'del';
+      return `<div class="${cls}">${esc(line) || '&nbsp;'}</div>`;
+    }).join('');
+    diffPane.innerHTML = `<div class="spread" style="margin-bottom:6px">
+        <span class="mono">${esc(diff.target || '-')}</span>
+        <span class="muted mono">${esc(diff.old_label || '')} -> ${esc(diff.new_label || '')} (${diff.changed_lines || 0} lines)</span>
+      </div><pre class="diff">${rendered || '<div class="ctx">No changes / no file</div>'}</pre>`;
+    return;
+  }
+
+  const timelineData = (state.run && state.run.timeline) || [];
+  const sig = sigOf(timelineData);
+  if(sig === state.sig.timeline) return;
+  state.sig.timeline = sig;
+  const box = $('#timeline');
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  if(!timelineData.length){
+    box.innerHTML = '<div class="empty">This run has no events yet.</div>';
+    return;
+  }
+  box.innerHTML = timelineData.map((item) => {
+    const meta = NODE[item.node] || NODE.system;
+    const chip = item.status ? `<span class="pill ${STATUS_CLASS(item.status)}">${esc(item.status)}</span>` : '';
+    const model = item.model ? `<span class="mono" style="color:var(--dim2)">${esc(item.model)}</span>` : '';
+    const dur = item.duration_ms ? `<span class="mono" style="color:var(--dim2)">${fmtMs(item.duration_ms)}</span>` : '';
+    return `<div class="ev" style="--c:${meta.c}">
+      <div class="ev-time">${clock(item.timestamp)}</div>
+      <div class="ev-line"><span class="ev-dot"></span></div>
+      <div class="ev-card">
+        <div class="ev-head"><b style="color:${meta.c}">${meta.n}</b>${chip}${model}${dur}</div>
+        <div class="ev-msg">${esc(item.message)}</div>
+      </div></div>`;
+  }).join('');
+  if(state.follow && atBottom) box.scrollTop = box.scrollHeight;
+  if(!state.follow && box.scrollTop === 0) box.scrollTop = 0;
+}
+
+function bar(value, max=100){
+  const pct = Math.max(0, Math.min(100, Number(value) || 0));
+  const cls = pct >= 85 ? 'bad' : pct >= 60 ? 'warn' : '';
+  return `<div class="track"><i class="${cls}" style="width:${pct}%"></i></div>`;
+}
+
+function renderQuota(){
+  const quota = state.quota || {};
+  const shared = quota.shared || {};
+  const windows = shared.windows || {};
+  $('#quotaChecked').textContent = quota.fetched_at
+    ? 'checked ' + new Date(quota.fetched_at * 1000).toLocaleTimeString() : '';
+  const names = {today:'5h', week:'7d', month:'30d'};
+  $('#sharedQuota').innerHTML = !shared.windows ? 'No data.' : `
+    <div class="qbar"><span class="lab">Plan cap</span><span class="mono">$${esc(shared.cap)}/mo</span></div>
+    ${Object.keys(names).map((key) => {
+      const window = windows[key] || {};
+      return `<div class="qbar"><span class="lab">${names[key]}</span>${bar(window.pct)}
+        <span class="val">${(window.pct || 0).toFixed(1)}%</span></div>`;
+    }).join('')}
+    <div class="muted mono" style="margin-top:8px">${shared.ok ? 'headroom available' : 'EXHAUSTED'}</div>`;
+
+  const models = (quota.models || []).slice().sort((a, b) => b.worst_pct - a.worst_pct);
+  if(!models.length){ $('#modelQuota').innerHTML = 'No data.'; return; }
+  $('#modelQuota').innerHTML = `<table><thead><tr><th>Model</th><th style="width:45%">Worst window</th>
+    <th>5h</th><th>7d</th><th>30d</th><th>Status</th></tr></thead><tbody>
+    ${models.map((model) => {
+      const name = model.model.split('/').pop();
+      const w = model.windows || {};
+      const pct = model.worst_pct || 0;
+      const status = model.unlimited ? '<span class="pill ok">free</span>'
+        : model.ok ? `<span class="pill ${pct>=60?'warn':'ok'}">ok</span>`
+        : '<span class="pill bad">exhausted</span>';
+      return `<tr><td class="mono">${esc(name)}</td><td>${bar(pct)}</td>
+        <td class="mono">${(w.today ?? 0).toFixed(1)}%</td>
+        <td class="mono">${(w.week ?? 0).toFixed(1)}%</td>
+        <td class="mono">${(w.month ?? 0).toFixed(1)}%</td>
+        <td>${status}</td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+async function loadDrafts(){
+  const jobId = (state.job && state.job.state && state.job.state.job_id)
+    || (state.job && state.job.plan && state.job.plan.job_id) || '';
+  if(!jobId){ $('#draftList').textContent = 'No active job.'; return; }
+  try{
+    const data = await api('/api/draft?job_id=' + encodeURIComponent(jobId));
+    const drafts = data.drafts || [];
+    state.drafts = drafts;
+    $('#draftList').innerHTML = drafts.length ? drafts.map((item) =>
+      `<div class="draftrow" onclick="openDraft('${esc(item.path).replace(/'/g, "\\'")}')">
+        <span class="mono">${esc(item.path)}</span>
+        <span class="muted mono">${item.size} B</span></div>`).join('')
+      : '<p>No drafts for this job.</p>';
+  }catch(error){ $('#draftList').textContent = error.message; }
+}
+
+function renderSettings(plan, jobState, control){
+  $('#tokenState').textContent = authToken() ? 'control enabled (token)' : 'view only (no token)';
+  $('#setJob').textContent = jobState.job_id || '-';
+  $('#setPhase').textContent = jobState.phase || '-';
+  $('#setPaused').textContent = control.paused ? 'yes' : 'no';
+  $('#setOpinion').textContent = control.opinion || '-';
+  const health = state.health || {};
+  $('#notifyState').textContent = health.notify ? 'configured' : 'not found';
+  $('#telegramState').textContent = health.telegram ? 'enabled' : 'not configured';
+  renderPlan(plan, (state.job && state.job.decision) || {}, jobState);
+  $('#pauseBtn').textContent = control.paused ? 'Resume' : 'Pause';
+  $('#pauseBtn2').textContent = control.paused ? 'Resume' : 'Pause';
+}
+
+function renderControls(control){
+  $('#pauseBtn2').textContent = control.paused ? 'Resume' : 'Pause';
+  $('#opinion').placeholder = control.opinion
+    ? 'Current direction: ' + control.opinion
+    : 'Leader direction for the next subtask...';
+}
+
+/* ---------- actions ---------- */
+async function planGoal(){
+  const input = $('#goal');
+  const goal = input.value.trim();
+  if(!goal){ input.focus(); return; }
+  const button = $('#goalBtn');
+  button.disabled = true; button.textContent = 'Planning...';
+  $('#goalMsg').textContent = 'The planner is reading the project tree (up to ~1 minute)...';
+  try{
+    const data = await api('/api/plan/generate', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({goal})});
+    state.sessionToken = data.token || '';
+    input.value = '';
+    $('#goalMsg').textContent = `Plan ${data.job_id} is ready. Review and approve it.`;
+    state.sig = {};
+    await refreshAll();
+    switchView('plan');
+  }catch(error){ $('#goalMsg').textContent = error.message; }
+  finally{ button.disabled = false; button.textContent = 'Plan'; }
+}
+
+async function decide(kind){
+  try{
+    await api('/api/plan/decision', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({decision:kind, token:authToken()})});
+    toast('Plan ' + kind + 'd');
+    await refreshAll();
+  }catch(error){ toast(error.message); }
+}
+
+async function setControl(action, value){
+  try{
+    await api('/api/control', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action, token:authToken(), value:value || ''})});
+    $('#controlMsg').textContent = action + ' ok';
+    await refreshAll();
+  }catch(error){ $('#controlMsg').textContent = error.message; toast(error.message); }
+}
+function togglePause(){
+  const paused = !!(state.job && state.job.control && state.job.control.paused);
+  setControl(paused ? 'resume' : 'pause');
+}
+function stopJob(){ if(confirm('Stop after the current subtask?')) setControl('stop'); }
+function sendOpinion(){
+  const input = $('#opinion'); const value = input.value.trim();
+  if(!value) return;
+  setControl('opinion', value); input.value = '';
+}
+
+async function selectRun(runId){
+  if(!runId) return;
+  await loadRun(runId);
+  switchView('chat');
+}
+
+function chatTab(tab){
+  state.chatTab = tab;
+  state.sig.timeline = null;
+  renderChat();
+}
+function toggleFollow(){
+  state.follow = !state.follow;
+  renderChat();
+  if(state.follow){ const box = $('#timeline'); box.scrollTop = box.scrollHeight; }
+}
+
+function copyText(text, button){
+  navigator.clipboard.writeText(text).then(() => {
+    button.classList.add('done'); button.textContent = 'Copied';
+    setTimeout(() => { button.classList.remove('done'); button.textContent = 'Copy'; }, 900);
+  }).catch(() => toast('Clipboard blocked'));
+}
+function copyCommand(button){ copyText($('#planCmd').textContent, button); }
+
+function openModal(title, html){
+  $('#modalTitle').textContent = title;
+  $('#modalBody').innerHTML = html;
+  $('#modal').classList.add('open');
+}
+function closeModal(){ $('#modal').classList.remove('open'); $('#modalBody').innerHTML = ''; }
+async function openDraft(path){
+  try{
+    const data = await api('/api/draft?path=' + encodeURIComponent(path));
+    openModal(path, `<pre>${esc(data.content || '')}</pre>`);
+  }catch(error){ toast(error.message); }
+}
+
+/* ---------- nav ---------- */
+document.querySelectorAll('.nav button').forEach((button) =>
+  button.addEventListener('click', () => switchView(button.dataset.view)));
+$('#goal').addEventListener('keydown', (event) => { if(event.key === 'Enter') planGoal(); });
+$('#opinion').addEventListener('keydown', (event) => { if(event.key === 'Enter') sendOpinion(); });
+
+const VIEWS = ['overview','plan','chat','history','quota','drafts','settings'];
+const initialView = (location.hash || '#overview').slice(1);
+const runParam = new URLSearchParams(location.search).get('run');
+if(runParam) state.selected = runParam;
+switchView(VIEWS.includes(initialView) ? initialView : 'overview');
+window.addEventListener('hashchange', () => {
+  const view = (location.hash || '#overview').slice(1);
+  if(VIEWS.includes(view) && view !== state.view) switchView(view);
+});
+refreshAll();
+setInterval(refreshAll, 3000);
+</script>
+</body>
+</html>

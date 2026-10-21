@@ -301,7 +301,8 @@ def test_dashboard_api(checks: Checks) -> None:
 
         with urllib.request.urlopen(base + "/", timeout=5) as response:
             html = response.read().decode("utf-8")
-        checks.check("dashboard: HTML co planPanel", 'id="planPanel"' in html)
+        checks.check("dashboard: HTML co view plan", 'id="view-plan"' in html
+                     and 'id="nav"' in html)
 
         with urllib.request.urlopen(base + "/api/job", timeout=5) as response:
             job_data = json.loads(response.read().decode("utf-8"))
