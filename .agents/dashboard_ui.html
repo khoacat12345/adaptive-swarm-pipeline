@@ -97,9 +97,10 @@
   .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
   /* tables */
   table{width:100%;border-collapse:collapse}
-  th{text-align:left;color:var(--dim2);font-size:9.5px;text-transform:uppercase;
-     letter-spacing:.7px;padding:6px;border-bottom:1px solid var(--line);font-weight:600}
-  td{padding:7px 6px;border-bottom:1px solid #12202e;vertical-align:top}
+  th{text-align:left;color:#b9cde2;font-size:10px;text-transform:uppercase;
+     letter-spacing:.7px;padding:7px 6px;border-bottom:1px solid var(--line);font-weight:600}
+  td{padding:8px 6px;border-bottom:1px solid #1d2d3e;vertical-align:top;
+     color:#e8f1fa;font-size:12.5px}
   tr:last-child td{border-bottom:0}
   tbody tr.click{cursor:pointer;transition:background .12s}
   tbody tr.click:hover{background:#0d1a27}
@@ -150,6 +151,19 @@
   .track i.warn{background:var(--warn)}.track i.bad{background:var(--bad)}
   .qbar .val{width:52px;text-align:right;font:10.5px Consolas,monospace;color:var(--dim)}
   .qhead{display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center}
+  .hourly{display:flex;align-items:flex-end;gap:3px;height:140px;padding:10px 2px 0;
+          border-bottom:1px solid var(--line)}
+  .hslot{flex:1;display:flex;flex-direction:column;justify-content:flex-end;
+         align-items:center;gap:3px;height:100%}
+  .hbar{width:100%;background:#3d5a75;border-radius:3px 3px 0 0;min-height:2px;
+        transition:height .3s,background .15s}
+  .hbar:hover{background:var(--accent)}
+  .hx{font-size:8.5px;color:var(--dim2);height:12px}
+  .limitrow{display:flex;align-items:center;gap:12px;margin:10px 0}
+  .limitrow .lab{width:72px;font-size:12px;color:var(--fg)}
+  .limitrow .track{flex:1;height:9px}
+  .limitrow .pct{width:86px;text-align:right;font-weight:650;font-size:12px}
+  .limitrow .reset{width:124px;text-align:right;font-size:10.5px;color:var(--dim2)}
   /* drafts */
   .draftrow{display:flex;justify-content:space-between;gap:10px;padding:9px 10px;
             border:1px solid var(--line);border-radius:8px;margin-bottom:6px;
@@ -310,7 +324,16 @@
 
     <!-- USAGE -->
     <section class="view" id="view-quota">
-      <div class="grid g4" id="spendCards"></div>
+      <div class="grid g3" id="spendCards"></div>
+      <div class="card" id="limitCard" style="margin-top:14px"></div>
+      <div class="card" style="margin-top:14px">
+        <div class="spread"><h2 style="margin:0">Hourly usage</h2>
+          <div class="tabs">
+            <button id="hourCost" class="active" onclick="hourlyMode('cost')">Cost</button>
+            <button id="hourTokens" onclick="hourlyMode('tokens')">Tokens</button>
+          </div></div>
+        <div id="hourly" class="hourly"></div>
+      </div>
       <div class="card" style="margin-top:14px">
         <div class="spread"><h2 style="margin:0">Models (rolling windows)</h2>
           <span id="quotaChecked" class="muted mono"></span></div>
@@ -408,6 +431,7 @@ const STATUS_CLASS = (s) => ['applied','pass','ok','approved','done'].includes(s
 const state = {
   view:'overview', runs:[], selected:null, run:null, diff:null, job:null, planState:null,
   quota:null, health:null, drafts:null, workspaces:[], chatTab:'timeline', follow:false,
+  hourlyMode:'cost',
   token:new URLSearchParams(location.search).get('token') || '', sessionToken:'',
   lastQuota:0, sig:{}
 };
@@ -694,20 +718,59 @@ function bar(value, max=100){
   return `<div class="track"><i class="${cls}" style="width:${pct}%"></i></div>`;
 }
 
-function spendCard(label, spend){
-  const value = spend || {};
+function metricCard(label, value, hint){
   return `<div class="card"><h2>${label}</h2>
-    <div style="font-size:22px;font-weight:650">$${(value.cost || 0).toFixed(2)}</div>
-    <div class="muted mono">${num(value.requests)} req · ${num(value.tokens_in)} / ${num(value.tokens_out)} tok</div></div>`;
+    <div style="font-size:24px;font-weight:650">${value}</div>
+    <div class="muted mono">${hint}</div></div>`;
 }
 
 function renderUsage(){
   const quota = state.quota || {};
   const spend = quota.spend || {};
-  $('#spendCards').innerHTML = [
-    ['Today', spend.calendar_today], ['5h rolling', spend.today],
-    ['7 days', spend.week], ['30 days', spend.month]
-  ].map(([label, value]) => spendCard(label, value)).join('');
+  const today = spend.calendar_today || {};
+  const totalTokens = (today.tokens_in || 0) + (today.tokens_out || 0);
+  $('#spendCards').innerHTML =
+    metricCard('Cost', `$${(today.cost || 0).toFixed(2)}`, 'today') +
+    metricCard('Requests', num(today.requests), 'assistant messages') +
+    metricCard('Tokens', num(totalTokens),
+               `${num(today.tokens_in)} in / ${num(today.tokens_out)} out`);
+
+  const shared = quota.shared || {};
+  const windows = shared.windows || {};
+  const resets = quota.reset || {};
+  const rows = [['today', 'Rolling'], ['week', 'Weekly'], ['month', 'Monthly']];
+  const resetLabel = (ms) => {
+    if(!ms) return '';
+    const diff = Math.max(0, ms - Date.now());
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    return hours ? `resets in ${hours}h ${minutes}m` : `resets in ${minutes}m`;
+  };
+  $('#limitCard').innerHTML = `<div class="spread"><h2 style="margin:0">Go limits</h2>
+    <span class="muted" style="font-size:10.5px">local estimate · console is billing source</span></div>
+    ${rows.map(([key, label]) => {
+      const window = windows[key] || {};
+      const pct = window.pct || 0;
+      return `<div class="limitrow"><span class="lab">${label}</span>
+        ${bar(pct)}<span class="pct">${pct.toFixed(0)}% used</span>
+        <span class="reset">${resetLabel(resets[key])}</span></div>`;
+    }).join('')}`;
+
+  const hourly = quota.hourly || [];
+  const mode = state.hourlyMode || 'cost';
+  const values = hourly.map((bucket) => mode === 'cost' ? bucket.cost : bucket.tokens);
+  const peak = Math.max(...values, 0.0001);
+  $('#hourly').innerHTML = hourly.map((bucket, hour) => {
+    const value = values[hour] || 0;
+    const height = Math.max(2, Math.round(value / peak * 100));
+    const tip = mode === 'cost' ? '$' + value.toFixed(4) : num(value) + ' tokens';
+    return `<div class="hslot" title="${hour}:00 · ${tip}">
+      <div class="hbar" style="height:${height}%"></div>
+      <div class="hx">${hour % 4 === 0 ? hour : ''}</div></div>`;
+  }).join('');
+  $('#hourCost').classList.toggle('active', mode === 'cost');
+  $('#hourTokens').classList.toggle('active', mode !== 'cost');
+
   $('#quotaChecked').textContent = quota.fetched_at
     ? 'checked ' + new Date(quota.fetched_at * 1000).toLocaleTimeString() : '';
 
@@ -752,8 +815,12 @@ function renderUsage(){
     </tr>`).join('')}</tbody></table>`;
 }
 
-async function loadDrafts(){
-  const jobId = (state.job && state.job.state && state.job.state.job_id)
+function hourlyMode(mode){
+  state.hourlyMode = mode;
+  renderUsage();
+}
+
+async function loadDrafts(){  const jobId = (state.job && state.job.state && state.job.state.job_id)
     || (state.job && state.job.plan && state.job.plan.job_id) || '';
   if(!jobId){ $('#draftList').textContent = 'No active job.'; return; }
   try{

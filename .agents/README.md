@@ -526,10 +526,11 @@ Thu tu uu tien tin hieu: W8 > W6 > W3 > W5 > W4 > W0 > W7 > W2 > W1.
 `validate_roles()` bat buoc main/escalate khac ho o W3/W5/W8. Dung:
 `python .agents/recipe_c.py --order order.json --route`.
 
-**Quota that:** `quota.py` doc `opencode stats --models --cost --json` (cung so lieu
-console) va cat theo HAI tran: (1) **ngan sach CHUNG cua plan** (~$14/thang; console
-hien Rolling/Weekly/Monthly dung chung cho moi model) va (2) **tran rieng tung model**
-($15/$60/$80). Ty le: 5h=20%, tuan=50%, thang=100%; free = vo han.
+**Quota that:** `quota.py` doc `opencode.db` (`session_message`: cost/token tung
+request) va tinh rolling 5h / 7d / 30d + hom nay. Hien thi **chi phi that**; phan %
+tren dashboard chi la uoc luong theo tran tai lieu ($15/$60/$80; 5h=20%, tuan=50%,
+thang=100%), khong phai so billing cua console. Fallback `opencode stats` da bo de
+tranh lech cua so.
 
 `--route` chon theo thu tu: **main** (con >=10%) -> **escalate** (chi khi con >=50%,
 hoac `--allow-escalate`) -> **fallback re/free** (deepseek/glm free) -> `exhausted`

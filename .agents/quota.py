@@ -204,6 +204,8 @@ class QuotaTracker:
         self.cache_ttl = cache_ttl
         self.usage: dict[str, dict[str, float]] = {name: {} for name in WINDOW_DAYS}
         self.spend: dict[str, dict] = {}
+        self.reset: dict[str, int] = {}
+        self.hourly: list[dict] = []
         self.requests: list[dict] = []
         self.message_count = 0
         self.available = False
@@ -222,6 +224,8 @@ class QuotaTracker:
         if cached and not force:
             self.usage = cached["usage"]
             self.spend = cached.get("spend") or {}
+            self.reset = cached.get("reset") or {}
+            self.hourly = cached.get("hourly") or []
             self.requests = cached.get("requests") or []
             self.message_count = int(cached.get("message_count") or 0)
             self.available = bool(cached.get("available"))
@@ -261,6 +265,8 @@ class QuotaTracker:
                     self.usage[window][model] = self.usage[window].get(model, 0.0) + message["cost"]
 
         self.spend = {}
+        self.reset = {}
+        self.hourly = [{"hour": hour, "cost": 0.0, "tokens": 0} for hour in range(24)]
         for window, cutoff in {**windows, "calendar_today": midnight}.items():
             selected = [message for message in messages if message["t"] >= cutoff]
             self.spend[window] = {
@@ -269,6 +275,20 @@ class QuotaTracker:
                 "tokens_in": sum(message["tokens_in"] for message in selected),
                 "tokens_out": sum(message["tokens_out"] for message in selected),
             }
+            if window == "calendar_today":
+                self.reset[window] = midnight + 86400 * 1000
+            else:
+                span = {"today": 5 * 3600, "week": 7 * 86400,
+                        "month": 30 * 86400}[window] * 1000
+                oldest = min((message["t"] for message in selected), default=None)
+                self.reset[window] = oldest + span if oldest else now + span
+        for message in messages:
+            if message["t"] >= midnight:
+                hour = time.localtime(message["t"] / 1000).tm_hour
+                self.hourly[hour]["cost"] += message["cost"]
+                self.hourly[hour]["tokens"] += message["tokens_in"] + message["tokens_out"]
+        for bucket in self.hourly:
+            bucket["cost"] = round(bucket["cost"], 4)
         self.requests = sorted(messages, key=lambda message: message["t"],
                                reverse=True)[:60]
         self.message_count = len(messages)
@@ -287,6 +307,7 @@ class QuotaTracker:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             payload = {"at": self.fetched_at, "available": self.available,
                        "error": self.error, "usage": self.usage, "spend": self.spend,
+                       "reset": self.reset, "hourly": self.hourly,
                        "requests": self.requests, "message_count": self.message_count}
             tmp = self.cache_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
@@ -356,6 +377,7 @@ class QuotaTracker:
         return {"available": self.available, "error": self.error,
                 "fetched_at": self.fetched_at, "plan_cap": self.plan_cap,
                 "shared": self.shared(), "spend": self.spend,
+                "reset": self.reset, "hourly": self.hourly,
                 "requests": self.requests, "message_count": self.message_count,
                 "usage": {window: dict(values) for window, values in self.usage.items()}}
 
