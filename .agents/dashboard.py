@@ -345,6 +345,9 @@ def make_handler(root: Path, ledger: Path):
                         "decision": plan_state.get("decision"),
                         "control": job_module.read_control(root),
                     })
+                elif route == "/api/team":
+                    import team_view
+                    self._json(team_view.build(root, ledger))
                 elif route == "/api/draft":
                     import job as job_module
                     query = parse_qs(parsed.query)

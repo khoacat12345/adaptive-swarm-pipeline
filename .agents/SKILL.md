@@ -70,7 +70,8 @@ python .agents/memory.py                     # loi hay gap + goi y
 ```
 
 Dashboard: `http://127.0.0.1:8080/` (sidebar run history | chat da agent | diff &
-inspector). Server chi bind loopback, khong mo ra mang.
+inspector). 5 stage pages: `#analyze`, `#plan`, `#warroom`, `#verify`, `#done`.
+Server chi bind loopback, khong mo ra mang.
 
 ## Nghiem thu
 

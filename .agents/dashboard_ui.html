@@ -79,6 +79,8 @@
   .step:hover{border-color:#3d5873;color:var(--fg);transform:translateY(-1px)}
   .step.done{border-color:#14532d;color:#9be7c4}
   .step.done .n{background:#14532d;color:#9be7c4}
+  .step.bad{border-color:var(--bad);color:#ffb4b4}
+  .step.bad .n{background:#4c1d1d;color:#ffb4b4}
   .step.active{border-color:var(--accent);background:#0e1c29;color:#e2f3ff}
   .step.active .n{background:var(--accent);color:#04121f;animation:pulse 1.6s infinite}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #38bdf855}50%{box-shadow:0 0 0 4px #38bdf800}}
@@ -112,6 +114,7 @@
   .quick .k{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--dim2)}
   .quick code{font-family:Consolas,monospace;font-size:11px;color:#9fe3c0;
               overflow-wrap:anywhere}
+  .quick .copy{align-self:flex-start}
   .copy{background:#1a2b3d;color:#c7d2fe;border:0;border-radius:6px;
         padding:3px 9px;font-size:10px;cursor:pointer;margin-left:6px}
   .copy.done{background:#14532d;color:#9be7c4}
@@ -180,6 +183,139 @@
   /* settings */
   .kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;font-size:12px}
   .kv .k{color:var(--dim2);font-size:11px}
+  /* pipeline pages */
+  .hero{display:flex;justify-content:space-between;gap:16px;align-items:center;
+        padding:16px 18px;border:1px solid var(--line);border-radius:14px;
+        background:linear-gradient(135deg,#152638,#101b28 60%,#0e1a27);
+        margin-bottom:14px;overflow:hidden;position:relative}
+  .hero:after{content:"";position:absolute;right:-60px;top:-80px;width:240px;height:240px;
+              background:radial-gradient(circle,#38bdf822,transparent 65%);pointer-events:none}
+  .hero .eyebrow{font-size:9px;letter-spacing:1.6px;color:var(--accent);text-transform:uppercase}
+  .hero h2{margin:3px 0 4px;font-size:20px;letter-spacing:-.2px;text-transform:none}
+  .hero p{margin:0;color:var(--dim);font-size:12px;max-width:760px}
+  .hero .actions{text-align:right;flex:0 0 auto;display:flex;gap:7px;flex-wrap:wrap}
+  .statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;
+            margin-bottom:14px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .stat .k{font-size:9px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim2)}
+  .stat b{display:block;font-size:18px;line-height:1.35;margin-top:2px}
+  .stat span{font-size:10.5px;color:var(--dim2)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{font:10.5px Consolas,monospace;border:1px solid var(--line);background:#0e1a27;
+        border-radius:999px;padding:3px 9px;color:var(--dim)}
+  .chip.ok{border-color:#14532d;color:#9be7c4}
+  .chip.warn{border-color:#4a3a12;color:#fbbf24}
+  .chip.bad{border-color:#4c1d1d;color:#ffb4b4}
+  .checkrow{display:grid;grid-template-columns:minmax(120px,1.1fr) minmax(0,2fr) 44px;
+            gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid #1d2d3e}
+  .checkrow:last-child{border-bottom:0}
+  .checkrow .lab{font-size:11.5px;color:var(--dim)}
+  .checkrow .val{font-size:10.5px;color:var(--dim2);text-align:right;font-family:Consolas,monospace}
+  .hbar2{height:7px;border-radius:999px;background:#0c1520;border:1px solid var(--line);overflow:hidden}
+  .hbar2 i{display:block;height:100%;border-radius:999px;background:var(--ok);transition:width .4s}
+  .hbar2 i.warn{background:var(--warn)}.hbar2 i.bad{background:var(--bad)}
+  .risk{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:9px;
+        border:1px solid var(--line);background:#0e1a27;margin-bottom:7px}
+  .risk .ic{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;
+            font-size:10px;font-weight:800;flex:0 0 auto;background:#16283a;color:var(--dim)}
+  .risk.bad{border-left:3px solid var(--bad)}.risk.bad .ic{background:#2a1010;color:#ffb4b4}
+  .risk.warn{border-left:3px solid var(--warn)}.risk.warn .ic{background:#2a2310;color:#fbbf24}
+  .risk.ok{border-left:3px solid var(--ok)}.risk.ok .ic{background:#0f2a22;color:#9be7c4}
+  .risk b{font-size:11.5px}.risk p{margin:2px 0 0;font-size:11px;color:var(--dim2)}
+  .deprail{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin-top:4px}
+  .depnode{background:#0e1a27;border:1px solid var(--line);border-radius:9px;padding:7px 10px;
+           min-width:110px}
+  .depnode b{display:block;font-size:10px;color:var(--accent)}
+  .depnode span{font-size:11px;color:var(--dim)}
+  .deparrow{align-self:center;color:var(--dim2)}
+  .subtask{border:1px solid var(--line);border-radius:11px;background:var(--panel2);
+           margin-bottom:8px;overflow:hidden}
+  .subtask summary{display:flex;gap:9px;align-items:center;padding:10px 12px;cursor:pointer;
+                   list-style:none;flex-wrap:wrap}
+  .subtask summary::-webkit-details-marker{display:none}
+  .subtask summary b{font-size:12.5px}
+  .subtask[open] summary{border-bottom:1px solid var(--line);background:#101d2b}
+  .subtask .body{padding:10px 12px}
+  .fieldgrid{display:grid;grid-template-columns:112px minmax(0,1fr);gap:6px 12px;font-size:11.5px}
+  .fieldgrid .k{color:var(--dim2);font-size:10.5px}
+  .code{background:#0a1420;border:1px solid #1d2f42;border-radius:6px;padding:3px 7px;
+        font-family:Consolas,monospace;font-size:10.5px;color:#9fe3c0;overflow-wrap:anywhere}
+  /* war room */
+  .war{position:relative;height:360px;border:1px solid var(--line);border-radius:16px;
+       background:radial-gradient(circle at 50% 48%,#122538 0,#0c1622 55%,#0a121c 100%);
+       overflow:hidden;margin-bottom:10px}
+  .war svg{position:absolute;inset:0;width:100%;height:100%}
+  .war .link{stroke:#27405a;stroke-width:1.2;vector-effect:non-scaling-stroke;
+             stroke-dasharray:4 6;transition:stroke .2s}
+  .war .link.run{stroke:#fb923c;stroke-width:2;stroke-dasharray:6 5;animation:dash 1s linear infinite}
+  .war .link.next{stroke:#38bdf8;stroke-width:1.6;stroke-dasharray:3 6;opacity:.8;
+                  animation:dash 2.4s linear infinite}
+  @keyframes dash{to{stroke-dashoffset:-22}}
+  .anode{position:absolute;transform:translate(-50%,-50%);width:146px;
+         background:#0f1c2a;border:1px solid #2a4258;border-radius:11px;padding:8px 10px;
+         display:flex;gap:8px;align-items:center;transition:all .25s;cursor:pointer;z-index:2}
+  .anode:hover{border-color:#4b6c8c;transform:translate(-50%,-50%) scale(1.03)}
+  .anode .av{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;
+             font-size:10px;font-weight:800;background:#17293b;color:var(--dim);flex:0 0 auto}
+  .anode .nm{display:block;font-size:11.5px;font-weight:650;line-height:1.2}
+  .anode .md{display:block;font:9.5px/1.35 Consolas,monospace;color:var(--dim2);overflow:hidden;
+             text-overflow:ellipsis;white-space:nowrap;max-width:94px}
+  .anode .st{display:block;font-size:8.5px;letter-spacing:.6px;text-transform:uppercase;
+             color:var(--dim2);margin-top:2px}
+  .anode > span:last-child{min-width:0;flex:1;text-align:left}
+  .anode.role-coder .av{background:#3b1d6e;color:#ddd6fe}
+  .anode.role-security .av{background:#5c1a1a;color:#fecaca}
+  .anode.role-qa .av{background:#27364a;color:#e2e8f0}
+  .anode.role-perf .av{background:#14532d;color:#bbf7d0}
+  .anode.role-docs .av{background:#5a3a0c;color:#fde68a}
+  .anode.run{border-color:#fb923c;background:#23180e;box-shadow:0 0 0 2px #fb923c22,0 0 26px #fb923c55;
+             animation:runPulse 1.6s ease-in-out infinite}
+  .anode.run .av{background:#7c2d12;color:#ffd7b0}
+  .anode.run .st{color:#fdba74}
+  .anode.next{border-color:#38bdf8;background:#0d2131;box-shadow:0 0 0 2px #38bdf822,0 0 24px #38bdf866;
+              animation:nextPulse 2.2s ease-in-out infinite}
+  .anode.next .av{background:#0b4a63;color:#bae6fd}
+  .anode.next .st{color:#7dd3fc}
+  .anode.idle{opacity:.55;filter:saturate(.25)}
+  .anode.done{border-color:#14532d}
+  .anode.done .av{background:#14532d;color:#9be7c4}
+  .anode.leader{width:168px;border-color:#2f6180;background:linear-gradient(145deg,#123448,#0d1d2b);
+                box-shadow:0 0 32px #38bdf822}
+  .anode.leader .nm{font-size:13px}
+  .anode.leader .md{max-width:118px}
+  @keyframes runPulse{0%,100%{box-shadow:0 0 0 2px #fb923c22,0 0 22px #fb923c44}50%{box-shadow:0 0 0 5px #fb923c11,0 0 34px #fb923c77}}
+  @keyframes nextPulse{0%,100%{box-shadow:0 0 0 2px #38bdf822,0 0 20px #38bdf855}50%{box-shadow:0 0 0 5px #38bdf811,0 0 30px #38bdf899}}
+  .replay{display:flex;gap:10px;align-items:center;padding:9px 12px;border:1px solid var(--line);
+          border-radius:10px;background:var(--panel2);margin-bottom:14px;flex-wrap:wrap}
+  .replay input[type=range]{flex:1;min-width:160px;accent-color:var(--accent)}
+  .replay .rmsg{font-size:10.5px;color:var(--dim2);overflow:hidden;text-overflow:ellipsis;
+                white-space:nowrap;max-width:420px}
+  .agentcard{border:1px solid var(--line);border-radius:11px;background:var(--panel2);
+             padding:11px 12px;transition:border-color .2s,box-shadow .2s}
+  .agentcard.run{border-color:#fb923c;box-shadow:0 0 18px #fb923c33}
+  .agentcard.next{border-color:#38bdf8;box-shadow:0 0 18px #38bdf833}
+  .agentcard.flash{outline:2px solid var(--accent);outline-offset:2px}
+  .anode:focus-visible,.step:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .agentcard .top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .agentcard .role{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim2)}
+  .agentcard .model{font:11px Consolas,monospace;color:#dbeafe;margin-top:4px;overflow-wrap:anywhere}
+  .agentcard .meta{font-size:10.5px;color:var(--dim2);margin-top:5px}
+  /* verify flow */
+  .flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+  .fstep{position:relative;background:#0e1a27;border:1px solid var(--line);border-radius:10px;
+         padding:10px;min-height:82px}
+  .fstep b{display:block;font-size:10px;color:var(--dim2);letter-spacing:.6px}
+  .fstep span{display:block;font-size:11.5px;margin-top:4px}
+  .fstep.ok{border-color:#14532d;background:#0f1d18}
+  .fstep.bad{border-color:#4c1d1d;background:#1d1111}
+  .fstep:not(:last-child):after{content:"";position:absolute;right:-9px;top:50%;width:9px;height:1px;
+                                background:#2a4258}
+  .contract{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:9px 0;
+            border-bottom:1px solid #1d2d3e}
+  .contract:last-child{border-bottom:0}
+  @media (prefers-reduced-motion:reduce){
+    .anode.run,.anode.next,.war .link.run,.war .link.next{animation:none}
+  }
   /* bottom control */
   .control{position:fixed;left:224px;right:0;bottom:0;z-index:7;display:flex;
            gap:8px;align-items:center;padding:9px 18px;background:#080e16ee;
@@ -287,8 +423,15 @@
       </div>
     </section>
 
+    <!-- ANALYZE -->
+    <section class="view" id="view-analyze">
+      <div class="stepper"></div>
+      <div id="analyzeBody" class="muted">No plan yet.</div>
+    </section>
+
     <!-- PLAN -->
     <section class="view" id="view-plan">
+      <div class="stepper"></div>
       <div class="card">
         <div class="spread" style="margin-bottom:8px">
           <h2 style="margin:0">Plan</h2>
@@ -296,6 +439,24 @@
         </div>
         <div id="planBody" class="muted">No plan submitted.</div>
       </div>
+    </section>
+
+    <!-- WAR ROOM -->
+    <section class="view" id="view-warroom">
+      <div class="stepper"></div>
+      <div id="warBody" class="muted">No active run.</div>
+    </section>
+
+    <!-- VERIFY -->
+    <section class="view" id="view-verify">
+      <div class="stepper"></div>
+      <div id="verifyBody" class="muted">No plan yet.</div>
+    </section>
+
+    <!-- DONE -->
+    <section class="view" id="view-done">
+      <div class="stepper"></div>
+      <div id="doneBody" class="muted">No completed job.</div>
     </section>
 
     <!-- CHAT -->
@@ -441,7 +602,7 @@ const STATUS_CLASS = (s) => ['applied','pass','ok','approved','done'].includes(s
 const state = {
   view:'overview', runs:[], selected:null, run:null, diff:null, job:null, planState:null,
   quota:null, health:null, drafts:null, workspaces:[], chatTab:'timeline', follow:false,
-  hourlyMode:'cost',
+  hourlyMode:'cost', teamData:null, replayIndex:null, replayTimer:null, pageSig:{},
   token:new URLSearchParams(location.search).get('token') || '', sessionToken:'',
   lastQuota:0, sig:{}
 };
@@ -466,10 +627,12 @@ async function refreshAll(){
   try{
     const runs = await api('/api/runs?filter=all');
     state.runs = runs.runs || [];
-    const [job, plan, health] = await Promise.all([
-      api('/api/job'), api('/api/plan'), api('/api/health')
+    const [job, plan, health, team] = await Promise.all([
+      api('/api/job'), api('/api/plan'), api('/api/health'),
+      api('/api/team').catch(() => ({}))
     ]);
     state.job = job; state.planState = plan; state.health = health;
+    state.teamData = team;
     if(Date.now() - state.lastQuota > 15000){
       try{
         state.quota = await api('/api/quota');
@@ -483,6 +646,7 @@ async function refreshAll(){
     if(state.selected) await loadRun(state.selected, true);
     $('#connDot').classList.remove('off');
     render();
+    if(state.view === 'warroom') ensureWarRun();
   }catch(error){
     $('#connDot').classList.add('off');
     $('#updatedAt').textContent = 'offline';
@@ -507,21 +671,39 @@ async function loadRun(runId, silent=false){
 /* ---------- navigation ---------- */
 function switchView(view){
   state.view = view;
-  if(location.hash !== '#' + view) history.replaceState(null, '', '#' + view);
+  if(location.hash !== '#' + view) history.pushState(null, '', '#' + view);
+  const navView = ['analyze','warroom','verify','done'].includes(view) ? 'overview' : view;
   document.querySelectorAll('.nav button').forEach((button) =>
-    button.classList.toggle('active', button.dataset.view === view));
+    button.classList.toggle('active', button.dataset.view === navView));
   document.querySelectorAll('.view').forEach((section) =>
     section.classList.toggle('active', section.id === 'view-' + view));
-  const titles = {overview:['Overview','Mission control'], plan:['Plan','Approve or reject the current plan'],
-    chat:['Chat','Chronological timeline, oldest first'], workspaces:['Workspaces','Projects and old working rooms'],
-    quota:['Usage','Requests, tokens and rolling model spend'], drafts:['Drafts','Read-only previews'],
+  const titles = {overview:['Overview','Mission control'],
+    analyze:['Analyze','Plan intelligence before any file is written'],
+    plan:['Plan','Approve or reject the current plan'],
+    warroom:['War room','Five agents, one Lead, live state'],
+    verify:['Verify','The real machine decides what passes'],
+    done:['Done','Applied, verified, summarized'],
+    chat:['Chat','Chronological timeline, oldest first'],
+    workspaces:['Workspaces','Projects and old working rooms'],
+    quota:['Usage','Requests, tokens and rolling model spend'],
+    drafts:['Drafts','Read-only previews'],
     settings:['Settings','Control, connections and quick access']};
-  $('#pageTitle').textContent = titles[view][0];
-  $('#pageSub').textContent = titles[view][1];
+  const title = titles[view] || ['Overview','Mission control'];
+  $('#pageTitle').textContent = title[0];
+  $('#pageSub').textContent = title[1];
+  document.title = title[0] + ' · Adaptive Swarm';
+  window.scrollTo(0, 0);
+  if(view !== 'warroom' && state.replayTimer){
+    clearInterval(state.replayTimer); state.replayTimer = null; state.replayIndex = null;
+  }
+  state.pageSig = state.pageSig || {};
+  state.pageSig[view] = null;
   if(view === 'drafts') loadDrafts();
   if(view === 'workspaces') loadWorkspaces();
   if(view === 'quota') renderUsage();
   if(view === 'chat') renderChat();
+  if(['analyze','plan','warroom','verify','done'].includes(view)) render();
+  if(view === 'warroom') ensureWarRun();
 }
 
 /* ---------- render ---------- */
@@ -539,9 +721,13 @@ function render(){
   const badge = $('#planBadge');
   badge.style.display = decision.status === 'pending' ? 'inline-block' : 'none';
 
-  renderStepper(jobState);
+  renderStepper(jobState, plan, decision);
   if(state.view === 'overview') renderOverview(plan, jobState, control);
+  if(state.view === 'analyze') renderAnalyze(plan, jobState, decision, control);
   if(state.view === 'plan') renderPlan(plan, decision, jobState);
+  if(state.view === 'warroom') renderWarRoom(plan, jobState, decision);
+  if(state.view === 'verify') renderVerify(plan, jobState, decision);
+  if(state.view === 'done') renderDone(plan, jobState, decision);
   if(state.view === 'workspaces') renderWorkspaces();
   if(state.view === 'quota') renderUsage();
   if(state.view === 'settings') renderSettings(plan, jobState, control);
@@ -549,96 +735,869 @@ function render(){
   renderControls(control);
 }
 
-function renderStepper(jobState){
+function renderStepper(jobState, plan, decision){
   state.jobState = jobState;
   const steps = ['Analyze','Plan','War room','Verify','Done'];
   const phase = jobState.phase || '';
-  let current = 0;
-  if(['awaiting_approval','rejected'].includes(phase)) current = 1;
-  else if(['approved','running','paused'].includes(phase)) current = 2;
-  else if(phase === 'stopped') current = 3;
-  else if(phase === 'done') current = 4;
-  $('#stepper').innerHTML = steps.map((name, index) => {
-    const cls = index < current ? 'done' : index === current ? 'active' : '';
-    return `<button type="button" class="step ${cls}" onclick="showStep(${index})"
-      title="Show ${name} summary"><span class="n">${index + 1}</span>${name}</button>`;
+  const timeline = runContext(decision, phase).timeline;
+  const approved = ['approved', 'done'].includes((decision || {}).status) ||
+    ['approved', 'running', 'paused', 'done', 'stopped'].includes(phase);
+  const warDone = timeline.some((item) =>
+    ['safe_writer.write', 'recipe.done', 'safe_writer.verify'].includes(item.event_type)) ||
+    ['done', 'stopped'].includes(phase);
+  const verifyDone = timeline.some((item) => item.event_type === 'safe_writer.verify') ||
+    phase === 'done';
+  const flags = [!!plan, approved, warDone, verifyDone, phase === 'done'];
+  let current = flags.findIndex((value) => !value);
+  if(current < 0) current = 4;
+  const stopped = phase === 'stopped';
+  if(stopped){
+    const reachedVerify = timeline.some((item) => item.event_type === 'safe_writer.verify');
+    current = reachedVerify ? 3 : 2;
+  }
+  const signature = phase + '|' + current + '|' + stopped;
+  if(state.stepperSig === signature) return;
+  state.stepperSig = signature;
+  const html = steps.map((name, index) => {
+    const cls = index < current ? 'done'
+      : index === current ? 'active' + (stopped ? ' bad' : '') : '';
+    return `<button type="button" class="step ${cls}" onclick="openStep(${index})"
+      aria-current="${index === current ? 'step' : 'false'}"
+      title="Open ${name}"><span class="n">${index + 1}</span>${name}</button>`;
   }).join('<span class="muted">&#8250;</span>');
+  document.querySelectorAll('.stepper').forEach((node) => { node.innerHTML = html; });
 }
 
-function showStep(index){
-  const job = state.job || {};
-  const plan = job.plan || (state.planState || {}).plan || null;
-  const jobState = job.state || state.jobState || {};
-  const decision = job.decision || (state.planState || {}).decision || {};
-  const titles = ['Analyze','Plan','War room','Verify','Done'];
+function openStep(index){
+  const views = ['analyze','plan','warroom','verify','done'];
+  switchView(views[index] || 'overview');
+}
+
+async function ensureWarRun(){
+  const phase = (state.job && state.job.state && state.job.state.phase) || '';
+  if(['awaiting_approval', 'approved'].includes(phase)) return;
+  const current = state.run && state.run.run ? state.run.run.run_id : '';
+  if(String(current).startsWith('rc_')) return;
+  const latest = (state.runs || []).find((run) => String(run.run_id).startsWith('rc_'));
+  if(!latest) return;
+  try{
+    await loadRun(latest.run_id, true);
+    if(state.view === 'warroom') render();
+  }catch(_){ /* keep the current run */ }
+}
+
+function shortModel(model){
+  return String(model || '').split('/').pop();
+}
+
+function fmtDuration(ms){
+  const value = Number(ms || 0);
+  if(value < 1000) return value + 'ms';
+  const seconds = value / 1000;
+  if(seconds < 60) return seconds.toFixed(1) + 's';
+  return Math.floor(seconds / 60) + 'm ' + Math.round(seconds % 60) + 's';
+}
+
+function statCard(key, value, sub){
+  return `<div class="stat"><div class="k">${esc(key)}</div>
+    <b>${esc(String(value))}</b><span>${esc(sub || '')}</span></div>`;
+}
+
+function mergedSubtasks(plan, jobState){
+  const planSubs = (plan && plan.subtasks) || [];
+  const live = new Map(((jobState && jobState.subtasks) || []).map((item) => [item.id, item]));
+  return planSubs.map((item) => {
+    const stateItem = live.get(item.id) || {};
+    return Object.assign({}, item, stateItem, {
+      title: item.title || stateItem.title || '',
+      objective: item.objective || '',
+      verify_command: item.verify_command || stateItem.verify_command || '',
+      target_files: item.target_files || stateItem.files || [],
+      sandbox_files: item.sandbox_files || [],
+      depends_on: item.depends_on || [],
+      level: item.level != null ? item.level : 1,
+      max_rounds: item.max_rounds != null ? item.max_rounds : 1,
+      status: stateItem.status || item.status || 'pending'
+    });
+  });
+}
+
+function topoOrder(subtasks){
+  const byId = new Map(subtasks.map((item) => [item.id, item]));
+  const indeg = new Map();
+  const children = new Map(subtasks.map((item) => [item.id, []]));
+  subtasks.forEach((item) => {
+    const deps = (item.depends_on || []).filter((dep) => byId.has(dep));
+    indeg.set(item.id, deps.length);
+    deps.forEach((dep) => children.get(dep).push(item.id));
+  });
+  const queue = subtasks.filter((item) => indeg.get(item.id) === 0).map((item) => item.id);
+  const ordered = [];
+  while(queue.length){
+    const id = queue.shift();
+    ordered.push(byId.get(id));
+    children.get(id).forEach((child) => {
+      indeg.set(child, indeg.get(child) - 1);
+      if(indeg.get(child) === 0) queue.push(child);
+    });
+  }
+  return ordered.length === subtasks.length ? ordered : subtasks;
+}
+
+function uniqueFiles(subtasks, key){
+  return [...new Set(subtasks.flatMap((item) => item[key] || []))];
+}
+
+function quotaFor(model){
+  const list = (state.quota && state.quota.models) || [];
+  return list.find((item) => item.model === model) || null;
+}
+
+function guardRender(view, payload){
+  state.pageSig = state.pageSig || {};
+  const signature = JSON.stringify(payload);
+  if(state.pageSig[view] === signature) return false;
+  state.pageSig[view] = signature;
+  return true;
+}
+
+function runContext(decision, phase){
+  const run = (state.run && state.run.run) || {};
+  const all = (state.run && state.run.timeline) || [];
+  const decisionAt = decision && decision.at ? new Date(decision.at).getTime() : 0;
+  const firstAt = all.length ? new Date(all[0].timestamp).getTime() : 0;
+  const stale = ['awaiting_approval', 'approved'].includes(phase) &&
+    decisionAt && firstAt && firstAt < decisionAt;
+  return {run: stale ? {} : run, timeline: stale ? [] : all, stale};
+}
+
+function healthRow(label, pct, detail){
+  const value = Math.max(0, Math.min(100, Math.round(pct)));
+  const cls = value >= 99 ? '' : value >= 60 ? 'warn' : 'bad';
+  return `<div class="checkrow">
+    <div><div class="lab">${esc(label)}</div>
+      <div class="muted" style="font-size:10px">${esc(detail)}</div></div>
+    <div class="hbar2"><i class="${cls}" style="width:${value}%"></i></div>
+    <div class="val">${value}%</div></div>`;
+}
+
+function riskItem(cls, title, text){
+  const icon = cls === 'bad' ? '!' : cls === 'warn' ? '~' : 'ok';
+  return `<div class="risk ${cls}"><span class="ic">${icon}</span>
+    <div><b>${esc(title)}</b><p>${esc(text)}</p></div></div>`;
+}
+
+function renderAnalyze(plan, jobState, decision, control){
+  if(!guardRender('analyze', {plan, jobState, decision, team:state.teamData, run:state.run})) return;
+  const box = $('#analyzeBody');
   if(!plan){
-    openModal(titles[index] || 'Step',
-      '<p>No plan yet. Type a goal above and press <b>Plan</b>.</p>');
+    box.innerHTML = `<div class="hero">
+      <div><div class="eyebrow">Plan intelligence</div><h2>No plan to analyze</h2>
+        <p>Type a goal on Overview and press Plan. This page then shows scope,
+        dependencies, verification coverage, risks and agent readiness before any file is written.</p></div>
+      <div class="actions"><button class="btn primary" onclick="switchView('overview')">New goal</button></div>
+    </div>`;
     return;
   }
-  const subtasks = (jobState.subtasks && jobState.subtasks.length)
-    ? jobState.subtasks : (plan.subtasks || []);
-  const planById = Object.fromEntries((plan.subtasks || []).map((item) => [item.id, item]));
-  const team = jobState.team || {};
+  const subs = mergedSubtasks(plan, jobState);
+  const files = uniqueFiles(subs, 'target_files');
+  const sandbox = uniqueFiles(subs, 'sandbox_files');
+  const missingVerify = subs.filter((item) => !String(item.verify_command || '').trim());
+  const missingSandbox = files.filter((file) => !sandbox.includes(file));
+  const fileUse = {};
+  subs.forEach((item) => (item.target_files || []).forEach((file) => {
+    fileUse[file] = fileUse[file] || [];
+    fileUse[file].push(item.id);
+  }));
+  const shared = Object.entries(fileUse).filter(([, ids]) => ids.length > 1);
+  const unorderedShared = shared.filter(([, ids]) => ids.some((id, index) =>
+    ids.slice(index + 1).some((other) => {
+      const left = subs.find((item) => item.id === id) || {};
+      const right = subs.find((item) => item.id === other) || {};
+      return !(left.depends_on || []).includes(other) &&
+             !(right.depends_on || []).includes(id);
+    })));
+  const unknownDeps = [];
+  subs.forEach((item) => (item.depends_on || []).forEach((dep) => {
+    if(!subs.some((other) => other.id === dep)) unknownDeps.push(item.id + ' -> ' + dep);
+  }));
+  const order = topoOrder(subs);
+  const maxLevel = Math.max(0, ...subs.map((item) => Number(item.level || 0)));
+  const rounds = subs.reduce((total, item) => total + Number(item.max_rounds || 1), 0);
+  const applied = subs.filter((item) => ['applied', 'done'].includes(item.status)).length;
+  const verifyPct = subs.length ? (subs.length - missingVerify.length) / subs.length * 100 : 100;
+  const sandboxPct = files.length ? (files.length - missingSandbox.length) / files.length * 100 : 100;
+  const isolationPct = files.length ? (files.length - shared.length) / files.length * 100 : 100;
+  const approved = ['approved', 'done'].includes(decision.status) || jobState.phase === 'done';
+  const approvalPct = approved ? 100 : decision.status === 'pending' ? 50 : 0;
+  const phase = jobState.phase || 'idle';
+  const recentTimeline = runContext(decision, phase).timeline;
+  const team = jobState.team || (state.teamData && state.teamData.team) || {};
+  const route = state.teamData || {};
+  const risks = [];
+  if(!subs.length) risks.push(['bad', 'Plan is empty', 'No subtask, no execution. Ask the planner to regenerate.']);
+  if(missingVerify.length) risks.push(['bad', 'Missing verify command',
+    missingVerify.map((item) => item.id).join(', ') + ' cannot be applied without a machine check.']);
+  if(unknownDeps.length) risks.push(['bad', 'Unknown dependency',
+    unknownDeps.join(', ') + ' points to an id that is not in the plan.']);
+  if(shared.length) risks.push(['warn', 'Shared target file',
+    shared.map(([file, ids]) => file + ' (' + ids.join(', ') + ')').join('; ') +
+    ' - subtasks must run in order to avoid overwriting each other.']);
+  if(unorderedShared.length) risks.push(['bad', 'Shared file without a dependency',
+    unorderedShared.map(([file, ids]) => file + ' (' + ids.join(', ') + ')').join('; ') +
+    ' - add depends_on so the write order is explicit.']);
+  if(!sandbox.length) risks.push(['warn', 'Pre-flight will be syntax-only',
+    'No sandbox_files: the shadow verify cannot run the real command, so it falls back to py_compile.']);
+  if(missingSandbox.length) risks.push(['warn', 'Verify cannot see every file',
+    missingSandbox.join(', ') + ' is a target but not in sandbox_files. The shadow run may fail.']);
+  if(maxLevel >= 3) risks.push(['warn', 'Level 3 transaction',
+    'All target files are backed up and roll back together. One bad file stops the whole batch.']);
+  if(rounds > subs.length) risks.push(['warn', 'Retry budget',
+    rounds + ' rounds across ' + subs.length + ' subtask(s); the hard cap is 8 requests per run.']);
+  if(!approved) risks.push(['warn', 'Approval gate is ' + (decision.status || 'pending'),
+    'Nothing is written before approval. Review the plan, then approve it.']);
+  const freeChain = (route.chain || []).filter((model) => String(model).includes('-free'));
+  if(freeChain.length) risks.push(['warn', 'Free fallback in chain',
+    shortModel(freeChain[0]) + ' may take over if paid models are tight on quota.']);
+  if(!team.coder && !(route.chain || []).length) risks.push(['warn', 'No route selected yet',
+    'The coder model is chosen when the job starts. Approve the plan to select it.']);
+  if(!risks.length) risks.push(['ok', 'No structural risk detected',
+    'Verify, sandbox, dependency and file isolation checks all look clean.']);
+
+  const nextStep = phase === 'done'
+    ? 'Review the applied files on Done, then run the next goal.'
+    : phase === 'stopped'
+      ? 'Open Chat, inspect the diff and verify evidence, fix the cause and re-plan.'
+      : phase === 'running' || phase === 'paused'
+        ? 'Watch War room and Chat. Use Pause or Stop from the bottom bar if needed.'
+        : ['approved'].includes(phase)
+          ? 'Start the waiting job process, or copy the command on Plan and run it.'
+          : 'Review the plan and approve it. Nothing is written before approval.';
+
+  const roleRows = (route.roles || []).length ? route.roles : [
+    {role:'coder', label:'Coder', model: team.coder},
+    {role:'security', label:'Security', model:null},
+    {role:'qa', label:'QA', model:null},
+    {role:'perf', label:'Perf', model:null},
+    {role:'docs', label:'Docs', model:null}
+  ];
+  const agentHtml = roleRows.map((row) => {
+    const quota = quotaFor(row.model);
+    const health = (route.model_health || {})[row.model] || null;
+    const quotaText = quota
+      ? (quota.ok ? 'quota ok' : 'quota tight') + ' · ' + (100 - Number(quota.worst_pct || 0)).toFixed(0) + '% headroom'
+      : row.model ? 'free / unlimited' : 'not assigned';
+    const healthText = health
+      ? (health.cooldown_s ? 'cooldown ' + health.cooldown_s + 's'
+        : health.successes + ' ok / ' + health.failures + ' fail')
+      : 'no health sample';
+    const mode = row.standby ? 'standby' : row.skipped ? 'skipped' : 'ready';
+    return `<div class="contract"><span class="chip">${esc(row.label)}</span>
+      <span class="mono">${esc(row.model || 'not assigned')}</span>
+      <span class="chip ${mode === 'ready' ? 'ok' : mode === 'skipped' ? 'bad' : 'warn'}">${mode}</span>
+      <span class="muted" style="font-size:10.5px;margin-left:auto">${esc(quotaText)} · ${esc(healthText)}</span></div>`;
+  }).join('');
+
+  box.innerHTML = `<div class="hero">
+    <div><div class="eyebrow">Plan intelligence · ${esc(plan.job_id || '')}</div>
+      <h2>${esc(plan.objective || 'Untitled plan')}</h2>
+      <p>${esc(subs.length)} subtask(s), ${esc(files.length)} file(s), ${esc(rounds)} round(s).
+      This is what the swarm knows before it writes: scope, order, checks and risk.</p></div>
+    <div class="actions">
+      <span class="pill ${STATUS_CLASS(decision.status || phase)}">${esc(decision.status || phase || 'pending')}</span>
+      <button class="btn ghost" onclick="switchView('plan')">Open plan</button>
+      <button class="btn ghost" onclick="switchView('warroom')">War room</button>
+    </div>
+  </div>
+
+  <div class="statgrid">
+    ${statCard('Subtasks', subs.length, applied + ' already applied')}
+    ${statCard('Files', files.length, shared.length + ' shared')}
+    ${statCard('Verify', (subs.length - missingVerify.length) + '/' + subs.length, 'machine commands')}
+    ${statCard('Max level', maxLevel || '-', maxLevel >= 3 ? 'multi-file atomic' : maxLevel <= 1 ? 'single file' : 'standard write')}
+    ${statCard('Rounds', rounds, 'hard cap 8 requests')}
+    ${statCard('Phase', phase, 'approval: ' + (decision.status || 'pending'))}
+  </div>
+
+  <div class="grid g2">
+    <div class="card"><h2>Execution order</h2>
+      <p class="muted" style="margin:0 0 8px;font-size:11px">Dependencies are enforced; the rest runs in this order.</p>
+      <div class="deprail">${order.map((item, index) =>
+        `<div class="depnode"><b>${esc(item.id)}</b><span>${esc(item.title || '')}</span>
+          <div class="muted" style="font-size:9.5px">${item.depends_on && item.depends_on.length
+            ? 'after ' + esc(item.depends_on.join(', ')) : 'starts first'}</div></div>` +
+        (index < order.length - 1 ? '<span class="deparrow">&#8594;</span>' : '')).join('')}</div>
+    </div>
+    <div class="card"><h2>Plan health</h2>
+      ${healthRow('Verify coverage', verifyPct,
+        (subs.length - missingVerify.length) + '/' + subs.length + ' subtasks have a command')}
+      ${healthRow('Sandbox coverage', sandboxPct,
+        (files.length - missingSandbox.length) + '/' + files.length + ' target files visible')}
+      ${healthRow('File isolation', isolationPct,
+        shared.length ? shared.length + ' shared file(s)' : 'no file shared by two subtasks')}
+      ${healthRow('Dependency integrity', unknownDeps.length ? 0 : 100,
+        unknownDeps.length ? unknownDeps.join(', ') : 'all depends_on ids resolve')}
+      ${healthRow('Approval gate', approvalPct,
+        'plan is ' + (decision.status || 'pending'))}
+    </div>
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h2>Files in scope</h2>
+      ${files.length ? files.map((file) => {
+        const ids = fileUse[file] || [];
+        const inSandbox = sandbox.includes(file);
+        return `<div class="contract"><span class="mono">${esc(file)}</span>
+          <span class="chip">${esc(ids.join(', '))}</span>
+          <span class="chip ${inSandbox ? 'ok' : 'warn'}">${inSandbox ? 'sandbox' : 'not in sandbox'}</span></div>`;
+      }).join('') : '<p class="muted">No target files.</p>'}
+    </div>
+    <div class="card"><h2>Attention points</h2>
+      ${risks.map(([cls, title, text]) => riskItem(cls, title, text)).join('')}
+      <div class="risk ok" style="margin-top:10px"><span class="ic">&#8594;</span>
+        <div><b>Next action</b><p>${esc(nextStep)}</p></div></div>
+    </div>
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h2>Agent readiness</h2>${agentHtml}
+      <p class="muted" style="margin:8px 0 0;font-size:10.5px">
+        Reviewer mode: <b>${esc(route.reviewer_mode || 'heuristic')}</b>.
+        ${route.wave_active ? 'Wave reviewers are part of this run.'
+          : 'Heuristic gate: the 4 reviewer models stay on standby and spend 0 requests.'}</p>
+    </div>
+    <div class="card"><h2>Recent events</h2>
+      ${(() => {
+        const events = recentTimeline.slice(-8);
+        return events.length ? events.map((item) => `<div class="row" style="gap:8px;padding:3px 0">
+          <span class="mono" style="width:62px;color:var(--dim2)">${clock(item.timestamp)}</span>
+          <b style="font-size:11px">${esc((NODE[item.node] || NODE.system).n)}</b>
+          <span style="font-size:11.5px">${esc(item.message)}</span></div>`).join('')
+          : '<p class="muted">No run selected yet.</p>';
+      })()}
+    </div>
+  </div>`;
+}
+
+function renderPlan(plan, decision, jobState){
+  const status = $('#planStatus');
+  status.className = 'pill ' + STATUS_CLASS(decision.status || jobState.phase);
+  status.textContent = decision.status || jobState.phase || 'none';
+  if(!plan){ $('#planBody').innerHTML = 'No plan submitted.'; return; }
+  const subs = mergedSubtasks(plan, jobState);
   const source = plan._source || '.agents/tmp/plan.json';
-  let html = '';
-  if(index === 0){
-    const files = [...new Set(subtasks.flatMap((item) =>
-      item.files || item.target_files || []))];
-    html = `<div class="kv">
-      <div class="k">Job</div><div class="mono">${esc(plan.job_id || '-')}</div>
-      <div class="k">Objective</div><div>${esc(plan.objective || '')}</div>
-      <div class="k">Plan file</div><div class="mono">${esc(source)}</div>
-      <div class="k">Subtasks</div><div>${subtasks.length}</div>
-      <div class="k">Files</div><div class="mono">${esc(files.join(', ') || '-')}</div>
-      <div class="k">Approval</div><div><span class="pill ${STATUS_CLASS(decision.status)}">${esc(decision.status || 'pending')}</span></div>
+  const root = (state.planState && state.planState.root) || '.';
+  const command = 'python .agents/job.py --plan ' + source + ' --root "' + root + '" --wait --open';
+  const applied = subs.filter((item) => ['applied', 'done'].includes(item.status)).length;
+  const files = uniqueFiles(subs, 'target_files');
+  const maxLevel = Math.max(0, ...subs.map((item) => Number(item.level || 0)));
+  const pending = decision.status === 'pending';
+  const order = topoOrder(subs);
+  const actions = pending ? `<div class="row" style="margin-bottom:12px">
+      <button class="btn ok" onclick="decide('approve')">Approve plan</button>
+      <button class="btn bad" onclick="decide('reject')">Reject</button>
+      <span class="muted" style="font-size:10.5px">Approval records the decision only. Start the job with the copy command below; nothing is written before approval.</span></div>` : '';
+  const cards = subs.map((item) => {
+    const st = item.status || 'pending';
+    const fileList = item.target_files || [];
+    return `<details class="subtask" ${['applied', 'done'].includes(st) ? 'open' : ''}>
+      <summary><span class="pill">${esc(item.id)}</span><b>${esc(item.title || '')}</b>
+        <span class="muted" style="font-size:10.5px">L${esc(item.level)} ·
+          ${esc(item.max_rounds)} round(s) · ${esc(fileList.length)} file(s)</span>
+        <span class="pill ${STATUS_CLASS(st)}" style="margin-left:auto">${esc(st)}</span></summary>
+      <div class="body"><div class="fieldgrid">
+        <div class="k">Objective</div><div>${esc(item.objective || '-')}</div>
+        <div class="k">Acceptance</div><div>${esc(item.acceptance_criteria || '-')}</div>
+        <div class="k">Boundaries</div><div>${esc(item.boundaries || '-')}</div>
+        <div class="k">Input context</div><div>${esc(item.input_context || '-')}</div>
+        <div class="k">Target files</div><div class="mono">${esc(fileList.join(', ') || '-')}</div>
+        <div class="k">Sandbox</div><div class="mono">${esc((item.sandbox_files || []).join(', ') || '-')}</div>
+        <div class="k">Verify</div><div><span class="code">${esc(item.verify_command || 'MISSING')}</span></div>
+        <div class="k">Depends on</div><div>${esc((item.depends_on || []).join(', ') || 'nothing')}</div>
+        <div class="k">Fallback chain</div><div class="mono">${esc((item.chain || []).join(' -> ') || 'chosen at run time')}</div>
+        <div class="k">Requests</div><div>${esc(item.requests != null ? item.requests : '-')}</div>
+      </div></div></details>`;
+  }).join('');
+  $('#planBody').innerHTML = `<div class="hero">
+      <div><div class="eyebrow">Plan · ${esc(plan.job_id || '')}</div>
+        <h2>${esc(plan.objective || 'Untitled plan')}</h2>
+        <p>${esc(subs.length)} subtask(s), ${esc(files.length)} file(s), max level ${esc(maxLevel || '-')}.
+        Dependencies run top-to-bottom; the machine verifies each step.</p></div>
+      <div class="actions"><span class="pill ${STATUS_CLASS(decision.status || jobState.phase)}">${esc(decision.status || jobState.phase || 'pending')}</span>
+        <button class="btn ghost" onclick="switchView('analyze')">Analyze</button></div>
     </div>
-    <p class="muted" style="margin-top:12px">Phase: <b>${esc(jobState.phase || 'idle')}</b>. The planner reads the tree, proposes verified subtasks, then waits for approval.</p>`;
-  } else if(index === 1){
-    const rows = subtasks.map((item) => `<tr>
-      <td><b>${esc(item.id)}</b></td><td>${esc(item.title || (planById[item.id] || {}).title || '')}</td>
-      <td class="mono">${esc(((item.files || item.target_files || (planById[item.id] || {}).target_files) || []).join(', '))}</td>
-      <td><span class="pill ${STATUS_CLASS(item.status)}">${esc(item.status || 'pending')}</span></td></tr>`).join('');
-    html = `<table><thead><tr><th>ID</th><th>Task</th><th>Files</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="muted" style="margin-top:12px">Approval: <b>${esc(decision.status || 'pending')}</b>. Nothing is written before approval.</p>`;
-  } else if(index === 2){
-    const tl = (state.run && state.run.timeline) || [];
-    const relevant = tl.filter((item) =>
-      ['coder','reviewer','security','qa','lead'].includes(String(item.node || '').toLowerCase())).slice(-12);
-    html = `<div class="kv">
-      <div class="k">Coder</div><div class="mono">${esc(team.coder || '-')}</div>
-      <div class="k">Fallback</div><div class="mono">${esc(team.fallback || '-')}</div>
-      <div class="k">Reviewer</div><div class="mono">${esc(team.reviewer || 'heuristic')}</div>
-      <div class="k">Verify</div><div class="mono">${esc(team.verify || 'machine')}</div>
+    ${actions}
+    <div class="quick" style="margin-bottom:12px"><span class="k">run this plan</span>
+      <code id="planCmd">${esc(command)}</code>
+      <button class="copy" onclick="copyCommand(this)">Copy</button></div>
+    <div class="statgrid">
+      ${statCard('Subtasks', subs.length, applied + ' applied')}
+      ${statCard('Files', files.length, 'in scope')}
+      ${statCard('Max level', maxLevel || '-', 'transaction size')}
+      ${statCard('Approval', decision.status || 'pending', 'gate')}
+      ${statCard('Verify', subs.filter((item) => item.verify_command).length + '/' + subs.length, 'commands')}
     </div>
-    <p class="muted" style="margin-top:12px">Selected run events (latest 12):</p>
-    ${relevant.length ? relevant.map((item) => `<div class="row" style="gap:8px;padding:3px 0">
+    <div class="card" style="margin-bottom:12px"><h2>Execution order</h2>
+      <div class="deprail">${order.map((item, index) =>
+        `<div class="depnode"><b>${esc(item.id)}</b><span>${esc(item.title || '')}</span>
+          <div class="muted" style="font-size:9.5px">${item.depends_on && item.depends_on.length
+            ? 'after ' + esc(item.depends_on.join(', ')) : 'starts first'}</div></div>` +
+        (index < order.length - 1 ? '<span class="deparrow">&#8594;</span>' : '')).join('')}</div>
+    </div>
+    <div class="card"><h2>Subtasks</h2>${cards || '<p class="muted">No subtasks.</p>'}</div>`;
+  const setCmd = $('#setCommand');
+  if(setCmd) setCmd.innerHTML = `<span class="k">command</span><code id="planCmd2">${esc(command)}</code>
+    <button class="copy" onclick="copyCommand(this)">Copy</button>`;
+}
+
+function warStatuses(jobState, waveActive, timeline){
+  const phase = jobState.phase || '';
+  const events = timeline || [];
+  const status = {coder:'idle', security:'idle', qa:'idle', perf:'idle', docs:'idle'};
+  let active = null;
+  const mark = (node) => {
+    node = String(node || '').toLowerCase();
+    if(node === 'coder') status.coder = 'running';
+    else if(node === 'reviewer') {
+      if(waveActive){
+        status.coder = 'done';
+        ['security', 'qa', 'perf', 'docs'].forEach((role) => { status[role] = 'running'; });
+      }
+    }
+    else if(status[node] != null) status[node] = 'running';
+  };
+  if(state.replayIndex != null && events[state.replayIndex]){
+    active = events[state.replayIndex];
+    mark(active.node);
+  } else if(['awaiting_approval', 'approved'].includes(phase)){
+    status.coder = 'next';
+  } else if(['running', 'paused'].includes(phase)){
+    const last = events[events.length - 1];
+    if(last && last.node === 'reviewer' && waveActive){
+      status.coder = 'done';
+      ['security', 'qa', 'perf', 'docs'].forEach((role) => { status[role] = 'running'; });
+    } else {
+      status.coder = 'running';
+      if(waveActive){
+        ['security', 'qa', 'perf', 'docs'].forEach((role) => { status[role] = 'next'; });
+      }
+    }
+    active = last || null;
+  }
+  return {status, active};
+}
+
+function focusAgent(role){
+  const node = document.getElementById('agent-' + role);
+  if(!node) return;
+  node.scrollIntoView({behavior:'smooth', block:'center'});
+  node.classList.add('flash');
+  setTimeout(() => node.classList.remove('flash'), 1200);
+}
+
+function setReplay(value){
+  const timeline = (state.run && state.run.timeline) || [];
+  if(value == null || value === ''){
+    state.replayIndex = null;
+    if(state.replayTimer){ clearInterval(state.replayTimer); state.replayTimer = null; }
+  } else {
+    state.replayIndex = Math.max(0, Math.min(Number(value), Math.max(0, timeline.length - 1)));
+  }
+  render();
+}
+
+function toggleReplay(){
+  const timeline = (state.run && state.run.timeline) || [];
+  if(!timeline.length) return;
+  if(state.replayTimer){
+    clearInterval(state.replayTimer); state.replayTimer = null; render(); return;
+  }
+  if(state.replayIndex == null) state.replayIndex = 0;
+  state.replayTimer = setInterval(() => {
+    const length = ((state.run && state.run.timeline) || []).length;
+    if(state.replayIndex >= length - 1){
+      clearInterval(state.replayTimer); state.replayTimer = null; render(); return;
+    }
+    state.replayIndex += 1;
+    render();
+  }, 900);
+  render();
+}
+
+function renderWarRoom(plan, jobState, decision){
+  if(!guardRender('warroom', {plan, jobState, decision, team:state.teamData, run:state.run,
+    replay:state.replayIndex, playing:!!state.replayTimer})) return;
+  const box = $('#warBody');
+  if(!plan){
+    box.innerHTML = `<div class="hero"><div><div class="eyebrow">War room</div>
+      <h2>No plan is active</h2><p>The war room lights up when a plan is submitted.
+      Coder, Security, QA, Perf and Docs orbit the Lead; the Lead is the only writer.</p></div>
+      <div class="actions"><button class="btn primary" onclick="switchView('overview')">New goal</button></div></div>`;
+    return;
+  }
+  const subs = mergedSubtasks(plan, jobState);
+  const phase = jobState.phase || 'idle';
+  const ctx = runContext(decision, phase);
+  const timeline = ctx.timeline;
+  if(ctx.stale || (state.replayIndex != null && !timeline[state.replayIndex])){
+    state.replayIndex = null;
+    if(state.replayTimer){ clearInterval(state.replayTimer); state.replayTimer = null; }
+  }
+  const team = jobState.team || {};
+  const data = state.teamData || {};
+  const roles = (data.roles && data.roles.length) ? data.roles : [
+    {role:'coder', label:'Coder', model:team.coder, fallback:team.fallback},
+    {role:'security', label:'Security', model:null},
+    {role:'qa', label:'QA', model:null},
+    {role:'perf', label:'Perf', model:null},
+    {role:'docs', label:'Docs', model:null}
+  ];
+  const {status, active} = warStatuses(jobState, !!data.wave_active, timeline);
+  if(phase === 'done' && state.replayIndex == null){
+    status.coder = 'done';
+    roles.forEach((item) => {
+      if(!item.standby && !item.skipped && ['approve', 'reject'].includes(item.verdict)){
+        status[item.role] = 'done';
+      }
+    });
+  }
+  const idx = state.replayIndex;
+  const activeEvent = idx != null ? timeline[idx] : (timeline[timeline.length - 1] || null);
+  const rangeMax = Math.max(0, timeline.length - 1);
+  const replayNode = idx != null && activeEvent ? String(activeEvent.node || '').toLowerCase() : '';
+  const centerState = idx != null && activeEvent ? 'run'
+    : phase === 'done' ? 'done' : ['running', 'paused'].includes(phase)
+      ? 'run' : ['awaiting_approval', 'approved'].includes(phase) ? 'next' : '';
+  const pos = {coder:[50, 14], security:[15, 31], qa:[85, 31], perf:[28, 77], docs:[72, 77]};
+  const short = (model) => shortModel(model);
+  const roleNode = (role) => {
+    const item = roles.find((row) => row.role === role) || {role, label:role};
+    const [x, y] = pos[role];
+    const st = status[role] || 'idle';
+    const label = item.standby ? 'standby' : item.skipped ? 'skipped'
+      : st === 'running' ? 'running' : st === 'next' ? 'next'
+        : st === 'done' ? 'approved' : 'idle';
+    return `<button type="button" class="anode ${st} role-${esc(role)}" style="left:${x}%;top:${y}%"
+      onclick="focusAgent('${role}')" title="${esc(item.label)} · ${esc(item.model || 'not assigned')}">
+      <span class="av">${esc((item.label || role).slice(0, 2).toUpperCase())}</span>
+      <span><span class="nm">${esc(item.label)}</span>
+        <span class="md">${esc(item.model ? short(item.model) : 'not assigned')}</span>
+        <span class="st">${label}</span></span></button>`;
+  };
+  const lines = roles.map((item) => {
+    const [x, y] = pos[item.role] || [50, 50];
+    const cls = status[item.role] === 'running' ? 'run' : status[item.role] === 'next' ? 'next' : '';
+    return `<line x1="50" y1="48" x2="${x}" y2="${y}" class="link ${cls}"
+      vector-effect="non-scaling-stroke"/>`;
+  }).join('');
+  const agentCards = roles.map((item) => {
+    const st = status[item.role] || 'idle';
+    const quota = quotaFor(item.model);
+    const health = (data.model_health || {})[item.model] || null;
+    const verdict = (!item.standby && item.verdict)
+      ? `<span class="pill ${STATUS_CLASS(item.verdict)}">${esc(item.verdict)}</span>` : '';
+    const note = item.standby
+      ? 'Heuristic review: this model is not called in this run.'
+      : item.skipped
+        ? 'Skipped by the wave request budget.'
+        : (item.reasons && item.reasons[0])
+          ? String(item.reasons[0]).slice(0, 160) : 'No reviewer note yet.';
+    const stateText = item.standby ? 'standby' : item.skipped ? 'skipped' : st;
+    return `<div class="agentcard ${st}" id="agent-${item.role}">
+      <div class="top"><span class="role">${esc(item.label)}</span>${verdict}
+        <span class="chip ${stateText === 'running' ? 'warn' : stateText === 'skipped' ? 'bad' : stateText === 'standby' ? 'warn' : 'ok'}">${stateText}</span></div>
+      <div class="model">${esc(item.model || 'not assigned')}</div>
+      ${item.fallback ? `<div class="meta">fallback: ${esc(item.fallback)}</div>` : ''}
+      <div class="meta">${quota ? esc((100 - Number(quota.worst_pct || 0)).toFixed(0)) + '% quota headroom'
+        : item.model ? 'free / unlimited' : 'no model yet'}
+        ${health ? ' · ' + esc(health.cooldown_s ? 'cooldown ' + health.cooldown_s + 's'
+          : health.successes + ' ok / ' + health.failures + ' fail') : ''}</div>
+      <div class="meta">${esc(note)}</div></div>`;
+  }).join('');
+  const feed = timeline.slice(-10).reverse();
+  const routeLine = data.work_type
+    ? `${data.work_type} · ${data.route_label || ''} · ${data.route_mode || 'mode'}`
+    : 'No route decided yet';
+  const displayPhase = idx != null ? 'replay' : phase;
+  const requestsUsed = Number((state.run && state.run.run && state.run.run.requests) || 0);
+  const budgetPct = Math.min(100, requestsUsed / 8 * 100);
+  const budgetCls = requestsUsed >= 8 ? 'bad' : requestsUsed >= 6 ? 'warn' : '';
+  const lastAge = activeEvent && activeEvent.timestamp
+    ? Math.max(0, Math.round((Date.now() - new Date(activeEvent.timestamp).getTime()) / 1000)) : null;
+  const stale = ['running', 'paused'].includes(phase) && lastAge != null && lastAge > 30;
+  box.innerHTML = `<div class="hero">
+    <div><div class="eyebrow">War room · ${esc(displayPhase)}</div>
+      <h2>${esc(plan.job_id || 'Active plan')}</h2>
+      <p>Lead orchestrates; Coder writes; Security, QA, Perf and Docs review in parallel.
+      Orange means running now, blue means selected for the next phase, gray means idle.
+      State is inferred from the latest ledger event, not a per-role heartbeat.</p></div>
+    <div class="actions">
+      <span class="pill ${STATUS_CLASS(phase)}">${esc(phase)}</span>
+      ${idx != null ? `<span class="chip">replay ${esc(String(idx + 1))}/${esc(String(timeline.length))}</span>` : ''}
+      <span class="chip ${data.wave_active ? 'ok' : 'warn'}">reviewer: ${esc(data.reviewer_mode || 'heuristic')}</span>
+      ${stale ? `<span class="chip warn">no events for ${esc(String(lastAge))}s</span>` : ''}
+      <button class="btn ghost" onclick="switchView('analyze')">Analyze</button>
+      <button class="btn ghost" onclick="switchView('verify')">Verify</button>
+    </div></div>
+
+  <div class="card" style="padding:10px">
+    <div class="spread" style="padding:2px 4px 8px;flex-wrap:wrap">
+      <span class="muted" style="font-size:10.5px">State inferred from the latest ledger event; replay is free.</span>
+      <div class="chips">
+        <span class="chip warn">orange running</span>
+        <span class="chip">blue next</span>
+        <span class="chip ok">green approved</span>
+        <span class="chip">gray idle</span>
+      </div>
+    </div>
+    <div class="war">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>
+      <button type="button" class="anode leader ${centerState}" style="left:50%;top:48%"
+        onclick="focusAgent('lead')" title="Lead · ${esc(phase)}">
+        <span class="av">LD</span><span><span class="nm">Lead</span>
+          <span class="md">${esc(jobState.job_id || plan.job_id || 'orchestrator')}</span>
+          <span class="st">${esc(state.replayIndex != null ? 'replay' : phase)}</span></span></button>
+      ${roles.map((item) => roleNode(item.role)).join('')}
+    </div>
+    <div class="replay">
+      <button class="btn ghost" onclick="toggleReplay()">${state.replayTimer ? 'Pause' : 'Replay'}</button>
+      <input type="range" min="0" max="${rangeMax}" value="${idx != null ? idx : rangeMax}"
+        oninput="setReplay(this.value)" ${timeline.length ? '' : 'disabled'}>
+      <button class="btn ghost" onclick="setReplay(null)">Live</button>
+      <span class="rmsg">${activeEvent
+        ? esc(clock(activeEvent.timestamp) + ' · ' + (activeEvent.node || 'system') + ' · ' + activeEvent.message)
+        : 'No run events yet'}</span>
+    </div>
+    <div class="muted" style="font-size:10px;padding:0 4px 6px">
+      Live state is inferred from the latest ledger event. Replay steps through the selected run without calling a model.</div>
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h2>Lead route</h2>
+      <div class="kv">
+        <div class="k">Route</div><div class="mono">${esc(routeLine)}</div>
+        <div class="k">Chain (planned)</div><div class="mono">${esc((data.chain || []).join(' -> ') || 'not selected')}</div>
+        <div class="k">Why</div><div>${esc(data.route_why || 'The router picks a chain when the job starts.')}</div>
+        <div class="k">Degraded</div><div>${data.degraded ? 'yes' : 'no'}</div>
+        <div class="k">Last wave</div><div>${data.last_wave
+          ? esc((data.last_wave.verdict || 'done') + ' · ' + (data.last_wave.at || ''))
+          : 'no wave review yet'}</div>
+        <div class="k">Budget</div><div>${requestsUsed}/8 requests
+          <div class="hbar2" style="margin-top:4px"><i class="${budgetCls}" style="width:${budgetPct}%"></i></div></div>
+      </div></div>
+    <div class="card"><h2>Live feed</h2>
+      ${feed.length ? feed.map((item) => `<div class="row" style="gap:8px;padding:3px 0">
+        <span class="mono" style="width:62px;color:var(--dim2)">${clock(item.timestamp)}</span>
+        <b style="font-size:11px;color:${(NODE[item.node] || NODE.system).c}">${esc((NODE[item.node] || NODE.system).n)}</b>
+        <span style="font-size:11.5px">${esc(item.message)}</span></div>`).join('')
+        : '<p class="muted">No events for the selected run.</p>'}
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px"><h2>Agents</h2>
+    <div class="grid g3">${agentCards}</div>
+    <div class="agentcard" id="agent-lead" style="margin-top:10px">
+      <div class="top"><span class="role">Lead</span>
+        <span class="chip ok">${esc(phase)}</span></div>
+      <div class="model">orchestrator · only the Lead writes project files</div>
+      <div class="meta">${esc(subs.length)} subtask(s) · ${esc(subs.filter((item) => ['applied', 'done'].includes(item.status)).length)} applied · approval ${esc(decision.status || 'pending')}</div>
+    </div>
+  </div>`;
+}
+
+function renderVerify(plan, jobState, decision){
+  if(!guardRender('verify', {plan, jobState, run:state.run,
+    done:state.teamData && state.teamData.last_done})) return;
+  const box = $('#verifyBody');
+  if(!plan){
+    box.innerHTML = `<div class="hero"><div><div class="eyebrow">Verify</div>
+      <h2>No plan to verify</h2><p>Verify is the machine gate. It runs the project's real
+      command and only exit code 0 can mark a change as applied.</p></div>
+      <div class="actions"><button class="btn primary" onclick="switchView('overview')">New goal</button></div></div>`;
+    return;
+  }
+  const subs = mergedSubtasks(plan, jobState);
+  const phase = jobState.phase || 'idle';
+  const ctx = runContext(decision, phase);
+  const timeline = ctx.timeline;
+  const run = ctx.run;
+  const stopped = phase === 'stopped' || run.status === 'stopped' || run.status === 'aborted';
+  const done = phase === 'done' || run.status === 'applied' || run.status === 'done';
+  const flowState = done ? 'ok' : stopped ? 'bad' : '';
+  const flow = [
+    ['01', 'Draft in sandbox', 'Coder writes only .agents/draft', done ? 'ok' : ''],
+    ['02', 'Shadow verify', 'The command runs on a temp copy', done ? 'ok' : stopped ? 'bad' : ''],
+    ['03', 'Backup + write', 'safe_writer backs up every target', done ? 'ok' : stopped ? 'bad' : ''],
+    ['04', 'Real verify', 'The machine runs verify_command', done ? 'ok' : stopped ? 'bad' : ''],
+    ['05', 'Pass / rollback', 'Exit 0 keeps it; failure restores bytes', flowState]
+  ];
+  const evidence = timeline.filter((item) =>
+    ['system_bot.run', 'safe_writer.verify', 'recipe.draft_verify', 'safe_writer.write',
+     'safe_writer.backup'].includes(item.event_type));
+  const contracts = subs.map((item) => {
+    const command = item.verify_command || 'MISSING';
+    return `<div class="contract">
+      <span class="pill">${esc(item.id)}</span>
+      <span class="code">${esc(command)}</span>
+      <span class="pill ${STATUS_CLASS(item.status)}" style="margin-left:auto">${esc(item.status)}</span>
+      <button class="copy" data-cmd="${esc(command)}" onclick="copyCmd(this)">Copy</button>
+    </div>`;
+  }).join('');
+  const missing = subs.filter((item) => !item.verify_command).length;
+  const lastAll = (state.teamData && state.teamData.last_done) || {};
+  const last = (!run.run_id || lastAll.run_id === run.run_id) ? lastAll : {};
+  const contractCmd = (jobState.team && jobState.team.verify) ||
+    (subs[0] && subs[0].verify_command) || '';
+  const requestsUsed = Number(run.requests || 0);
+  const flags = [
+    last.rolled_back ? ['bad', 'rolled back'] : null,
+    last.budget_exceeded ? ['warn', 'budget hit'] : null,
+    last.secrets_blocked ? ['bad', 'secrets blocked'] : null,
+    last.plan_ok === false ? ['bad', 'plan not ok'] : null
+  ].filter(Boolean);
+  box.innerHTML = `<div class="hero">
+    <div><div class="eyebrow">Verify · machine contract</div>
+      <h2>The real machine decides what passes</h2>
+      <p>No verify command, no write. Every subtask runs its own command on the real tree;
+      a non-zero exit triggers a byte-exact rollback.</p></div>
+    <div class="actions"><span class="pill ${done ? 'ok' : stopped ? 'bad' : 'warn'}">${done ? 'verified' : stopped ? 'stopped' : 'pending'}</span>
+      ${flags.map(([cls, text]) => `<span class="chip ${cls}">${esc(text)}</span>`).join('')}
+      <button class="btn ghost" onclick="switchView('warroom')">War room</button></div>
+  </div>
+
+  <div class="quick" style="margin-bottom:14px"><span class="k">verify contract</span>
+    <code>${esc(contractCmd || 'MISSING')}</code>
+    <button class="copy" data-cmd="${esc(contractCmd)}" onclick="copyCmd(this)">Copy</button>
+  </div>
+
+  <div class="statgrid">
+    ${statCard('Subtasks', subs.length, 'in this plan')}
+    ${statCard('Commands', subs.length - missing + '/' + subs.length, 'machine checked')}
+    ${statCard('Run status', run.status || phase, 'from the ledger')}
+    ${statCard('Exit evidence', evidence.length, 'ledger events')}
+    ${statCard('Budget', requestsUsed + '/8', 'requests used')}
+    ${statCard('Verify time', run.duration_ms ? fmtDuration(run.duration_ms) : '-', 'whole run')}
+  </div>
+
+  <div class="card"><h2>How a change gets through</h2>
+    <div class="flow">${flow.map(([num, title, text, cls]) =>
+      `<div class="fstep ${cls}"><b>${num}</b><span><b style="font-size:11.5px">${esc(title)}</b>
+        <span style="display:block;color:var(--dim2);font-size:10.5px;margin-top:2px">${esc(text)}</span></span></div>`).join('')}</div>
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card"><h2>Contracts</h2>${contracts || '<p class="muted">No subtasks.</p>'}
+      ${missing ? `<p class="muted" style="color:var(--bad);margin-top:8px;font-size:11px">
+        ${missing} subtask(s) have no verify command and cannot be applied.</p>` : ''}
+    </div>
+    <div class="card"><h2>Ledger evidence</h2>
+      ${evidence.length ? evidence.slice(-8).reverse().map((item) => `<div class="row" style="gap:8px;padding:4px 0">
+        <span class="mono" style="width:62px;color:var(--dim2)">${clock(item.timestamp)}</span>
+        <b style="font-size:11px">${esc(item.node || 'system')}</b>
+        <span style="font-size:11.5px">${esc(item.message)}</span></div>`).join('')
+        : '<p class="muted">No verify evidence for this run yet.</p>'}
+    </div>
+  </div>
+
+  <div class="grid g3" style="margin-top:14px">
+    <div class="card"><h2>Why shadow first</h2><p class="muted" style="font-size:11.5px;margin:0">
+      The command runs on a temporary copy before the Lead touches the project. A bad draft never reaches the real tree.</p></div>
+    <div class="card"><h2>Why backup</h2><p class="muted" style="font-size:11.5px;margin:0">
+      Every target file is hashed and copied. If the real verify fails, the original bytes are restored.</p></div>
+    <div class="card"><h2>Why exit code</h2><p class="muted" style="font-size:11.5px;margin:0">
+      The model cannot declare success. Only the real command's exit code 0 is accepted.</p></div>
+  </div>`;
+}
+
+function renderDone(plan, jobState, decision){
+  if(!guardRender('done', {plan, jobState, decision, run:state.run,
+    done:state.teamData && state.teamData.last_done})) return;
+  const box = $('#doneBody');
+  if(!plan){
+    box.innerHTML = `<div class="hero"><div><div class="eyebrow">Done</div>
+      <h2>No completed job</h2><p>When a plan is applied, this page summarizes files,
+      duration, tokens and the evidence trail.</p></div>
+      <div class="actions"><button class="btn primary" onclick="switchView('overview')">New goal</button></div></div>`;
+    return;
+  }
+  const subs = mergedSubtasks(plan, jobState);
+  const phase = jobState.phase || 'idle';
+  const ctx = runContext(decision, phase);
+  const run = ctx.run;
+  const done = phase === 'done' || run.status === 'applied' || run.status === 'done';
+  const applied = subs.filter((item) => ['applied', 'done'].includes(item.status));
+  const files = uniqueFiles(applied, 'target_files');
+  const tokens = Number(run.in_tokens || 0) + Number(run.out_tokens || 0);
+  const timeline = ctx.timeline;
+  const lastAll = (state.teamData && state.teamData.last_done) || {};
+  const last = (!run.run_id || lastAll.run_id === run.run_id) ? lastAll : {};
+  const changedMap = new Map((last.files || []).map((item) => [item.path, item.changed]));
+  const changedCount = files.filter((file) => changedMap.get(file) !== false).length;
+  const flags = [
+    last.rolled_back ? ['bad', 'rolled back'] : null,
+    last.budget_exceeded ? ['warn', 'budget hit'] : null,
+    last.secrets_blocked ? ['bad', 'secrets blocked'] : null,
+    last.fallback_attempts ? ['warn', last.fallback_attempts + ' fallback'] : null
+  ].filter(Boolean);
+  const source = plan._source || '.agents/tmp/plan.json';
+  const command = 'python .agents/job.py --plan ' + source + ' --wait --open';
+  box.innerHTML = `<div class="hero">
+    <div><div class="eyebrow">Done · ${esc(plan.job_id || '')}</div>
+      <h2>${done ? 'Applied and verified' : 'Not finished yet'}</h2>
+      <p>${done ? esc(applied.length + '/' + subs.length + ' subtask(s) applied. The machine verify passed.')
+        : 'The job is still ' + esc(phase) + '.'}</p></div>
+    <div class="actions"><span class="pill ${done ? 'ok' : STATUS_CLASS(phase)}">${done ? 'done' : esc(phase)}</span>
+      ${flags.map(([cls, text]) => `<span class="chip ${cls}">${esc(text)}</span>`).join('')}
+      ${done ? `<button class="btn ghost" onclick="openDiff()">View diff</button>` : ''}
+      <button class="btn ghost" onclick="switchView('overview')">New goal</button></div>
+  </div>
+  <div class="quick" style="margin-bottom:14px"><span class="k">reproduce this plan</span>
+    <code>${esc(command)}</code>
+    <button class="copy" data-cmd="${esc(command)}" onclick="copyCmd(this)">Copy</button>
+  </div>
+  <div class="statgrid">
+    ${statCard('Applied', applied.length + '/' + subs.length, 'subtasks')}
+    ${statCard('Files', changedCount + '/' + files.length, 'changed bytes')}
+    ${statCard('Duration', run.duration_ms ? fmtDuration(run.duration_ms) : '-', 'whole run')}
+    ${statCard('Requests', run.requests != null ? run.requests : '-', 'of 8 max')}
+    ${statCard('Tokens', tokens ? num(tokens) : '-', 'in + out')}
+    ${statCard('Verify', run.verify_command ? 'set' : 'missing', 'machine gate')}
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Applied files</h2>
+      ${files.length ? files.map((file) => {
+        const state = last.rolled_back ? 'rolled back'
+          : changedMap.has(file) ? (changedMap.get(file) ? 'changed' : 'unchanged') : 'applied';
+        const cls = state === 'rolled back' ? 'bad' : state === 'unchanged' ? 'warn' : 'ok';
+        return `<div class="contract"><span class="mono">${esc(file)}</span>
+          <span class="chip ${cls}">${esc(state)}</span>
+          <button class="copy" style="margin-left:auto" onclick="openDiff()">Diff</button></div>`;
+      }).join('') : '<p class="muted">No file list for this run.</p>'}
+    </div>
+    <div class="card"><h2>Run summary</h2>
+      <div class="kv">
+        <div class="k">Run</div><div class="mono">${esc(run.run_id || '-')}</div>
+        <div class="k">Status</div><div>${esc(run.status || phase)}</div>
+        <div class="k">Models</div><div class="mono">${esc((run.models || []).join(' -> ') || '-')}</div>
+        <div class="k">Verify</div><div><span class="code">${esc(run.verify_command || '-')}</span></div>
+        <div class="k">Approval</div><div>${esc(decision.status || '-')}</div>
+        <div class="k">Plan OK</div><div>${last.plan_ok === false ? 'no' : 'yes'}</div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px"><h2>Last events</h2>
+    ${timeline.length ? timeline.slice(-8).map((item) => `<div class="row" style="gap:8px;padding:3px 0">
       <span class="mono" style="width:62px;color:var(--dim2)">${clock(item.timestamp)}</span>
       <b style="font-size:11px">${esc((NODE[item.node] || NODE.system).n)}</b>
-      <span style="font-size:11.5px">${esc(item.message)}</span></div>`).join('') : '<p>No war-room events yet.</p>'}`;
-  } else if(index === 3){
-    const rows = subtasks.map((item) => `<tr>
-      <td><b>${esc(item.id)}</b></td>
-      <td class="mono">${esc((planById[item.id] || {}).verify_command || item.verify_command || '-')}</td>
-      <td class="mono">${item.requests != null ? esc(String(item.requests)) : '-'}</td>
-      <td><span class="pill ${STATUS_CLASS(item.status)}">${esc(item.status || 'pending')}</span></td></tr>`).join('');
-    html = `<table><thead><tr><th>ID</th><th>Verify command</th><th>Requests</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="muted" style="margin-top:12px">The real machine <b>verify_command</b> is the contract: exit code 0 means pass.</p>`;
-  } else {
-    const done = subtasks.filter((item) => ['applied','done'].includes(item.status));
-    const files = [...new Set(done.flatMap((item) =>
-      item.files || item.target_files || []))];
-    html = `<div class="kv">
-      <div class="k">Phase</div><div><span class="pill ${STATUS_CLASS(jobState.phase)}">${esc(jobState.phase || 'idle')}</span></div>
-      <div class="k">Applied</div><div>${done.length}/${subtasks.length} subtasks</div>
-      <div class="k">Files</div><div class="mono">${esc(files.join(', ') || '-')}</div>
-      <div class="k">Job</div><div class="mono">${esc(plan.job_id || '-')}</div>
-    </div>
-    <p class="muted" style="margin-top:12px">${jobState.phase === 'done'
-      ? 'All approved work is applied and verified.'
-      : 'Not finished yet - the job is still ' + esc(jobState.phase || 'idle') + '.'}</p>`;
-  }
-  openModal(titles[index], html);
+      <span style="font-size:11.5px">${esc(item.message)}</span></div>`).join('')
+      : '<p class="muted">No events for this run.</p>'}
+  </div>`;
+}
+
+function openDiff(){
+  state.chatTab = 'diff';
+  switchView('chat');
+  renderChat();
 }
 
 function renderOverview(plan, jobState, control){
@@ -668,7 +1627,9 @@ function renderOverview(plan, jobState, control){
       <div class="k">Reviewer</div><div class="mono">${esc(team.reviewer || 'heuristic')}</div>
       <div class="k">Verify</div><div class="mono">${esc(team.verify || 'machine')}</div>
     </div>` : '<p>No active job.</p>';
-  const tl = (state.run && state.run.timeline) || [];
+  const tl = runContext(
+    (state.job && state.job.decision) || (state.planState || {}).decision || {},
+    jobState.phase || '').timeline;
   const recent = tl.slice(-6);
   $('#overviewFeed').innerHTML = recent.length ? recent.map((item) => {
     const meta = NODE[item.node] || NODE.system;
@@ -677,37 +1638,6 @@ function renderOverview(plan, jobState, control){
       <b style="color:${meta.c};font-size:11px">${meta.n}</b>
       <span style="font-size:11.5px">${esc(item.message)}</span></div>`;
   }).join('') : '<p>No events yet.</p>';
-}
-
-function renderPlan(plan, decision, jobState){
-  const status = $('#planStatus');
-  status.className = 'pill ' + STATUS_CLASS(decision.status || jobState.phase);
-  status.textContent = decision.status || jobState.phase || 'none';
-  if(!plan){ $('#planBody').innerHTML = 'No plan submitted.'; $('#setCommand') && null; return; }
-  const source = plan._source || '.agents/tmp/plan.json';
-  const root = (state.planState && state.planState.root) || '.';
-  const command = `python .agents/job.py --plan ${source} --root "${root}" --wait --open`;
-  const rows = (plan.subtasks || []).map((item) => `<tr>
-    <td><b>${esc(item.id)}</b></td><td>${esc(item.title || '')}</td>
-    <td class="mono">${esc((item.target_files || []).join(', '))}</td>
-    <td class="mono">${esc(item.verify_command || '')}</td>
-    <td class="mono">${esc((item.depends_on || []).join(', ') || '-')}</td>
-    <td><span class="pill ${STATUS_CLASS(item.status)}">${esc(item.status || 'pending')}</span></td></tr>`).join('');
-  const actions = decision.status === 'pending' ? `<div class="row">
-      <button class="btn ok" onclick="decide('approve')">Approve</button>
-      <button class="btn bad" onclick="decide('reject')">Reject</button></div>` : '';
-  $('#planBody').innerHTML = `<div class="planbox">
-    <div><b>${esc(plan.job_id)}</b> <span class="muted">&middot; ${esc(plan.objective || '')}</span></div>
-    <div class="quick"><span class="k">plan file</span><code>${esc(source)}</code>
-      <span class="k" style="margin-top:4px">quick access</span>
-      <code id="planCmd">${esc(command)}</code>
-      <button class="copy" onclick="copyCommand(this)">Copy</button></div>
-    <table><thead><tr><th>ID</th><th>Task</th><th>Files</th><th>Verify</th><th>Depends</th><th>Status</th></tr></thead>
-      <tbody>${rows}</tbody></table>${actions}</div>`;
-  // keep settings command in sync
-  const setCmd = $('#setCommand');
-  if(setCmd) setCmd.innerHTML = `<span class="k">command</span><code id="planCmd2">${esc(command)}</code>
-    <button class="copy" onclick="copyText('${esc(command).replace(/'/g, "\\'")}', this)">Copy</button>`;
 }
 
 async function loadWorkspaces(){
@@ -1060,6 +1990,7 @@ function copyText(text, button){
     setTimeout(() => { button.classList.remove('done'); button.textContent = 'Copy'; }, 900);
   }).catch(() => toast('Clipboard blocked'));
 }
+function copyCmd(button){ copyText(button.dataset.cmd || '', button); }
 function copyCommand(button){ copyText($('#planCmd').textContent, button); }
 
 function openModal(title, html){
@@ -1081,7 +2012,7 @@ document.querySelectorAll('.nav button').forEach((button) =>
 $('#goal').addEventListener('keydown', (event) => { if(event.key === 'Enter') planGoal(); });
 $('#opinion').addEventListener('keydown', (event) => { if(event.key === 'Enter') sendOpinion(); });
 
-const VIEWS = ['overview','plan','chat','workspaces','quota','drafts','settings'];
+const VIEWS = ['overview','analyze','plan','warroom','verify','done','chat','workspaces','quota','drafts','settings'];
 const initialView = (location.hash || '#overview').slice(1);
 const runParam = new URLSearchParams(location.search).get('run');
 if(runParam) state.selected = runParam;
@@ -1091,7 +2022,9 @@ window.addEventListener('hashchange', () => {
   if(VIEWS.includes(view) && view !== state.view) switchView(view);
 });
 refreshAll();
-setInterval(refreshAll, 3000);
+setInterval(() => {
+  if(!document.hidden && !state.replayTimer) refreshAll();
+}, 3000);
 </script>
 </body>
 </html>

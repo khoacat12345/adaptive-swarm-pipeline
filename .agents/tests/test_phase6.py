@@ -306,6 +306,9 @@ def test_dashboard_api(checks: Checks) -> None:
             html = response.read().decode("utf-8")
         checks.check("dashboard: HTML co view plan", 'id="view-plan"' in html
                      and 'id="nav"' in html)
+        checks.check("dashboard: 5 stage pages",
+                     all(f'id="view-{name}"' in html for name in
+                         ("analyze", "plan", "warroom", "verify", "done")), html[:200])
 
         with urllib.request.urlopen(base + "/api/job", timeout=5) as response:
             job_data = json.loads(response.read().decode("utf-8"))
@@ -314,6 +317,14 @@ def test_dashboard_api(checks: Checks) -> None:
                      job_data.get("state"))
         checks.check("dashboard: /api/job control",
                      "paused" in (job_data.get("control") or {}), job_data.get("control"))
+
+        with urllib.request.urlopen(base + "/api/team", timeout=5) as response:
+            team_data = json.loads(response.read().decode("utf-8"))
+        roles = team_data.get("roles") or []
+        checks.check("dashboard: /api/team 5 agents",
+                     [item.get("role") for item in roles] ==
+                     ["coder", "security", "qa", "perf", "docs"], team_data)
+        checks.check("dashboard: /api/team phase", "phase" in team_data, team_data)
 
         draft = root / ".agents" / "draft" / "J1-S1" / "a.py"
         draft.parent.mkdir(parents=True, exist_ok=True)
