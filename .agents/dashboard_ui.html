@@ -76,6 +76,7 @@
         font-size:11px;cursor:pointer;transition:all .16s}
   .step .n{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;
            background:#16202c;font-size:9px}
+  .step:hover{border-color:#3d5873;color:var(--fg);transform:translateY(-1px)}
   .step.done{border-color:#14532d;color:#9be7c4}
   .step.done .n{background:#14532d;color:#9be7c4}
   .step.active{border-color:var(--accent);background:#0e1c29;color:#e2f3ff}
@@ -549,6 +550,7 @@ function render(){
 }
 
 function renderStepper(jobState){
+  state.jobState = jobState;
   const steps = ['Analyze','Plan','War room','Verify','Done'];
   const phase = jobState.phase || '';
   let current = 0;
@@ -558,8 +560,85 @@ function renderStepper(jobState){
   else if(phase === 'done') current = 4;
   $('#stepper').innerHTML = steps.map((name, index) => {
     const cls = index < current ? 'done' : index === current ? 'active' : '';
-    return `<div class="step ${cls}"><span class="n">${index + 1}</span>${name}</div>`;
+    return `<button type="button" class="step ${cls}" onclick="showStep(${index})"
+      title="Show ${name} summary"><span class="n">${index + 1}</span>${name}</button>`;
   }).join('<span class="muted">&#8250;</span>');
+}
+
+function showStep(index){
+  const job = state.job || {};
+  const plan = job.plan || (state.planState || {}).plan || null;
+  const jobState = job.state || state.jobState || {};
+  const decision = job.decision || (state.planState || {}).decision || {};
+  const titles = ['Analyze','Plan','War room','Verify','Done'];
+  if(!plan){
+    openModal(titles[index] || 'Step',
+      '<p>No plan yet. Type a goal above and press <b>Plan</b>.</p>');
+    return;
+  }
+  const subtasks = (jobState.subtasks && jobState.subtasks.length)
+    ? jobState.subtasks : (plan.subtasks || []);
+  const planById = Object.fromEntries((plan.subtasks || []).map((item) => [item.id, item]));
+  const team = jobState.team || {};
+  const source = plan._source || '.agents/tmp/plan.json';
+  let html = '';
+  if(index === 0){
+    const files = [...new Set(subtasks.flatMap((item) =>
+      item.files || item.target_files || []))];
+    html = `<div class="kv">
+      <div class="k">Job</div><div class="mono">${esc(plan.job_id || '-')}</div>
+      <div class="k">Objective</div><div>${esc(plan.objective || '')}</div>
+      <div class="k">Plan file</div><div class="mono">${esc(source)}</div>
+      <div class="k">Subtasks</div><div>${subtasks.length}</div>
+      <div class="k">Files</div><div class="mono">${esc(files.join(', ') || '-')}</div>
+      <div class="k">Approval</div><div><span class="pill ${STATUS_CLASS(decision.status)}">${esc(decision.status || 'pending')}</span></div>
+    </div>
+    <p class="muted" style="margin-top:12px">Phase: <b>${esc(jobState.phase || 'idle')}</b>. The planner reads the tree, proposes verified subtasks, then waits for approval.</p>`;
+  } else if(index === 1){
+    const rows = subtasks.map((item) => `<tr>
+      <td><b>${esc(item.id)}</b></td><td>${esc(item.title || (planById[item.id] || {}).title || '')}</td>
+      <td class="mono">${esc(((item.files || item.target_files || (planById[item.id] || {}).target_files) || []).join(', '))}</td>
+      <td><span class="pill ${STATUS_CLASS(item.status)}">${esc(item.status || 'pending')}</span></td></tr>`).join('');
+    html = `<table><thead><tr><th>ID</th><th>Task</th><th>Files</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="muted" style="margin-top:12px">Approval: <b>${esc(decision.status || 'pending')}</b>. Nothing is written before approval.</p>`;
+  } else if(index === 2){
+    const tl = (state.run && state.run.timeline) || [];
+    const relevant = tl.filter((item) =>
+      ['coder','reviewer','security','qa','lead'].includes(String(item.node || '').toLowerCase())).slice(-12);
+    html = `<div class="kv">
+      <div class="k">Coder</div><div class="mono">${esc(team.coder || '-')}</div>
+      <div class="k">Fallback</div><div class="mono">${esc(team.fallback || '-')}</div>
+      <div class="k">Reviewer</div><div class="mono">${esc(team.reviewer || 'heuristic')}</div>
+      <div class="k">Verify</div><div class="mono">${esc(team.verify || 'machine')}</div>
+    </div>
+    <p class="muted" style="margin-top:12px">Selected run events (latest 12):</p>
+    ${relevant.length ? relevant.map((item) => `<div class="row" style="gap:8px;padding:3px 0">
+      <span class="mono" style="width:62px;color:var(--dim2)">${clock(item.timestamp)}</span>
+      <b style="font-size:11px">${esc((NODE[item.node] || NODE.system).n)}</b>
+      <span style="font-size:11.5px">${esc(item.message)}</span></div>`).join('') : '<p>No war-room events yet.</p>'}`;
+  } else if(index === 3){
+    const rows = subtasks.map((item) => `<tr>
+      <td><b>${esc(item.id)}</b></td>
+      <td class="mono">${esc((planById[item.id] || {}).verify_command || item.verify_command || '-')}</td>
+      <td class="mono">${item.requests != null ? esc(String(item.requests)) : '-'}</td>
+      <td><span class="pill ${STATUS_CLASS(item.status)}">${esc(item.status || 'pending')}</span></td></tr>`).join('');
+    html = `<table><thead><tr><th>ID</th><th>Verify command</th><th>Requests</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="muted" style="margin-top:12px">The real machine <b>verify_command</b> is the contract: exit code 0 means pass.</p>`;
+  } else {
+    const done = subtasks.filter((item) => ['applied','done'].includes(item.status));
+    const files = [...new Set(done.flatMap((item) =>
+      item.files || item.target_files || []))];
+    html = `<div class="kv">
+      <div class="k">Phase</div><div><span class="pill ${STATUS_CLASS(jobState.phase)}">${esc(jobState.phase || 'idle')}</span></div>
+      <div class="k">Applied</div><div>${done.length}/${subtasks.length} subtasks</div>
+      <div class="k">Files</div><div class="mono">${esc(files.join(', ') || '-')}</div>
+      <div class="k">Job</div><div class="mono">${esc(plan.job_id || '-')}</div>
+    </div>
+    <p class="muted" style="margin-top:12px">${jobState.phase === 'done'
+      ? 'All approved work is applied and verified.'
+      : 'Not finished yet - the job is still ' + esc(jobState.phase || 'idle') + '.'}</p>`;
+  }
+  openModal(titles[index], html);
 }
 
 function renderOverview(plan, jobState, control){

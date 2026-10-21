@@ -570,7 +570,8 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
 
 ### Mission control (stepper / roadmap / control bar)
 
-- **Stepper 5 buoc**: Analyze -> Plan -> War room -> Verify -> Done (bam de xem tom tat).
+- **Stepper 5 buoc**: Analyze -> Plan -> War room -> Verify -> Done (bam 1 buoc de xem
+  tom tat: goal/plan, team, verify command, file da apply).
 - **Project roadmap**: checklist subtask + file, tu cap nhat theo `job_state.json`.
 - **Team lineup**: coder / fallback / reviewer cua buoc hien tai.
 - **Drafts**: xem ban nhap trong `.agents/draft/` (read-only, chan path escape).
