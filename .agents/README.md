@@ -549,6 +549,9 @@ python .agents/job.py --plan plan.json --root "C:\path\to\project" --wait --open
 `--open`: tu khoi dong dashboard neu port trong + mo trinh duyet kem token.
 Khong co `--open`: chi in URL de ban tu mo.
 
+Windows: double-click `dashboard.cmd` de mo dashboard (tu chay server + mo browser).
+Trang poll 3s va chi ve lai phan thay doi (khong nhay/F5); quota bar cap nhat toi da 1 lan/phut.
+
 Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objective`,
 `verify_command`, `target_files`, `sandbox_files`, `level`, `max_rounds`, `depends_on`.
 
