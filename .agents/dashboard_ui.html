@@ -1952,10 +1952,10 @@ function renderOverview(plan, jobState, control){
   ];
   const flowDone = [
     !!plan && ['approved', 'done'].includes(decision.status || phase),
-    requests > 0 || ['running', 'paused', 'done'].includes(phase),
-    !!data.last_wave || phase === 'done',
-    phase === 'done' || timeline.some((item) => item.event_type === 'safe_writer.verify'),
-    phase === 'done' || applied > 0
+    !!plan && (requests > 0 || ['running', 'paused', 'done'].includes(phase)),
+    !!plan && (!!data.last_wave || phase === 'done'),
+    !!plan && (phase === 'done' || timeline.some((item) => item.event_type === 'safe_writer.verify')),
+    !!plan && (phase === 'done' || applied > 0)
   ];
   const status = phase === 'done' ? 'done' : (decision.status || phase);
   const actions = [];
