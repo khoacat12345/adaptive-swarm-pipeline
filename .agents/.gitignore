@@ -2,6 +2,7 @@
 tmp/
 backups/
 draft/
+notify.json
 eval/*/debug/
 eval/bench/
 *.lock
