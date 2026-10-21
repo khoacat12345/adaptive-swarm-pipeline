@@ -161,6 +161,12 @@ def test_approval(checks: Checks) -> None:
     job.submit_plan(make_plan(), root)
     checks.check("approval: giu token khi resubmit cung job",
                  job.token_path(root).read_text(encoding="utf-8").strip() == "tok123")
+    try:
+        job.start_run(root, token="tok123")
+        blocked = False
+    except ValueError:
+        blocked = True
+    checks.check("run: chua approve bi chan", blocked)
     checks.check("approval: decision pending",
                  job.read_plan_state(root)["decision"]["status"] == "pending")
     checks.check("approval: khong lo token trong state",
@@ -178,6 +184,12 @@ def test_approval(checks: Checks) -> None:
                  job.read_plan_state(root)["decision"]["status"] == "approved")
     checks.check("approval: wait thay approved",
                  job.wait_for_decision(root, timeout=1, poll=0.05) == "approved")
+    try:
+        job.start_run(root, token="sai")
+        blocked = False
+    except PermissionError:
+        blocked = True
+    checks.check("run: sai token bi chan", blocked)
 
     job.submit_plan(make_plan(), root, token="tok456")
     job.decide(root, "reject", token="tok456")

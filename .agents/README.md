@@ -559,6 +559,8 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
 `verify_command`, `target_files`, `sandbox_files`, `level`, `max_rounds`, `depends_on`.
 
 - Duyet **ca plan** mot lan; chay tuan tu theo topo, dung ngay khi 1 buoc fail.
+- Dashboard co **Approve & Run** (duyet + chay ngay) va **Run job** o War room
+  (chon `wave` 5 agent hoac `heuristic` 0 reviewer). Approve-only van duoc giu.
 - Khong duyet / timeout -> **khong ghi file nao**.
 - Moi subtask tu chon model theo W0-W8 + quota (fallback ladder).
 - Token 1 lan chi in ra CLI; dashboard khong tra token qua API.

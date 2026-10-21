@@ -778,9 +778,8 @@ async function ensureWarRun(){
   const phase = (state.job && state.job.state && state.job.state.phase) || '';
   if(['awaiting_approval', 'approved'].includes(phase)) return;
   const current = state.run && state.run.run ? state.run.run.run_id : '';
-  if(String(current).startsWith('rc_')) return;
   const latest = (state.runs || []).find((run) => String(run.run_id).startsWith('rc_'));
-  if(!latest) return;
+  if(!latest || String(latest.run_id) === String(current)) return;
   try{
     await loadRun(latest.run_id, true);
     if(state.view === 'warroom') render();
@@ -1103,9 +1102,10 @@ function renderPlan(plan, decision, jobState, control){
   const maxLevel = Math.max(0, ...subs.map((item) => Number(item.level || 0)));
   const pending = decision.status === 'pending';
   const actions = pending ? `<div class="row" style="margin-bottom:12px">
-      <button class="btn ok" onclick="decide('approve')">Approve plan</button>
+      <button class="btn primary" onclick="decide('approve', true)">Approve &amp; Run</button>
+      <button class="btn ghost" onclick="decide('approve')">Approve only</button>
       <button class="btn bad" onclick="decide('reject')">Reject</button>
-      <span class="muted" style="font-size:10.5px">Approval records the decision only. Start the job with the copy command below; nothing is written before approval.</span></div>` : '';
+      <span class="muted" style="font-size:10.5px">Approve &amp; Run starts the job with wave reviewers (5 agents). Approve only records the decision; nothing is written before approval.</span></div>` : '';
   const cards = subs.map((item) => {
     const st = item.status || 'pending';
     const fileList = item.target_files || [];
@@ -1274,7 +1274,7 @@ function renderWarRoom(plan, jobState, decision){
     const st = status[role] || 'idle';
     const label = item.standby ? 'standby' : item.skipped ? 'skipped'
       : st === 'running' ? 'running' : st === 'next' ? 'next'
-        : st === 'done' ? 'approved' : 'idle';
+        : st === 'done' ? (role === 'coder' ? 'done' : 'approved') : 'idle';
     return `<button type="button" class="anode ${st} role-${esc(role)}" style="left:${x}%;top:${y}%"
       onclick="focusAgent('${role}')" title="${esc(item.label)} · ${esc(item.model || 'not assigned')}">
       <span class="av">${esc((item.label || role).slice(0, 2).toUpperCase())}</span>
@@ -1337,6 +1337,20 @@ function renderWarRoom(plan, jobState, decision){
       <button class="btn ghost" onclick="switchView('plan')">Plan</button>
       <button class="btn ghost" onclick="switchView('verify')">Verify</button>
     </div></div>
+
+  ${['approved', 'stopped'].includes(phase) ? `<div class="card" style="margin-bottom:12px;border-color:#0b6d96;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+    <div><b>Ready to run</b>
+      <div class="muted" style="font-size:11px">The plan is ${esc(phase)}. Pick the reviewer mode and start the job; progress appears here within a few seconds.</div></div>
+    <div class="row">
+      <select id="runReviewer" class="btn ghost" style="padding:7px 8px"
+        title="wave calls 4 extra reviewer models (5 agents total)">
+        <option value="wave">wave · 5 agents</option>
+        <option value="heuristic">heuristic · 0 reviewers</option>
+        <option value="none">none</option>
+      </select>
+      <button class="btn primary" onclick="runJob(this)">Run job</button>
+    </div>
+  </div>` : ''}
 
   <div class="card" style="padding:10px">
     <div class="spread" style="padding:2px 4px 8px;flex-wrap:wrap">
@@ -1636,7 +1650,7 @@ function renderOverview(plan, jobState, control){
       <p>${esc(plan.objective || '')}</p>
       <div class="muted mono">${done}/${subtasks.length} subtasks done</div>
       ${approval.status === 'pending' ? `<div class="row" style="margin-top:10px">
-        <button class="btn ok" onclick="decide('approve')">Approve</button>
+        <button class="btn ok" onclick="decide('approve', true)">Approve &amp; Run</button>
         <button class="btn bad" onclick="decide('reject')">Reject</button></div>` : ''}`;
   }
   const team = (jobState.team || {});
@@ -1959,16 +1973,45 @@ async function planGoal(){
   finally{ button.disabled = false; button.textContent = 'Plan'; }
 }
 
-async function decide(kind){
+async function decide(kind, runAfter){
   try{
     await api('/api/plan/decision', {method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({decision:kind, token:authToken()})});
+    if(kind === 'approve' && runAfter){
+      toast('Approved · starting the run...');
+      await runJob(null);
+      return;
+    }
     toast('Plan ' + kind + 'd');
     await refreshAll();
   }catch(error){
     toast(error.message === 'token khong dung'
       ? 'Control token expired. Open the fresh dashboard link from job.py --open.'
       : error.message);
+  }
+}
+
+async function runJob(button){
+  if(!authToken()){
+    toast('Control token missing. Open the dashboard link from job.py --open.');
+    return;
+  }
+  const select = $('#runReviewer');
+  const reviewer = select ? select.value : 'wave';
+  if(button){ button.disabled = true; button.textContent = 'Starting...'; }
+  try{
+    const data = await api('/api/run', {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token:authToken(), reviewer})});
+    toast('Run started · pid ' + data.pid + ' · ' + reviewer);
+    state.pageSig = {};
+    await refreshAll();
+    if(state.view !== 'warroom') switchView('warroom');
+  }catch(error){
+    toast(error.message === 'token khong dung'
+      ? 'Control token expired. Open the fresh dashboard link from job.py --open.'
+      : error.message);
+  }finally{
+    if(button){ button.disabled = false; button.textContent = 'Run job'; }
   }
 }
 

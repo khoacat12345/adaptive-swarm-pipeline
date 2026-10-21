@@ -33,6 +33,7 @@ import json
 import os
 import re
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -427,6 +428,49 @@ def decide(root, decision: str, *, token: str, log: bool = True) -> dict:
     return payload
 
 
+_RUN_LOCK = threading.Lock()
+_RUN_PROC: subprocess.Popen | None = None
+
+
+def start_run(root, *, token: str, reviewer: str = "wave",
+              model: str | None = None) -> dict:
+    """Start the already-approved plan in a background process."""
+    global _RUN_PROC
+    _require_token(root, token)
+    reviewer = str(reviewer or "wave").lower()
+    if reviewer not in ("heuristic", "wave", "none"):
+        raise ValueError("reviewer phai la heuristic, wave hoac none")
+    with _RUN_LOCK:
+        if _RUN_PROC is not None and _RUN_PROC.poll() is None:
+            raise ValueError("a job is already running")
+        state = read_state(root)
+        if state.get("phase") in ("running", "paused"):
+            raise ValueError("a job is already running")
+        decision = (read_plan_state(root).get("decision") or {}).get("status")
+        if decision != "approved":
+            raise ValueError("plan is not approved")
+        try:
+            plan = json.loads(plan_path(root).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("no readable plan to resume") from exc
+        if not isinstance(plan, dict) or not plan.get("subtasks"):
+            raise ValueError("no readable plan to resume")
+        out_dir = _dir(root)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        log_path = out_dir / ("run_" + time.strftime("%Y%m%d-%H%M%S") + ".log")
+        cmd = [sys.executable, str(Path(__file__).resolve()), "--resume",
+               "--root", str(Path(root).resolve()), "--reviewer", reviewer]
+        if model:
+            cmd += ["--model", str(model)]
+        creationflags = 0x08000000 if os.name == "nt" else 0
+        with log_path.open("w", encoding="utf-8") as log:
+            _RUN_PROC = subprocess.Popen(
+                cmd, cwd=str(Path(root).resolve()), stdout=log,
+                stderr=subprocess.STDOUT, creationflags=creationflags)
+        return {"ok": True, "pid": _RUN_PROC.pid, "log": str(log_path),
+                "reviewer": reviewer, "job_id": plan.get("job_id")}
+
+
 def wait_for_decision(root, *, timeout: float = DEFAULT_TIMEOUT,
                       poll: float = 1.0) -> str:
     deadline = time.time() + max(1.0, float(timeout))
@@ -487,7 +531,8 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
         "current": None,
         "subtasks": [{"id": item["id"], "status": "pending",
                       "files": item.get("target_files") or []} for item in ordered],
-        "team": {},
+        "team": {"reviewer": getattr(reviewer, "kind", None) or
+                 {"wave": "wave-reviewer", "none": "none"}.get(reviewer_kind, "heuristic")},
     })
 
     def update_state(**changes) -> dict:
@@ -606,7 +651,9 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
 # --------------------------------------------------------------------------
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Job plan + duyet dashboard + chay tuan tu.")
-    parser.add_argument("--plan", required=True)
+    parser.add_argument("--plan", default=None)
+    parser.add_argument("--resume", action="store_true",
+                        help="chay plan da duoc approve trong tmp/plan.json (khong submit lai)")
     parser.add_argument("--root", default=".")
     parser.add_argument("--token", default=None, help="token co dinh (mac dinh: random)")
     parser.add_argument("--decision", choices=("approve", "reject"), default=None,
@@ -627,15 +674,32 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        plan = load_plan(args.plan)
+        if args.resume:
+            try:
+                plan = json.loads(plan_path(args.root).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                print(f"cannot read saved plan: {exc}")
+                return 2
+            try:
+                token = token_path(args.root).read_text(encoding="utf-8").strip()
+            except OSError:
+                token = ""
+            info = {"job_id": plan.get("job_id"), "token": token,
+                    "subtasks": len(plan.get("subtasks") or [])}
+            print(f"job     : {info['job_id']} (resume, {info['subtasks']} subtask)")
+        else:
+            if not args.plan:
+                print("--plan is required unless --resume")
+                return 2
+            plan = load_plan(args.plan)
+            info = submit_plan(plan, args.root, token=args.token, source=args.plan,
+                               force=args.force)
+            print(f"job     : {info['job_id']} ({info['subtasks']} subtask)")
     except OSError as exc:
         print(f"cannot read plan: {args.plan} ({exc})")
         print("example: python .agents/job.py --plan scratch/swarm_demo/plan.json --root . --wait --open")
         return 2
-    info = submit_plan(plan, args.root, token=args.token, source=args.plan,
-                       force=args.force)
     url = f"http://127.0.0.1:{args.port}/?token={info['token']}"
-    print(f"job     : {info['job_id']} ({info['subtasks']} subtask)")
     print(f"dashboard: {url}")
 
     server = None

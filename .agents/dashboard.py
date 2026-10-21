@@ -396,6 +396,20 @@ def make_handler(root: Path, ledger: Path):
                         self._json({"error": str(exc)}, 400)
                         return
                     self._json(result)
+                elif route == "/api/run":
+                    import job as job_module
+                    try:
+                        result = job_module.start_run(
+                            root, token=str(payload.get("token") or ""),
+                            reviewer=str(payload.get("reviewer") or "wave"),
+                            model=payload.get("model") or None)
+                    except PermissionError as exc:
+                        self._json({"error": str(exc)}, 403)
+                        return
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 400)
+                        return
+                    self._json(result)
                 elif route == "/api/plan/generate":
                     import job as job_module
                     import planner
