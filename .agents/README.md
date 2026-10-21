@@ -527,10 +527,12 @@ Thu tu uu tien tin hieu: W8 > W6 > W3 > W5 > W4 > W0 > W7 > W2 > W1.
 `python .agents/recipe_c.py --order order.json --route`.
 
 **Quota that:** `quota.py` doc `opencode.db` (`session_message`: cost/token tung
-request) va tinh rolling 5h / 7d / 30d + hom nay. Hien thi **chi phi that**; phan %
-tren dashboard chi la uoc luong theo tran tai lieu ($15/$60/$80; 5h=20%, tuan=50%,
-thang=100%), khong phai so billing cua console. Fallback `opencode stats` da bo de
-tranh lech cua so.
+request) de tinh chi phi/request theo model, va goi **API console**
+`/console/api/go/status` (token OAuth da luu trong `credential`) de lay **meters
+chinh xac** cho Rolling/Weekly/Monthly (used/limit/resetsAt). Dashboard hien thi
+dung % cua console; neu API khong truy cap duoc thi tu fallback ve uoc luong
+`opencode.db` va ghi ro `local estimate`. Tat API bang `SWARM_CONSOLE=0`.
+Fallback `opencode stats` da bo de tranh lech cua so.
 
 `--route` chon theo thu tu: **main** (con >=10%) -> **escalate** (chi khi con >=50%,
 hoac `--allow-escalate`) -> **fallback re/free** (deepseek/glm free) -> `exhausted`

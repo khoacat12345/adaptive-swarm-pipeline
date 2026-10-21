@@ -27,6 +27,9 @@ import sqlite3
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 DEFAULT_BIN = (shutil.which("opencode")
@@ -106,6 +109,65 @@ def _connect() -> sqlite3.Connection:
     if not path.exists():
         raise FileNotFoundError(str(path))
     return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+
+
+CONSOLE_STATUS_URL = "https://opencode.ai/console/api/go/status"
+
+
+def _console_token() -> str:
+    con = _connect()
+    try:
+        row = con.execute(
+            "select value from credential where integration_id='opencode' and active=1 limit 1"
+        ).fetchone()
+    finally:
+        con.close()
+    if not row:
+        raise RuntimeError("no opencode credential")
+    credential = json.loads(row[0])
+    token = credential.get("access")
+    if not token:
+        raise RuntimeError("no console access token")
+    return str(token)
+
+
+def _iso_ms(value) -> int:
+    try:
+        return int(datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp() * 1000)
+    except (TypeError, ValueError):
+        return 0
+
+
+def read_go_status(timeout: int = 6) -> dict | None:
+    """Doc meters CHINH XAC tu console (used/limit/resetsAt)."""
+    if os.environ.get("SWARM_CONSOLE", "1") == "0":
+        return None
+    token = _console_token()
+    request = urllib.request.Request(
+        CONSOLE_STATUS_URL,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json",
+                 "User-Agent": "adaptive-swarm/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        return None
+    meters = (data.get("access") or {}).get("meters") or {}
+    result: dict[str, dict] = {}
+    for source, target in (("fiveHour", "today"), ("week", "week"), ("month", "month")):
+        item = meters.get(source) or {}
+        limit = int(item.get("limitMicroCents") or 0) / 1e8
+        used = int(item.get("usedMicroCents") or 0) / 1e8
+        if limit <= 0:
+            continue
+        result[target] = {
+            "used": round(used, 4), "limit": round(limit, 4),
+            "remaining": round(max(0.0, limit - used), 4),
+            "pct": round(used / limit * 100.0, 1),
+            "resets_at": item.get("resetsAt"),
+            "resets_at_ms": _iso_ms(item.get("resetsAt")),
+        }
+    return result or None
 
 
 def read_messages(days: int = 30) -> list[dict]:
@@ -206,6 +268,9 @@ class QuotaTracker:
         self.spend: dict[str, dict] = {}
         self.reset: dict[str, int] = {}
         self.hourly: list[dict] = []
+        self.meters: dict[str, dict] = {}
+        self.console = False
+        self.console_error: str | None = None
         self.requests: list[dict] = []
         self.message_count = 0
         self.available = False
@@ -230,6 +295,9 @@ class QuotaTracker:
             self.message_count = int(cached.get("message_count") or 0)
             self.available = bool(cached.get("available"))
             self.error = cached.get("error")
+            self.meters = cached.get("meters") or {}
+            self.console = bool(cached.get("console"))
+            self.console_error = cached.get("console_error")
             self.fetched_at = float(cached.get("at") or now)
             return self
 
@@ -245,6 +313,17 @@ class QuotaTracker:
             self.message_count = 0
             self.available = False
             self.error = f"db: {str(exc)[:160]}"
+
+        try:
+            meters = read_go_status()
+            self.meters = meters or {}
+            self.console = bool(meters)
+            self.console_error = None if meters else "console unavailable"
+        except Exception as exc:                    # noqa: BLE001
+            self.meters = {}
+            self.console = False
+            self.console_error = str(exc)[:160]
+
         self.fetched_at = now
         self._write_cache()
         return self
@@ -309,7 +388,9 @@ class QuotaTracker:
             payload = {"at": self.fetched_at, "available": self.available,
                        "error": self.error, "usage": self.usage, "spend": self.spend,
                        "reset": self.reset, "hourly": self.hourly,
-                       "requests": self.requests, "message_count": self.message_count}
+                       "requests": self.requests, "message_count": self.message_count,
+                       "meters": self.meters, "console": self.console,
+                       "console_error": self.console_error}
             tmp = self.cache_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
                            encoding="utf-8")
@@ -318,8 +399,23 @@ class QuotaTracker:
             pass
 
     def shared(self) -> dict:
-        """Ngan sach CHUNG cua plan: tong cost cac model tra tien (opencode-go/)."""
-        windows: dict[str, dict] = {}
+        """Ngan sach CHUNG cua plan: uu tien meters that tu console."""
+        if self.meters:
+            windows: dict[str, dict] = {}
+            ok = True
+            for key in ("today", "week", "month"):
+                item = self.meters.get(key) or {}
+                if not item:
+                    continue
+                windows[key] = {"used": item["used"], "limit": item["limit"],
+                                "remaining": item["remaining"], "pct": item["pct"]}
+                if item["pct"] >= 100:
+                    ok = False
+            month = self.meters.get("month") or {}
+            return {"ok": ok, "cap": month.get("limit", 0), "windows": windows,
+                    "worst_pct": max((item["pct"] for item in windows.values()), default=0),
+                    "source": "console"}
+        windows = {}
         ok = True
         worst = 0.0
         for window, ratio in WINDOW_RATIO.items():
@@ -334,7 +430,8 @@ class QuotaTracker:
                                "remaining": round(max(0.0, limit - used), 4),
                                "pct": round(pct, 1)}
         return {"ok": ok, "cap": round(self.plan_cap, 2),
-                "windows": windows, "worst_pct": round(worst, 1)}
+                "windows": windows, "worst_pct": round(worst, 1),
+                "source": "estimate"}
 
     def remaining(self, model: str) -> dict:
         cap = self.caps.get(model)
@@ -375,11 +472,18 @@ class QuotaTracker:
         return None, info
 
     def snapshot(self) -> dict:
+        reset = dict(self.reset)
+        for key in ("today", "week", "month"):
+            item = self.meters.get(key) or {}
+            if item.get("resets_at_ms"):
+                reset[key] = item["resets_at_ms"]
         return {"available": self.available, "error": self.error,
                 "fetched_at": self.fetched_at, "plan_cap": self.plan_cap,
                 "shared": self.shared(), "spend": self.spend,
-                "reset": self.reset, "hourly": self.hourly,
+                "reset": reset, "hourly": self.hourly,
                 "requests": self.requests, "message_count": self.message_count,
+                "console": self.console, "console_error": self.console_error,
+                "meters": self.meters,
                 "usage": {window: dict(values) for window, values in self.usage.items()}}
 
 
@@ -409,6 +513,15 @@ def _cli(argv=None) -> int:
             print(f"{label:<6} ${spend.get('cost', 0):8.2f}  "
                   f"{spend.get('requests', 0):>5} req  "
                   f"{spend.get('tokens_in', 0):>9} / {spend.get('tokens_out', 0):<8} tok")
+        if tracker.console:
+            parts = []
+            for key, label in (("today", "5h"), ("week", "7d"), ("month", "30d")):
+                item = tracker.meters.get(key) or {}
+                parts.append(f"{label} {item.get('pct', 0):.1f}% "
+                             f"(${item.get('used', 0):.2f}/${item.get('limit', 0):.0f})")
+            print("console: " + "  ".join(parts))
+        else:
+            print("console: khong lay duoc meters that (dang dung uoc luong)")
         print("")
         print(f"{'MODEL':<40} {'5H$':>8} {'7D$':>8} {'30D$':>8}  STATUS")
         for model in models:

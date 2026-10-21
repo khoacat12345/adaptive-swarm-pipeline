@@ -183,6 +183,27 @@ def test_shared_budget(checks: Checks) -> None:
     checks.check("shared: usage free khong tinh vao plan",
                  tracker.shared()["ok"] is True, tracker.shared())
 
+    tracker.meters = {
+        "today": {"used": 0.24, "limit": 12.0, "remaining": 11.76, "pct": 2.0,
+                  "resets_at_ms": 4102444800000},
+        "week": {"used": 8.4, "limit": 30.0, "remaining": 21.6, "pct": 28.0,
+                 "resets_at_ms": 4102444800000},
+        "month": {"used": 8.4, "limit": 60.0, "remaining": 51.6, "pct": 14.0,
+                  "resets_at_ms": 4102444800000},
+    }
+    tracker.console = True
+    shared = tracker.shared()
+    checks.check("shared: dung meters that tu console",
+                 shared["source"] == "console"
+                 and shared["windows"]["week"]["pct"] == 28.0
+                 and shared["cap"] == 60.0, shared)
+    snapshot = tracker.snapshot()
+    checks.check("shared: snapshot co meters + reset that",
+                 snapshot["console"] is True
+                 and snapshot["meters"]["month"]["limit"] == 60.0
+                 and snapshot["reset"]["month"] == 4102444800000,
+                 snapshot["reset"])
+
 
 def test_no_regression(checks: Checks, *, fast: bool = False) -> None:
     if fast:

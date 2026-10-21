@@ -747,12 +747,14 @@ function renderUsage(){
     const minutes = Math.floor((diff % 3600000) / 60000);
     return hours ? `resets in ${hours}h ${minutes}m` : `resets in ${minutes}m`;
   };
+  const live = shared.source === 'console';
   $('#limitCard').innerHTML = `<div class="spread"><h2 style="margin:0">Go limits</h2>
-    <span class="muted" style="font-size:10.5px">local estimate · console is billing source</span></div>
+    <span class="muted" style="font-size:10.5px">${live ? 'live from OpenCode console' : 'local estimate · console is billing source'}</span></div>
     ${rows.map(([key, label]) => {
       const window = windows[key] || {};
       const pct = window.pct || 0;
-      return `<div class="limitrow"><span class="lab">${label}</span>
+      const exact = window.limit ? `$${Number(window.used || 0).toFixed(2)} / $${Number(window.limit).toFixed(0)}` : '';
+      return `<div class="limitrow" title="${exact}"><span class="lab">${label}</span>
         ${bar(pct)}<span class="pct">${pct.toFixed(0)}% used</span>
         <span class="reset">${resetLabel(resets[key])}</span></div>`;
     }).join('')}`;

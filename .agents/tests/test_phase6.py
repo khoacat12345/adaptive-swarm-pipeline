@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,8 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+os.environ.setdefault("SWARM_CONSOLE", "0")
 
 AGENTS_DIR = Path(__file__).resolve().parents[1]
 for _path in (AGENTS_DIR, AGENTS_DIR / "tests"):
