@@ -159,6 +159,13 @@
         transition:height .3s,background .15s}
   .hbar:hover{background:var(--accent)}
   .hx{font-size:8.5px;color:var(--dim2);height:12px}
+  .htip{position:fixed;z-index:90;pointer-events:none;opacity:0;
+        background:#0b1521f5;border:1px solid #35506b;border-radius:8px;
+        padding:7px 10px;font:11px/1.5 Consolas,monospace;color:var(--fg);
+        box-shadow:0 10px 28px #0009;transition:opacity .1s;white-space:nowrap}
+  .htip .v{color:var(--accent);font-weight:700}
+  .htip .t{font-weight:700;color:#fff}
+  .htip .m{color:var(--dim2)}
   .limitrow{display:flex;align-items:center;gap:12px;margin:10px 0}
   .limitrow .lab{width:72px;font-size:12px;color:var(--fg)}
   .limitrow .track{flex:1;height:9px}
@@ -327,12 +334,14 @@
       <div class="grid g3" id="spendCards"></div>
       <div class="card" id="limitCard" style="margin-top:14px"></div>
       <div class="card" style="margin-top:14px">
-        <div class="spread"><h2 style="margin:0">Hourly usage</h2>
+        <div class="spread"><h2 style="margin:0">Hourly usage
+          <span class="muted" style="font-weight:400;font-size:10.5px">hover a bar for $ / tokens</span></h2>
           <div class="tabs">
             <button id="hourCost" class="active" onclick="hourlyMode('cost')">Cost</button>
             <button id="hourTokens" onclick="hourlyMode('tokens')">Tokens</button>
           </div></div>
         <div id="hourly" class="hourly"></div>
+        <div id="htip" class="htip"></div>
       </div>
       <div class="card" style="margin-top:14px">
         <div class="spread"><h2 style="margin:0">Models (rolling windows)</h2>
@@ -760,14 +769,22 @@ function renderUsage(){
     }).join('')}`;
 
   const hourly = quota.hourly || [];
+  state.hourlyData = hourly;
   const mode = state.hourlyMode || 'cost';
-  const values = hourly.map((bucket) => mode === 'cost' ? bucket.cost : bucket.tokens);
+  const tokensOf = (bucket) => {
+    if(bucket.tokens_in != null || bucket.tokens_out != null || bucket.tokens_cache != null){
+      return Number(bucket.tokens_in || 0) + Number(bucket.tokens_out || 0) +
+             Number(bucket.tokens_cache || 0);
+    }
+    return Number(bucket.tokens || 0);
+  };
+  const values = hourly.map((bucket) => mode === 'cost' ? Number(bucket.cost || 0) : tokensOf(bucket));
   const peak = Math.max(...values, 0.0001);
   $('#hourly').innerHTML = hourly.map((bucket, hour) => {
     const value = values[hour] || 0;
     const height = Math.max(2, Math.round(value / peak * 100));
-    const tip = mode === 'cost' ? '$' + value.toFixed(4) : num(value) + ' tokens';
-    return `<div class="hslot" title="${hour}:00 · ${tip}">
+    return `<div class="hslot" onmouseenter="showHourTip(event,${hour})"
+      onmousemove="moveHourTip(event)" onmouseleave="hideHourTip()">
       <div class="hbar" style="height:${height}%"></div>
       <div class="hx">${hour % 4 === 0 ? hour : ''}</div></div>`;
   }).join('');
@@ -817,6 +834,39 @@ function renderUsage(){
       <td class="mono">$${(item.cost || 0).toFixed(4)}</td>
     </tr>`).join('')}</tbody></table>`;
 }
+
+function showHourTip(ev, hour){
+  const data = (state.hourlyData || [])[hour] || {};
+  const tin = Number(data.tokens_in || 0);
+  const tout = Number(data.tokens_out || 0);
+  const cache = Number(data.tokens_cache || 0);
+  const total = (data.tokens_in != null || data.tokens_out != null || data.tokens_cache != null)
+    ? tin + tout + cache : Number(data.tokens || 0);
+  const tip = $('#htip');
+  tip.innerHTML = `<div class="t">${String(hour).padStart(2, '0')}:00</div>
+    <div><span class="v">$${Number(data.cost || 0).toFixed(4)}</span> <span class="m">cost</span></div>
+    <div><span class="t">${num(total)}</span> tokens</div>
+    <div class="m">in ${num(tin)} · out ${num(tout)} · cache ${num(cache)}</div>
+    <div class="m">${num(data.requests || 0)} requests</div>`;
+  tip.style.opacity = '1';
+  moveHourTip(ev);
+}
+
+function moveHourTip(ev){
+  const tip = $('#htip');
+  const rect = tip.getBoundingClientRect();
+  const pad = 14;
+  let x = ev.clientX + pad;
+  let y = ev.clientY - 12;
+  if(x + rect.width > window.innerWidth - 8) x = ev.clientX - rect.width - pad;
+  if(y + rect.height > window.innerHeight - 8) y = window.innerHeight - rect.height - 8;
+  if(x < 8) x = 8;
+  if(y < 8) y = 8;
+  tip.style.left = x + 'px';
+  tip.style.top = y + 'px';
+}
+
+function hideHourTip(){ $('#htip').style.opacity = '0'; }
 
 function hourlyMode(mode){
   state.hourlyMode = mode;

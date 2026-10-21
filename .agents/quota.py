@@ -345,7 +345,9 @@ class QuotaTracker:
 
         self.spend = {}
         self.reset = {}
-        self.hourly = [{"hour": hour, "cost": 0.0, "tokens": 0} for hour in range(24)]
+        self.hourly = [{"hour": hour, "cost": 0.0, "tokens": 0, "tokens_in": 0,
+                        "tokens_out": 0, "tokens_cache": 0, "requests": 0}
+                       for hour in range(24)]
         for window, cutoff in {**windows, "calendar_today": midnight}.items():
             selected = [message for message in messages if message["t"] >= cutoff]
             self.spend[window] = {
@@ -365,8 +367,13 @@ class QuotaTracker:
         for message in messages:
             if message["t"] >= midnight:
                 hour = time.localtime(message["t"] / 1000).tm_hour
-                self.hourly[hour]["cost"] += message["cost"]
-                self.hourly[hour]["tokens"] += message["tokens_in"] + message["tokens_out"]
+                bucket = self.hourly[hour]
+                bucket["cost"] += message["cost"]
+                bucket["tokens_in"] += message["tokens_in"]
+                bucket["tokens_out"] += message["tokens_out"]
+                bucket["tokens_cache"] += message["tokens_cache"]
+                bucket["tokens"] += message["tokens_in"] + message["tokens_out"]
+                bucket["requests"] += 1
         for bucket in self.hourly:
             bucket["cost"] = round(bucket["cost"], 4)
         self.requests = sorted(messages, key=lambda message: message["t"],

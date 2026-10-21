@@ -566,6 +566,7 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
   dung) va **quick access**: copy lenh `job.py --plan ... --wait --open` de chay lai.
 - **Timestamps**: gio bat dau run, gio tung event trong chat, gio cap nhat plan, gio
   doc quota (checked).
+- **Hourly usage**: hover 1 cot gio de xem cost ($), tokens (in/out/cache) va so request.
 
 ### Mission control (stepper / roadmap / control bar)
 
