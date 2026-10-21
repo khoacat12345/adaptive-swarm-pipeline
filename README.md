@@ -79,11 +79,15 @@ Left sidebar: **Overview, Plan, Chat, History, Quota, Drafts, Settings**.
 
 - **Chat** is a chronological timeline (oldest first) with `HH:MM:SS` on every event;
   logs are not shown on the overview.
-- **History** reopens any run.
-- **Quota** has the shared plan budget and per-model bars.
-- Deep links: `/#overview`, `/#plan`, `/#chat`, `/#history`, `/#quota`, `/#drafts`, `/#settings`.
+- **Workspaces** lists real OpenCode projects (old working rooms) with session count,
+  cost and tokens.
+- **Usage** shows exact per-request spend from `opencode.db` (today / 5h rolling /
+  7d / 30d), per-model costs and a request log.
+- Deep links: `/#overview`, `/#plan`, `/#chat`, `/#workspaces`, `/#quota`, `/#drafts`, `/#settings`.
 
-![Quota view](docs/quota.png)
+![Usage view](docs/usage.png)
+
+![Workspaces](docs/workspaces.png)
 
 ![Swarm chat](docs/chat.png)
 

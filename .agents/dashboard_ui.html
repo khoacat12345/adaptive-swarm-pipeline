@@ -6,9 +6,9 @@
 <title>Adaptive Swarm - Mission Control</title>
 <style>
   :root{
-    --bg:#0a111a; --side:#080e16; --panel:#0f1926; --panel2:#0c1520;
-    --line:#1b2a3a; --fg:#e6eef7; --dim:#8ba0b6; --dim2:#5f7488;
-    --accent:#38bdf8; --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
+    --bg:#0e1724; --side:#0a121c; --panel:#152233; --panel2:#111c2a;
+    --line:#283b50; --fg:#f2f8fe; --dim:#aec2d7; --dim2:#8299b0;
+    --accent:#4cc2ff; --ok:#3ddc97; --warn:#ffcf5c; --bad:#ff7b7b;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
@@ -55,6 +55,7 @@
   .grid{display:grid;gap:14px}
   .g2{grid-template-columns:minmax(0,1.45fr) minmax(260px,1fr)}
   .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .g4{grid-template-columns:repeat(4,minmax(0,1fr))}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
         padding:14px;min-width:0}
   .card h2{margin:0 0 10px;font-size:11px;text-transform:uppercase;
@@ -206,12 +207,12 @@
       <button data-view="chat">
         <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/></svg>
         <span>Chat</span></button>
-      <button data-view="history">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-        <span>History</span></button>
+      <button data-view="workspaces">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span>Workspaces</span></button>
       <button data-view="quota">
         <svg viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4"/><path d="M6 10v4"/></svg>
-        <span>Quota</span></button>
+        <span>Usage</span></button>
       <button data-view="drafts">
         <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
         <span>Drafts</span></button>
@@ -296,36 +297,29 @@
       </div>
     </section>
 
-    <!-- HISTORY -->
-    <section class="view" id="view-history">
+    <!-- WORKSPACES -->
+    <section class="view" id="view-workspaces">
       <div class="card">
-        <h2>Run history</h2>
-        <div id="historyTable" class="muted">No runs.</div>
+        <div class="spread"><h2 style="margin:0">Workspaces</h2>
+          <button class="btn ghost" onclick="loadWorkspaces()">Refresh</button></div>
+        <p class="muted" style="margin-top:4px;font-size:11px">
+          Projects / old working rooms from the local OpenCode database.</p>
+        <div id="workspaceList" class="muted">No workspaces.</div>
       </div>
     </section>
 
-    <!-- QUOTA -->
+    <!-- USAGE -->
     <section class="view" id="view-quota">
-      <div class="grid g2">
-        <div class="card">
-          <div class="spread"><h2 style="margin:0">Shared plan budget</h2>
-            <span id="quotaChecked" class="muted mono"></span></div>
-          <div id="sharedQuota" class="muted">No data.</div>
-        </div>
-        <div class="card">
-          <h2>Legend</h2>
-          <div class="muted" style="font-size:11.5px">
-            <p><span class="pill ok">ok</span> under 60% of the window.</p>
-            <p><span class="pill warn">warn</span> 60-85%.</p>
-            <p><span class="pill bad">hot</span> above 85% or exhausted.</p>
-            <p class="mono" style="margin-top:10px">windows: 5h / 7d / 30d</p>
-            <p class="muted">Source: <b>opencode stats</b> (same numbers as the console).</p>
-          </div>
-        </div>
+      <div class="grid g4" id="spendCards"></div>
+      <div class="card" style="margin-top:14px">
+        <div class="spread"><h2 style="margin:0">Models (rolling windows)</h2>
+          <span id="quotaChecked" class="muted mono"></span></div>
+        <div id="modelQuota" class="muted">No data.</div>
       </div>
       <div class="card" style="margin-top:14px">
-        <h2>Models</h2>
-        <div id="modelQuota" class="muted">No data.</div>
+        <div class="spread"><h2 style="margin:0">Request log</h2>
+          <span class="muted mono" id="requestCount"></span></div>
+        <div id="requestLog" class="muted">No requests.</div>
       </div>
     </section>
 
@@ -413,7 +407,7 @@ const STATUS_CLASS = (s) => ['applied','pass','ok','approved','done'].includes(s
   : ['pending','paused','blocked','warn'].includes(s) ? 'warn' : '';
 const state = {
   view:'overview', runs:[], selected:null, run:null, diff:null, job:null, planState:null,
-  quota:null, health:null, drafts:null, chatTab:'timeline', follow:false,
+  quota:null, health:null, drafts:null, workspaces:[], chatTab:'timeline', follow:false,
   token:new URLSearchParams(location.search).get('token') || '', sessionToken:'',
   lastQuota:0, sig:{}
 };
@@ -477,13 +471,14 @@ function switchView(view){
   document.querySelectorAll('.view').forEach((section) =>
     section.classList.toggle('active', section.id === 'view-' + view));
   const titles = {overview:['Overview','Mission control'], plan:['Plan','Approve or reject the current plan'],
-    chat:['Chat','Chronological timeline, oldest first'], history:['History','Reopen any run'],
-    quota:['Quota','Shared plan budget and per-model usage'], drafts:['Drafts','Read-only previews'],
+    chat:['Chat','Chronological timeline, oldest first'], workspaces:['Workspaces','Projects and old working rooms'],
+    quota:['Usage','Requests, tokens and rolling model spend'], drafts:['Drafts','Read-only previews'],
     settings:['Settings','Control, connections and quick access']};
   $('#pageTitle').textContent = titles[view][0];
   $('#pageSub').textContent = titles[view][1];
   if(view === 'drafts') loadDrafts();
-  if(view === 'history' || view === 'quota') render();
+  if(view === 'workspaces') loadWorkspaces();
+  if(view === 'quota') renderUsage();
   if(view === 'chat') renderChat();
 }
 
@@ -505,8 +500,8 @@ function render(){
   renderStepper(jobState);
   if(state.view === 'overview') renderOverview(plan, jobState, control);
   if(state.view === 'plan') renderPlan(plan, decision, jobState);
-  if(state.view === 'history') renderHistory();
-  if(state.view === 'quota') renderQuota();
+  if(state.view === 'workspaces') renderWorkspaces();
+  if(state.view === 'quota') renderUsage();
   if(state.view === 'settings') renderSettings(plan, jobState, control);
   if(state.view === 'chat') renderChat();
   renderControls(control);
@@ -595,19 +590,28 @@ function renderPlan(plan, decision, jobState){
     <button class="copy" onclick="copyText('${esc(command).replace(/'/g, "\\'")}', this)">Copy</button>`;
 }
 
-function renderHistory(){
-  if(!state.runs.length){ $('#historyTable').innerHTML = 'No runs.'; return; }
-  const rows = state.runs.map((run) => `<tr class="click" onclick="selectRun('${esc(run.run_id)}')">
-    <td class="mono">${esc(run.run_id)}</td>
-    <td class="mono">${esc(run.task_id || '-')}</td>
-    <td>${esc(run.level ?? '-')}</td>
-    <td><span class="pill ${STATUS_CLASS(run.status)}">${esc(run.status || '?')}</span></td>
-    <td class="mono">${run.events || 0}</td>
-    <td class="mono">${fmtMs(run.duration_ms)}</td>
-    <td class="mono">${num(run.requests)}</td>
-    <td class="mono">${clock(run.start)}</td></tr>`).join('');
-  $('#historyTable').innerHTML = `<table><thead><tr><th>Run</th><th>Task</th><th>Lvl</th>
-    <th>Status</th><th>Events</th><th>Time</th><th>Req</th><th>Started</th></tr></thead>
+async function loadWorkspaces(){
+  try{
+    const data = await api('/api/workspaces');
+    state.workspaces = data.workspaces || [];
+    renderWorkspaces();
+  }catch(error){ $('#workspaceList').textContent = error.message; }
+}
+
+function renderWorkspaces(){
+  const list = state.workspaces || [];
+  if(!list.length){ $('#workspaceList').innerHTML = '<p>No workspaces.</p>'; return; }
+  const rows = list.map((workspace) => `<tr>
+    <td><b>${esc(workspace.name || workspace.worktree || workspace.id)}</b>
+      <div class="mono muted">${esc(workspace.worktree || '')}</div></td>
+    <td class="mono">${workspace.sessions}</td>
+    <td class="mono">$${(workspace.cost || 0).toFixed(4)}</td>
+    <td class="mono">${num(workspace.tokens_in)} / ${num(workspace.tokens_out)}</td>
+    <td class="mono">${workspace.last_used
+      ? new Date(workspace.last_used).toLocaleString() : '-'}</td>
+  </tr>`).join('');
+  $('#workspaceList').innerHTML = `<table><thead><tr><th>Workspace</th><th>Sessions</th>
+    <th>Cost</th><th>Tokens in / out</th><th>Last used</th></tr></thead>
     <tbody>${rows}</tbody></table>`;
 }
 
@@ -682,39 +686,62 @@ function bar(value, max=100){
   return `<div class="track"><i class="${cls}" style="width:${pct}%"></i></div>`;
 }
 
-function renderQuota(){
+function spendCard(label, spend){
+  const value = spend || {};
+  return `<div class="card"><h2>${label}</h2>
+    <div style="font-size:22px;font-weight:650">$${(value.cost || 0).toFixed(2)}</div>
+    <div class="muted mono">${num(value.requests)} req · ${num(value.tokens_in)} / ${num(value.tokens_out)} tok</div></div>`;
+}
+
+function renderUsage(){
   const quota = state.quota || {};
-  const shared = quota.shared || {};
-  const windows = shared.windows || {};
+  const spend = quota.spend || {};
+  $('#spendCards').innerHTML = [
+    ['Today', spend.calendar_today], ['5h rolling', spend.today],
+    ['7 days', spend.week], ['30 days', spend.month]
+  ].map(([label, value]) => spendCard(label, value)).join('');
   $('#quotaChecked').textContent = quota.fetched_at
     ? 'checked ' + new Date(quota.fetched_at * 1000).toLocaleTimeString() : '';
-  const names = {today:'5h', week:'7d', month:'30d'};
-  $('#sharedQuota').innerHTML = !shared.windows ? 'No data.' : `
-    <div class="qbar"><span class="lab">Plan cap</span><span class="mono">$${esc(shared.cap)}/mo</span></div>
-    ${Object.keys(names).map((key) => {
-      const window = windows[key] || {};
-      return `<div class="qbar"><span class="lab">${names[key]}</span>${bar(window.pct)}
-        <span class="val">${(window.pct || 0).toFixed(1)}%</span></div>`;
-    }).join('')}
-    <div class="muted mono" style="margin-top:8px">${shared.ok ? 'headroom available' : 'EXHAUSTED'}</div>`;
 
   const models = (quota.models || []).slice().sort((a, b) => b.worst_pct - a.worst_pct);
-  if(!models.length){ $('#modelQuota').innerHTML = 'No data.'; return; }
-  $('#modelQuota').innerHTML = `<table><thead><tr><th>Model</th><th style="width:45%">Worst window</th>
-    <th>5h</th><th>7d</th><th>30d</th><th>Status</th></tr></thead><tbody>
-    ${models.map((model) => {
-      const name = model.model.split('/').pop();
-      const w = model.windows || {};
-      const pct = model.worst_pct || 0;
-      const status = model.unlimited ? '<span class="pill ok">free</span>'
-        : model.ok ? `<span class="pill ${pct>=60?'warn':'ok'}">ok</span>`
-        : '<span class="pill bad">exhausted</span>';
-      return `<tr><td class="mono">${esc(name)}</td><td>${bar(pct)}</td>
-        <td class="mono">${(w.today ?? 0).toFixed(1)}%</td>
-        <td class="mono">${(w.week ?? 0).toFixed(1)}%</td>
-        <td class="mono">${(w.month ?? 0).toFixed(1)}%</td>
-        <td>${status}</td></tr>`;
-    }).join('')}</tbody></table>`;
+  if(!models.length){
+    $('#modelQuota').innerHTML = 'No data.';
+  } else {
+    const usage = quota.usage || {};
+    $('#modelQuota').innerHTML = `<table><thead><tr><th>Model</th>
+      <th>5h cost</th><th>7d cost</th><th>30d cost</th><th>Status</th></tr></thead><tbody>
+      ${models.map((model) => {
+        const name = model.model.split('/').pop();
+        const cost = (window) => `$${(((usage[window] || {})[model.model]) || 0).toFixed(2)}`;
+        const status = model.unlimited
+          ? '<span class="pill ok">free</span>'
+          : '<span class="pill">paid</span>';
+        return `<tr><td class="mono">${esc(name)}</td>
+          <td class="mono">${cost('today')}</td>
+          <td class="mono">${cost('week')}</td>
+          <td class="mono">${cost('month')}</td>
+          <td>${status}</td></tr>`;
+      }).join('')}</tbody></table>
+      <div class="muted" style="margin-top:8px;font-size:10.5px">
+        Costs are exact, read from <b>opencode.db</b> per assistant message (rolling 5h / 7d / 30d).
+        The OpenCode console remains the billing source of truth for plan percentages.
+      </div>`;
+  }
+
+  const requests = quota.requests || [];
+  $('#requestCount').textContent = quota.message_count
+    ? `${num(quota.message_count)} requests in 30d` : '';
+  if(!requests.length){ $('#requestLog').innerHTML = '<p>No requests.</p>'; return; }
+  $('#requestLog').innerHTML = `<table><thead><tr><th>Time</th><th>Workspace</th>
+    <th>Model</th><th>Tokens in / out</th><th>Duration</th><th>Cost</th></tr></thead><tbody>
+    ${requests.map((item) => `<tr>
+      <td class="mono">${new Date(item.t).toLocaleTimeString()}</td>
+      <td class="mono muted">${esc((item.project || '').split(/[\\/]/).pop() || '-')}</td>
+      <td class="mono">${esc(item.model.split('/').pop())}</td>
+      <td class="mono">${num(item.tokens_in)} / ${num(item.tokens_out)}</td>
+      <td class="mono">${fmtMs(item.duration_ms)}</td>
+      <td class="mono">$${(item.cost || 0).toFixed(4)}</td>
+    </tr>`).join('')}</tbody></table>`;
 }
 
 async function loadDrafts(){
@@ -847,7 +874,7 @@ document.querySelectorAll('.nav button').forEach((button) =>
 $('#goal').addEventListener('keydown', (event) => { if(event.key === 'Enter') planGoal(); });
 $('#opinion').addEventListener('keydown', (event) => { if(event.key === 'Enter') sendOpinion(); });
 
-const VIEWS = ['overview','plan','chat','history','quota','drafts','settings'];
+const VIEWS = ['overview','plan','chat','workspaces','quota','drafts','settings'];
 const initialView = (location.hash || '#overview').slice(1);
 const runParam = new URLSearchParams(location.search).get('run');
 if(runParam) state.selected = runParam;

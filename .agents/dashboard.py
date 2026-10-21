@@ -326,11 +326,16 @@ def make_handler(root: Path, ledger: Path):
                             "windows": {name: value["pct"]
                                         for name, value in (entry.get("windows") or {}).items()},
                         })
-                    self._json({"available": tracker.available,
-                                "error": tracker.error,
-                                "fetched_at": tracker.fetched_at,
-                                "shared": tracker.shared(),
-                                "models": entries})
+                    payload = tracker.snapshot()
+                    payload["models"] = entries
+                    payload["usage"] = tracker.usage
+                    self._json(payload)
+                elif route == "/api/workspaces":
+                    import quota as quota_module
+                    try:
+                        self._json({"workspaces": quota_module.workspaces()})
+                    except Exception as exc:            # noqa: BLE001
+                        self._json({"workspaces": [], "error": str(exc)[:300]})
                 elif route == "/api/job":
                     import job as job_module
                     plan_state = job_module.read_plan_state(root)

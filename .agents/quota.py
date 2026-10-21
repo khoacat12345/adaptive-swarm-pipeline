@@ -2,10 +2,8 @@
 # -*- coding: utf-8 -*-
 """Quota tracker: doc usage THAT tu `opencode stats` va cat theo tran.
 
-Nguon du lieu: `opencode stats --days N --models --cost --json`
-  -> models[].model.{providerID,id}, models[].cost, tokens
-Day la cung so lieu voi OpenCode Go console (cost that, khong phai uoc luong
-tu ledger).
+Nguon du lieu: `opencode.db` (session_message: cost/token tung request) - chinh xac
+theo rolling 5h/7d/30d. Fallback: `opencode stats` neu DB khong doc duoc.
 
 Tran (theo tai lieu OpenCode Go):
   - 5 gio  = 20% han muc thang
@@ -25,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -92,6 +91,102 @@ def cost_by_model(stats: dict | None) -> dict[str, float]:
     return result
 
 
+# --------------------------------------------------------------------------
+# Nguon CHINH XAC: opencode.db (cost tung request, co timestamp)
+# --------------------------------------------------------------------------
+def db_path() -> Path:
+    env = os.environ.get("OPENCODE_DB")
+    if env:
+        return Path(env)
+    return Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+
+
+def _connect() -> sqlite3.Connection:
+    path = db_path()
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+
+
+def read_messages(days: int = 31) -> list[dict]:
+    """Doc cost/token tung assistant message (rolling window chinh xac)."""
+    cutoff = int((time.time() - days * 86400) * 1000)
+    con = _connect()
+    try:
+        rows = con.execute(
+            """
+            select sm.data, sm.session_id, s.project_id, p.worktree
+            from session_message sm
+            left join session_v2 s on s.id = sm.session_id
+            left join project p on p.id = s.project_id
+            where sm.type = 'assistant' and sm.time_created >= ?
+            """, (cutoff,)).fetchall()
+    finally:
+        con.close()
+    messages: list[dict] = []
+    for data, session_id, project_id, worktree in rows:
+        try:
+            obj = json.loads(data)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        model = obj.get("model") or {}
+        provider = str(model.get("providerID") or "")
+        model_id = str(model.get("id") or "")
+        if not provider or not model_id:
+            continue
+        timing = obj.get("time") or {}
+        created = int(timing.get("created") or 0)
+        completed = int(timing.get("completed") or created)
+        tokens = obj.get("tokens") or {}
+        cache = tokens.get("cache") or {}
+        messages.append({
+            "t": completed or created,
+            "model": f"{provider}/{model_id}",
+            "cost": float(obj.get("cost") or 0.0),
+            "tokens_in": int(tokens.get("input") or 0),
+            "tokens_out": int(tokens.get("output") or 0),
+            "tokens_cache": int(cache.get("read") or 0),
+            "duration_ms": max(0, completed - created),
+            "session": session_id,
+            "project": worktree or project_id or "",
+        })
+    return messages
+
+
+def workspaces(*, limit: int = 50) -> list[dict]:
+    """Danh sach project/workspace + thong ke (thay cho 'history' kieu run)."""
+    con = _connect()
+    try:
+        rows = con.execute(
+            """
+            select min(p.id) as id,
+                   coalesce(nullif(max(p.name), ''), min(p.worktree)) as label,
+                   min(p.worktree) as worktree,
+                   max(p.time_active) as active_at,
+                   count(s.id) as sessions,
+                   coalesce(sum(s.cost), 0) as cost,
+                   coalesce(sum(s.tokens_input), 0) as tokens_in,
+                   coalesce(sum(s.tokens_output), 0) as tokens_out,
+                   max(s.time_updated) as last_used,
+                   max(p.time_created) as created_at
+            from project p
+            left join session_v2 s on s.project_id = p.id
+            where lower(replace(p.worktree, '\\', '/')) not like '%/appdata/local/temp/%'
+              and lower(replace(p.worktree, '\\', '/')) not like '%/temp/%'
+              and lower(replace(p.worktree, '\\', '/')) not like '%/swarm_worker_%'
+            group by lower(replace(p.worktree, '\\', '/'))
+            having count(s.id) > 0
+            order by coalesce(max(p.time_active), max(p.time_created)) desc
+            limit ?
+            """, (limit,)).fetchall()
+    finally:
+        con.close()
+    return [{"id": row[0], "name": row[1], "worktree": row[2],
+             "active_at": row[3], "sessions": row[4], "cost": round(row[5] or 0, 4),
+             "tokens_in": row[6] or 0, "tokens_out": row[7] or 0,
+             "last_used": row[8]} for row in rows]
+
+
 class QuotaTracker:
     """Doc usage that + quyet dinh model nao con du dia.
 
@@ -108,6 +203,9 @@ class QuotaTracker:
         self.plan_cap = float(plan_cap)
         self.cache_ttl = cache_ttl
         self.usage: dict[str, dict[str, float]] = {name: {} for name in WINDOW_DAYS}
+        self.spend: dict[str, dict] = {}
+        self.requests: list[dict] = []
+        self.message_count = 0
         self.available = False
         self.error: str | None = None
         self.fetched_at = 0.0
@@ -123,23 +221,61 @@ class QuotaTracker:
         cached = self._read_cache(now)
         if cached and not force:
             self.usage = cached["usage"]
+            self.spend = cached.get("spend") or {}
+            self.requests = cached.get("requests") or []
+            self.message_count = int(cached.get("message_count") or 0)
             self.available = bool(cached.get("available"))
             self.fetched_at = float(cached.get("at") or now)
             return self
 
-        ok = False
-        for window, days in WINDOW_DAYS.items():
-            stats = read_stats(days, binary=self.binary)
-            if stats is None:
-                continue
-            self.usage[window] = cost_by_model(stats)
-            ok = True
-        self.available = ok
+        try:
+            messages = read_messages()
+            self._load(messages)
+            self.available = True
+            self.error = None
+        except Exception as exc:                    # noqa: BLE001
+            self.error = f"db: {str(exc)[:160]}"
+            ok = False
+            for window, days in WINDOW_DAYS.items():
+                stats = read_stats(days, binary=self.binary)
+                if stats is None:
+                    continue
+                self.usage[window] = cost_by_model(stats)
+                ok = True
+            self.available = ok
         self.fetched_at = now
-        if not ok:
-            self.error = "khong doc duoc opencode stats"
+        if not self.available:
+            self.error = self.error or "khong doc duoc usage"
         self._write_cache()
         return self
+
+    def _load(self, messages: list[dict]) -> None:
+        now = time.time() * 1000
+        windows = {"today": now - 5 * 3600 * 1000,
+                   "week": now - 7 * 86400 * 1000,
+                   "month": now - 30 * 86400 * 1000}
+        local = time.localtime()
+        midnight = time.mktime((local.tm_year, local.tm_mon, local.tm_mday,
+                                0, 0, 0, 0, 0, 0)) * 1000
+        self.usage = {window: {} for window in windows}
+        for message in messages:
+            for window, cutoff in windows.items():
+                if message["t"] >= cutoff:
+                    model = message["model"]
+                    self.usage[window][model] = self.usage[window].get(model, 0.0) + message["cost"]
+
+        self.spend = {}
+        for window, cutoff in {**windows, "calendar_today": midnight}.items():
+            selected = [message for message in messages if message["t"] >= cutoff]
+            self.spend[window] = {
+                "cost": round(sum(message["cost"] for message in selected), 4),
+                "requests": len(selected),
+                "tokens_in": sum(message["tokens_in"] for message in selected),
+                "tokens_out": sum(message["tokens_out"] for message in selected),
+            }
+        self.requests = sorted(messages, key=lambda message: message["t"],
+                               reverse=True)[:60]
+        self.message_count = len(messages)
 
     def _read_cache(self, now: float) -> dict | None:
         try:
@@ -155,8 +291,9 @@ class QuotaTracker:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             self.cache_path.write_text(json.dumps(
                 {"at": self.fetched_at, "available": self.available,
-                 "usage": self.usage}, ensure_ascii=False, indent=2),
-                encoding="utf-8")
+                 "usage": self.usage, "spend": self.spend,
+                 "requests": self.requests, "message_count": self.message_count},
+                ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             pass
 
@@ -217,7 +354,8 @@ class QuotaTracker:
     def snapshot(self) -> dict:
         return {"available": self.available, "error": self.error,
                 "fetched_at": self.fetched_at, "plan_cap": self.plan_cap,
-                "shared": self.shared(),
+                "shared": self.shared(), "spend": self.spend,
+                "requests": self.requests, "message_count": self.message_count,
                 "usage": {window: dict(values) for window, values in self.usage.items()}}
 
 
@@ -240,21 +378,22 @@ def _cli(argv=None) -> int:
     else:
         if not tracker.available:
             print(f"CANH BAO: {tracker.error or 'khong co du lieu'}")
-        shared = tracker.shared()
-        print(f"NGAN SACH CHUNG (plan ${shared['cap']:.2f}/thang): "
-              f"5h {shared['windows']['today']['pct']:.1f}% / "
-              f"tuan {shared['windows']['week']['pct']:.1f}% / "
-              f"thang {shared['windows']['month']['pct']:.1f}% "
-              f"{'OK' if shared['ok'] else 'CAN'}")
+        labels = (("calendar_today", "today"), ("today", "5h"),
+                  ("week", "7d"), ("month", "30d"))
+        for key, label in labels:
+            spend = tracker.spend.get(key) or {}
+            print(f"{label:<6} ${spend.get('cost', 0):8.2f}  "
+                  f"{spend.get('requests', 0):>5} req  "
+                  f"{spend.get('tokens_in', 0):>9} / {spend.get('tokens_out', 0):<8} tok")
         print("")
-        print(f"{'MODEL':<40} {'5H%':>6} {'TUAN%':>6} {'THANG%':>7}  OK")
-        for model, entry in report.items():
-            if entry["unlimited"]:
-                print(f"{model:<40} {'-':>6} {'-':>6} {'-':>7}  yes (free)")
+        print(f"{'MODEL':<40} {'5H$':>8} {'7D$':>8} {'30D$':>8}  STATUS")
+        for model in models:
+            if model not in tracker.caps:
+                print(f"{model:<40} {'-':>8} {'-':>8} {'-':>8}  free")
                 continue
-            w = entry["windows"]
-            print(f"{model:<40} {w['today']['pct']:>6.1f} {w['week']['pct']:>6.1f} "
-                  f"{w['month']['pct']:>7.1f}  {'yes' if entry['ok'] else 'NO'}")
+            cost = lambda window: (tracker.usage.get(window) or {}).get(model, 0.0)
+            print(f"{model:<40} {cost('today'):>8.2f} {cost('week'):>8.2f} "
+                  f"{cost('month'):>8.2f}  paid")
     return 0
 
 
