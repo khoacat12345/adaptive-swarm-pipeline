@@ -222,7 +222,7 @@ def test_run_job(checks: Checks) -> None:
 
 def test_dashboard_api(checks: Checks) -> None:
     root = make_root("dashboard")
-    job.submit_plan(make_plan(), root, token="dash-token")
+    job.submit_plan(make_plan(), root, token="dash-token", source="plan.json")
     ledger = root / ".agents" / "ledger.jsonl"
     server = dashboard.make_server(0, root=root, ledger=ledger)
     port = server.server_address[1]
@@ -235,6 +235,14 @@ def test_dashboard_api(checks: Checks) -> None:
         checks.check("dashboard: GET /api/plan co plan",
                      (data.get("plan") or {}).get("job_id") == "J1", data)
         checks.check("dashboard: pending", (data.get("decision") or {}).get("status") == "pending")
+        checks.check("dashboard: co root + source",
+                     bool(data.get("root")) and (data.get("plan") or {}).get("_source") == "plan.json",
+                     data)
+
+        with urllib.request.urlopen(base + "/api/quota", timeout=30) as response:
+            quota_data = json.loads(response.read().decode("utf-8"))
+        checks.check("dashboard: quota endpoint",
+                     "shared" in quota_data and "models" in quota_data, quota_data)
 
         with urllib.request.urlopen(base + "/", timeout=5) as response:
             html = response.read().decode("utf-8")

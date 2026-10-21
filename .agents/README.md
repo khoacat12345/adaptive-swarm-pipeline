@@ -556,6 +556,8 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
 - Khong duyet / timeout -> **khong ghi file nao**.
 - Moi subtask tu chon model theo W0-W8 + quota (fallback ladder).
 - Token 1 lan chi in ra CLI; dashboard khong tra token qua API.
+- Dashboard (tieng Anh) hien them **quota bar** (plan chung 5h/7d/30d + model dang
+  dung) va **quick access**: copy lenh `job.py --plan ... --wait --open` de chay lai.
 
 ### Work Order (5 truong)
 

@@ -316,6 +316,21 @@ HTML = r"""<!doctype html>
   .pill.pending{background:#2a2310;color:#fbbf24}
   .pill.approved{background:#0f2a22;color:#34d399}
   .pill.rejected{background:#2a1010;color:#f87171}
+  /* quota bar */
+  .quota{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 18px 0;padding:8px 12px;
+         background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:11px}
+  .qk{color:var(--dim);text-transform:uppercase;letter-spacing:1px;font-size:9.5px}
+  .qchip{background:#16202c;border-radius:999px;padding:2px 8px;color:#c7d2fe}
+  .qchip.ok{color:#9be7c4}
+  .qchip.no{color:#ffb4b4}
+  .qsep{width:1px;height:14px;background:var(--line);margin:0 2px}
+  /* plan quick access */
+  .plan .quick{display:flex;flex-direction:column;gap:5px;margin:6px 0 10px;padding:8px 10px;
+               background:var(--panel2);border-radius:8px}
+  .plan .quick code{font-family:Consolas,monospace;font-size:11px;color:#9fe3c0;word-break:break-all}
+  .plan .quick .copy{margin-left:8px;background:#1c2937;color:#c7d2fe;border:0;border-radius:6px;
+                     padding:2px 8px;font-size:10px;cursor:pointer}
+  .plan .quick .copy.copied{background:#14532d;color:#9be7c4}
   ::-webkit-scrollbar{width:10px;height:10px}
   ::-webkit-scrollbar-thumb{background:#1c2937;border-radius:8px}
   ::-webkit-scrollbar-track{background:transparent}
@@ -324,26 +339,27 @@ HTML = r"""<!doctype html>
 <body>
 <header>
   <h1><span>&#9679;</span> Adaptive Swarm <span>Pipeline</span></h1>
-  <div id="statusMessage"><span class="dot"></span>dang tai...</div>
+  <div id="statusMessage"><span class="dot"></span>loading...</div>
 </header>
 <div id="planPanel" class="plan" style="display:none"></div>
+<div id="quotaBar" class="quota"></div>
 <main>
   <section class="col" id="sidebar">
     <div class="colhead">Run history
       <label style="float:right;text-transform:none;letter-spacing:0;color:var(--dim);cursor:pointer">
-        <input type="checkbox" id="showAll"> tat ca</label>
+        <input type="checkbox" id="showAll"> all</label>
     </div>
-    <div id="runs"><div class="empty">Chua co run nao</div></div>
+    <div id="runs"><div class="empty">No runs yet</div></div>
   </section>
 
   <section class="col">
-    <div class="colhead">Phong hop da Agent</div>
-    <div id="chat"><div class="empty">Chon mot run o cot trai</div></div>
+    <div class="colhead">Multi-agent room</div>
+    <div id="chat"><div class="empty">Select a run on the left</div></div>
   </section>
 
   <section class="col">
     <div class="colhead">Diff &amp; Inspector</div>
-    <div id="inspector"><div class="empty">Chua co du lieu</div></div>
+    <div id="inspector"><div class="empty">No data yet</div></div>
   </section>
 </main>
 <script>
@@ -361,6 +377,7 @@ const esc = (s) => String(s ?? '');
 const sigOf = (value) => { try { return JSON.stringify(value); } catch (_) { return String(value); } };
 const token = new URLSearchParams(location.search).get('token') || '';
 let planSig = '';
+let quotaSig = '';
 const fmt = (ms) => ms >= 60000 ? (ms/60000).toFixed(1)+'m' : ms >= 1000 ? (ms/1000).toFixed(1)+'s' : (ms||0)+'ms';
 const num = (n) => (n||0).toLocaleString('en-US');
 
@@ -383,7 +400,7 @@ function renderRuns(force=false){
   if(!force && sig === state.sig.runs) return;
   state.sig.runs = sig;
   const box = el('runs');
-  if(!state.runs.length){ box.innerHTML = '<div class="empty">Chua co task nao<br><span style="font-size:11px">bat "tat ca" de xem run scout/acceptance</span></div>'; return; }
+  if(!state.runs.length){ box.innerHTML = '<div class="empty">No runs yet<br><span style="font-size:11px">turn on "all" to see scout/acceptance runs</span></div>'; return; }
   box.innerHTML = state.runs.map(r=>{
     const st = r.status || 'other';
     const cls = ['applied'].includes(st)?'applied':['aborted','rejected'].includes(st)?'aborted':['dry-run'].includes(st)?'dry-run':'other';
@@ -403,7 +420,7 @@ function renderRuns(force=false){
 function renderChat(){
   const box = el('chat');
   const tl = (state.data && state.data.timeline) || [];
-  if(!tl.length){ box.innerHTML='<div class="empty">Run nay chua co event</div>'; return; }
+  if(!tl.length){ box.innerHTML='<div class="empty">This run has no events</div>'; return; }
   box.innerHTML = tl.map(item=>{
     const meta = NODE[item.node] || NODE.system;
     const chat = item.status ? `<span class="chip ${statusClass(item.status)}">${esc(item.status)}</span>` : '';
@@ -447,7 +464,7 @@ function renderInspector(diff){
       <code>${esc(run.verify_command || '(khong ghi nhan)')}</code></div>
     <div class="diffhead"><div class="t">${esc(diff?.target || '')} ${diff?`(${diff.changed_lines} dong thay doi)`:''}</div>
       <div class="t">${esc(diff?.old_label||'')} &rarr; ${esc(diff?.new_label||'')}</div></div>
-    <pre class="diff">${rendered || '<div class="ctx">Khong co thay doi / chua co file</div>'}</pre>`;
+    <pre class="diff">${rendered || '<div class="ctx">No changes / no file</div>'}</pre>`;
 }
 
 async function renderPlan(){
@@ -468,15 +485,24 @@ async function renderPlan(){
       <td>${esc((s.depends_on || []).join(', ') || '-')}</td>
     </tr>`).join('');
     const actions = status === 'pending'
-      ? `<button class="ok" onclick="decidePlan('approve')">Duyet</button>
-         <button class="no" onclick="decidePlan('reject')">Tu choi</button>`
+      ? `<button class="ok" onclick="decidePlan('approve')">Approve</button>
+         <button class="no" onclick="decidePlan('reject')">Reject</button>`
       : `<span class="pill ${status}">${status}</span>`;
+    const planFile = data.plan._source || '.agents/tmp/plan.json';
+    const rootPath = data.root || '.';
+    const command = `python .agents/job.py --plan ${planFile} --root "${rootPath}" --wait --open`;
     panel.style.display = 'block';
     panel.innerHTML = `<div class="planhead">
         <b>Plan ${esc(data.plan.job_id)}</b>
         <span>${esc(data.plan.objective || '')}</span>
         <span class="pill ${status}">${status}</span></div>
-      <table><thead><tr><th>ID</th><th>Viec</th><th>File</th><th>Verify</th><th>Dep</th></tr></thead>
+      <div class="quick">
+        <div><span class="qk">plan file</span><br><code>${esc(planFile)}</code></div>
+        <div><span class="qk">quick access (paste into terminal)</span><br>
+          <code id="planCmd">${esc(command)}</code>
+          <button class="copy" onclick="copyPlan(this)">Copy</button></div>
+      </div>
+      <table><thead><tr><th>ID</th><th>Task</th><th>Files</th><th>Verify</th><th>Depends on</th></tr></thead>
       <tbody>${rows}</tbody></table>
       <div class="planactions">${actions}</div>`;
   }catch(_){ /* dashboard khong co plan endpoint -> bo qua */ }
@@ -495,9 +521,48 @@ async function decidePlan(kind){
   }catch(err){ alert(err.message); }
 }
 
+async function copyPlan(button){
+  try{
+    await navigator.clipboard.writeText(el('planCmd').textContent);
+    button.classList.add('copied');
+    button.textContent = 'Copied';
+    setTimeout(() => { button.classList.remove('copied'); button.textContent = 'Copy'; }, 900);
+  }catch(_){ /* clipboard blocked -> ignore */ }
+}
+
+async function renderQuota(){
+  try{
+    const data = await getJSON('/api/quota');
+    const sig = sigOf(data);
+    if(sig === quotaSig) return;
+    quotaSig = sig;
+    const bar = el('quotaBar');
+    const shared = data.shared || {};
+    const windows = shared.windows || null;
+    if(!windows){
+      bar.innerHTML = '<span class="qk">plan quota</span><span class="qchip">unavailable</span>';
+      return;
+    }
+    const pct = (window) => (window && typeof window.pct === 'number')
+      ? window.pct.toFixed(1) + '%' : '-';
+    const chips = (data.models || [])
+      .filter(model => !model.unlimited && model.worst_pct > 0)
+      .sort((left, right) => right.worst_pct - left.worst_pct)
+      .slice(0, 5)
+      .map(model => `<span class="qchip ${model.ok ? 'ok' : 'no'}">${esc(model.model.split('/').pop())} ${model.worst_pct.toFixed(0)}%</span>`)
+      .join('');
+    bar.innerHTML = `<span class="qk">plan quota</span>
+      <span class="qchip ${shared.ok ? 'ok' : 'no'}">5h ${pct(windows.today)}</span>
+      <span class="qchip ${shared.ok ? 'ok' : 'no'}">7d ${pct(windows.week)}</span>
+      <span class="qchip ${shared.ok ? 'ok' : 'no'}">30d ${pct(windows.month)}</span>
+      <span class="qsep"></span>
+      ${chips || '<span class="qchip">no paid usage</span>'}`;
+  }catch(_){ /* quota endpoint optional */ }
+}
+
 async function selectRun(runId, force=false){  if(state.selected !== runId){ state.selected = runId; force = true; }
   renderRuns();
-  if(force) el('statusMessage').innerHTML = '<span class="dot"></span>dang tai run...';
+  if(force) el('statusMessage').innerHTML = '<span class="dot"></span>loading run...';
   try{
     const [data, diff] = await Promise.all([
       getJSON('/api/runs/'+encodeURIComponent(runId)),
@@ -510,9 +575,9 @@ async function selectRun(runId, force=false){  if(state.selected !== runId){ sta
     state.data = data;
     renderChat(); renderInspector(diff);
     const run = data.run || {};
-    el('statusMessage').innerHTML = `<span class="dot"></span>${esc(run.status||'?')} &middot; ${run.events||0} event &middot; cap nhat ${new Date().toLocaleTimeString()}`;
+    el('statusMessage').innerHTML = `<span class="dot"></span>${esc(run.status||'?')} &middot; ${run.events||0} event &middot; updated ${new Date().toLocaleTimeString()}`;
   }catch(err){
-    el('statusMessage').textContent = 'loi: '+err.message;
+    el('statusMessage').textContent = 'error: '+err.message;
   }
 }
 
@@ -522,10 +587,11 @@ async function refresh(force=false){
     state.runs = data.runs || [];
     renderRuns(force);          // chi ve lai khi danh sach hoac selected doi
     renderPlan();
+    renderQuota();
     if(!state.selected && state.runs.length) await selectRun(state.runs[0].run_id, true);
     else if(state.selected) await selectRun(state.selected);
   }catch(err){
-    const message = 'mat ket noi: '+err.message;
+    const message = 'connection lost: '+err.message;
     if(el('statusMessage').textContent !== message) el('statusMessage').textContent = message;
   }
 }
@@ -600,6 +666,28 @@ def make_handler(root: Path, ledger: Path):
                 elif route == "/api/plan":
                     import job as job_module
                     self._json(job_module.read_plan_state(root))
+                elif route == "/api/quota":
+                    import quota as quota_module
+                    tracker = quota_module.QuotaTracker(root=root).refresh()
+                    models = list(quota_module.CAPS.keys()) + [
+                        "opencode/deepseek-v4.1-flash-free",
+                        "opencode/glm-5.3-flash-free",
+                    ]
+                    entries = []
+                    for model in models:
+                        entry = tracker.remaining(model)
+                        entries.append({
+                            "model": model,
+                            "ok": entry["ok"],
+                            "unlimited": entry["unlimited"],
+                            "worst_pct": entry["worst_pct"],
+                            "windows": {name: value["pct"]
+                                        for name, value in (entry.get("windows") or {}).items()},
+                        })
+                    self._json({"available": tracker.available,
+                                "error": tracker.error,
+                                "shared": tracker.shared(),
+                                "models": entries})
                 else:
                     self._send(404, b"not found", "text/plain; charset=utf-8")
             except Exception as exc:            # noqa: BLE001
@@ -667,7 +755,7 @@ def build_parser():
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--root", default=".")
     parser.add_argument("--ledger", default=None)
-    parser.add_argument("--open", action="store_true", help="tu mo trinh duyet")
+    parser.add_argument("--open", action="store_true", help="open the browser automatically")
     return parser
 
 

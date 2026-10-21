@@ -76,7 +76,8 @@ def load_plan(path) -> dict:
 
 def read_plan_state(root) -> dict:
     """Trang thai cho dashboard: plan + decision (KHONG tra token)."""
-    state: dict = {"plan": None, "decision": None}
+    state: dict = {"plan": None, "decision": None,
+                   "root": str(Path(root).resolve())}
     try:
         state["plan"] = json.loads(plan_path(root).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -202,10 +203,13 @@ def to_order(subtask: dict, plan: dict):
 # --------------------------------------------------------------------------
 # Duyet
 # --------------------------------------------------------------------------
-def submit_plan(plan: dict, root, *, token: str | None = None, log: bool = True) -> dict:
+def submit_plan(plan: dict, root, *, token: str | None = None, source: str | None = None,
+                log: bool = True) -> dict:
     problems = validate_plan(plan)
     if problems:
         raise ValueError("plan khong hop le: " + "; ".join(problems[:8]))
+    if source:
+        plan["_source"] = str(source)
     directory = _dir(root)
     directory.mkdir(parents=True, exist_ok=True)
     token = token or secrets.token_hex(8)
@@ -386,10 +390,10 @@ def main(argv=None) -> int:
     try:
         plan = load_plan(args.plan)
     except OSError as exc:
-        print(f"khong doc duoc plan: {args.plan} ({exc})")
-        print("vi du: python .agents/job.py --plan scratch/swarm_demo/plan.json --root . --wait --open")
+        print(f"cannot read plan: {args.plan} ({exc})")
+        print("example: python .agents/job.py --plan scratch/swarm_demo/plan.json --root . --wait --open")
         return 2
-    info = submit_plan(plan, args.root, token=args.token)
+    info = submit_plan(plan, args.root, token=args.token, source=args.plan)
     url = f"http://127.0.0.1:{args.port}/?token={info['token']}"
     print(f"job     : {info['job_id']} ({info['subtasks']} subtask)")
     print(f"dashboard: {url}")
@@ -397,7 +401,7 @@ def main(argv=None) -> int:
     server = None
     if args.open:
         server, started = ensure_dashboard(args.root, args.port)
-        print(f"dashboard: {'da khoi dong' if started else 'da co san'} tren port {args.port}")
+        print(f"dashboard: {'started' if started else 'already running'} on port {args.port}")
         try:
             webbrowser.open(url)
         except Exception:                       # noqa: BLE001
@@ -407,15 +411,15 @@ def main(argv=None) -> int:
         if args.decision:
             decide(args.root, args.decision, token=info["token"])
         elif args.wait:
-            print("dang cho duyet tren dashboard...")
+            print("waiting for approval on the dashboard...")
             result = wait_for_decision(args.root, timeout=args.timeout)
             if result != "approved":
-                print(f"KHONG CHAY: {result}")
+                print(f"NOT RUNNING: {result}")
                 return 2
 
         state = read_plan_state(args.root)
         if (state.get("decision") or {}).get("status") != "approved":
-            print("plan chua duoc duyet (dung --wait hoac --decision approve)")
+            print("plan is not approved (use --wait or --decision approve)")
             return 2
 
         report = run_job(plan, root=args.root, allow_escalate=args.allow_escalate,
