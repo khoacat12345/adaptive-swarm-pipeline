@@ -728,12 +728,13 @@ function renderUsage(){
   const quota = state.quota || {};
   const spend = quota.spend || {};
   const today = spend.calendar_today || {};
-  const totalTokens = (today.tokens_in || 0) + (today.tokens_out || 0);
+  const totalTokens = (today.tokens_in || 0) + (today.tokens_out || 0)
+    + (today.tokens_cache || 0);
   $('#spendCards').innerHTML =
     metricCard('Cost', `$${(today.cost || 0).toFixed(2)}`, 'today') +
     metricCard('Requests', num(today.requests), 'assistant messages') +
     metricCard('Tokens', num(totalTokens),
-               `${num(today.tokens_in)} in / ${num(today.tokens_out)} out`);
+               `${num(today.tokens_in)} in / ${num(today.tokens_out)} out / ${num(today.tokens_cache)} cache`);
 
   const shared = quota.shared || {};
   const windows = shared.windows || {};

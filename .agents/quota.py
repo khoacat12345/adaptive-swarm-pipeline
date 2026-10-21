@@ -274,6 +274,7 @@ class QuotaTracker:
                 "requests": len(selected),
                 "tokens_in": sum(message["tokens_in"] for message in selected),
                 "tokens_out": sum(message["tokens_out"] for message in selected),
+                "tokens_cache": sum(message["tokens_cache"] for message in selected),
             }
             if window == "calendar_today":
                 self.reset[window] = midnight + 86400 * 1000
