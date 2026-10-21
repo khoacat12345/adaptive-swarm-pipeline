@@ -561,6 +561,8 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
 - Token 1 lan chi in ra CLI; dashboard khong tra token qua API.
 - Dashboard (tieng Anh) hien them **quota bar** (plan chung 5h/7d/30d + model dang
   dung) va **quick access**: copy lenh `job.py --plan ... --wait --open` de chay lai.
+- **Timestamps**: gio bat dau run, gio tung event trong chat, gio cap nhat plan, gio
+  doc quota (checked).
 
 ### Work Order (5 truong)
 

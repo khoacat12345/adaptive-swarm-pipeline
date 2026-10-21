@@ -380,6 +380,7 @@ let planSig = '';
 let quotaSig = '';
 const fmt = (ms) => ms >= 60000 ? (ms/60000).toFixed(1)+'m' : ms >= 1000 ? (ms/1000).toFixed(1)+'s' : (ms||0)+'ms';
 const num = (n) => (n||0).toLocaleString('en-US');
+const clock = (iso) => iso ? new Date(iso).toLocaleTimeString() : '';
 
 function statusClass(s){
   if (['applied','pass','ok'].includes(s)) return 'pass';
@@ -409,7 +410,7 @@ function renderRuns(force=false){
       <div class="row"><span class="tag ${cls}">${esc(st)}</span>
         <span class="meta">${r.events} ev</span>
         <span class="meta">${fmt(r.duration_ms)}</span></div>
-      <div class="meta">${esc(r.task_id||'-')} &middot; L${esc(r.level??'-')} &middot; ${num(r.requests)} req</div>
+      <div class="meta">${esc(r.task_id||'-')} &middot; L${esc(r.level??'-')} &middot; ${num(r.requests)} req${r.start ? ' &middot; ' + esc(clock(r.start)) : ''}</div>
     </div>`;
   }).join('');
   box.querySelectorAll('.run').forEach(node=>{
@@ -426,10 +427,12 @@ function renderChat(){
     const chat = item.status ? `<span class="chip ${statusClass(item.status)}">${esc(item.status)}</span>` : '';
     const model = item.model ? `<span class="model">${esc(item.model)}</span>` : '';
     const dur = item.duration_ms ? `<span class="model">${item.duration_ms}ms</span>` : '';
+    const at = clock(item.timestamp);
     return `<div class="bubble">
       <div class="avatar" style="background:${meta.c}">${meta.a}</div>
       <div class="body">
         <div class="who"><b style="color:${meta.c}">${meta.n}</b>${chat}${model}${dur}
+          <span class="model">${esc(at)}</span>
           <span class="model">${item.at_s.toFixed(2)}s</span></div>
         <div class="msg">${esc(item.message)}</div>
       </div>
@@ -491,11 +494,13 @@ async function renderPlan(){
     const planFile = data.plan._source || '.agents/tmp/plan.json';
     const rootPath = data.root || '.';
     const command = `python .agents/job.py --plan ${planFile} --root "${rootPath}" --wait --open`;
+    const updated = decision.at ? new Date(decision.at).toLocaleString() : '';
     panel.style.display = 'block';
     panel.innerHTML = `<div class="planhead">
         <b>Plan ${esc(data.plan.job_id)}</b>
         <span>${esc(data.plan.objective || '')}</span>
-        <span class="pill ${status}">${status}</span></div>
+        <span class="pill ${status}">${status}</span>
+        ${updated ? `<span class="model">updated ${esc(updated)}</span>` : ''}</div>
       <div class="quick">
         <div><span class="qk">plan file</span><br><code>${esc(planFile)}</code></div>
         <div><span class="qk">quick access (paste into terminal)</span><br>
@@ -551,12 +556,16 @@ async function renderQuota(){
       .slice(0, 5)
       .map(model => `<span class="qchip ${model.ok ? 'ok' : 'no'}">${esc(model.model.split('/').pop())} ${model.worst_pct.toFixed(0)}%</span>`)
       .join('');
+    const checked = data.fetched_at
+      ? new Date(data.fetched_at * 1000).toLocaleTimeString()
+      : '';
     bar.innerHTML = `<span class="qk">plan quota</span>
       <span class="qchip ${shared.ok ? 'ok' : 'no'}">5h ${pct(windows.today)}</span>
       <span class="qchip ${shared.ok ? 'ok' : 'no'}">7d ${pct(windows.week)}</span>
       <span class="qchip ${shared.ok ? 'ok' : 'no'}">30d ${pct(windows.month)}</span>
       <span class="qsep"></span>
-      ${chips || '<span class="qchip">no paid usage</span>'}`;
+      ${chips || '<span class="qchip">no paid usage</span>'}
+      ${checked ? `<span class="qsep"></span><span class="qk">checked ${esc(checked)}</span>` : ''}`;
   }catch(_){ /* quota endpoint optional */ }
 }
 
@@ -686,6 +695,7 @@ def make_handler(root: Path, ledger: Path):
                         })
                     self._json({"available": tracker.available,
                                 "error": tracker.error,
+                                "fetched_at": tracker.fetched_at,
                                 "shared": tracker.shared(),
                                 "models": entries})
                 else:
