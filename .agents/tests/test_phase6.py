@@ -17,6 +17,7 @@ DoD:
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import shutil
@@ -38,6 +39,8 @@ for _path in (AGENTS_DIR, AGENTS_DIR / "tests"):
 
 import dashboard                      # noqa: E402
 import job                            # noqa: E402
+import plan_md                        # noqa: E402
+import replay                         # noqa: E402
 import work_order as work_order_module  # noqa: E402
 import workers                        # noqa: E402
 
@@ -161,12 +164,26 @@ def test_approval(checks: Checks) -> None:
     job.submit_plan(make_plan(), root)
     checks.check("approval: giu token khi resubmit cung job",
                  job.token_path(root).read_text(encoding="utf-8").strip() == "tok123")
+    waves = plan_md.dependency_waves([
+        {"id": "S1", "depends_on": []},
+        {"id": "S2", "depends_on": ["S1"]},
+        {"id": "S3", "depends_on": []},
+    ])
+    checks.check("plan-md: dependency waves",
+                 [[item["id"] for item in wave] for wave in waves] == [["S1", "S3"], ["S2"]],
+                 waves)
+    markdown = plan_md.build_markdown(make_plan(), {"status": "pending"}, {})
+    checks.check("plan-md: day du phase + verify",
+                 "## Execution phases" in markdown and "verify" in markdown.lower()
+                 and "## Verification contract" in markdown, markdown[:200])
     try:
         job.start_run(root, token="tok123")
         blocked = False
     except ValueError:
         blocked = True
     checks.check("run: chua approve bi chan", blocked)
+    checks.check("run: mac dinh heuristic",
+                 inspect.signature(job.start_run).parameters["reviewer"].default == "heuristic")
     checks.check("approval: decision pending",
                  job.read_plan_state(root)["decision"]["status"] == "pending")
     checks.check("approval: khong lo token trong state",
@@ -311,6 +328,28 @@ def test_dashboard_api(checks: Checks) -> None:
         checks.check("dashboard: co root + source",
                      bool(data.get("root")) and (data.get("plan") or {}).get("_source") == "plan.json",
                      data)
+
+        with urllib.request.urlopen(base + "/api/plan/md", timeout=5) as response:
+            markdown = response.read().decode("utf-8")
+            markdown_type = response.headers.get("Content-Type", "")
+        checks.check("dashboard: /api/plan/md markdown",
+                     "text/markdown" in markdown_type and "# Plan J1" in markdown
+                     and "## Execution phases" in markdown, markdown[:200])
+
+        replay_events = [{
+            "run_id": "r1", "timestamp": "2026-01-01T00:00:00.000Z",
+            "event_type": "reviewer.findings", "node": "reviewer",
+            "status": "pass",
+            "data": {"verdict": "approve", "per_role": [
+                {"role": "security", "model": "m1", "verdict": "approve",
+                 "reasons": ["ok"]},
+                {"role": "qa", "model": "m2", "verdict": "approve", "reasons": []},
+            ]},
+        }]
+        timeline = replay.build_timeline(replay_events, "r1")
+        checks.check("dashboard: timeline co per_role",
+                     timeline and timeline[0].get("details", {}).get("per_role", [])[0].get("role")
+                     == "security", timeline)
 
         with urllib.request.urlopen(base + "/api/quota", timeout=30) as response:
             quota_data = json.loads(response.read().decode("utf-8"))

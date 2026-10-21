@@ -145,6 +145,18 @@ def write_control(root, payload: dict) -> dict:
     return payload
 
 
+def _refresh_plan_md(root) -> None:
+    """Best-effort refresh of the long-form plan file."""
+    try:
+        import plan_md
+        plan_state = read_plan_state(root)
+        plan = plan_state.get("plan")
+        if plan:
+            plan_md.write_markdown(root, plan, plan_state.get("decision"), read_state(root))
+    except Exception:                       # noqa: BLE001
+        pass
+
+
 def _existing_token(root, job_id: str | None) -> str:
     """Reuse the token when the same job is re-submitted (stale dashboard tabs)."""
     try:
@@ -391,6 +403,7 @@ def submit_plan(plan: dict, root, *, token: str | None = None, source: str | Non
                             root=root)
     notify.notify("plan.submitted", {"job_id": plan.get("job_id"),
                                      "subtasks": len(plan["subtasks"])}, root=root)
+    _refresh_plan_md(root)
     return {"job_id": plan.get("job_id"), "token": token,
             "plan_path": str(plan_path(root)), "subtasks": len(plan["subtasks"])}
 
@@ -425,6 +438,7 @@ def decide(root, decision: str, *, token: str, log: bool = True) -> dict:
                             data={"job_id": payload["job_id"]}, root=root)
     notify.notify("plan.approved" if status == "approved" else "plan.rejected",
                   {"job_id": payload.get("job_id")}, root=root)
+    _refresh_plan_md(root)
     return payload
 
 
@@ -432,12 +446,12 @@ _RUN_LOCK = threading.Lock()
 _RUN_PROC: subprocess.Popen | None = None
 
 
-def start_run(root, *, token: str, reviewer: str = "wave",
+def start_run(root, *, token: str, reviewer: str = "heuristic",
               model: str | None = None) -> dict:
     """Start the already-approved plan in a background process."""
     global _RUN_PROC
     _require_token(root, token)
-    reviewer = str(reviewer or "wave").lower()
+    reviewer = str(reviewer or "heuristic").lower()
     if reviewer not in ("heuristic", "wave", "none"):
         raise ValueError("reviewer phai la heuristic, wave hoac none")
     with _RUN_LOCK:
@@ -643,6 +657,7 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
     notify.notify("job.done", {"job_id": plan.get("job_id"), "status": status,
                                "seconds": round(payload["duration_ms"] / 1000, 1)},
                   root=root)
+    _refresh_plan_md(root)
     return payload
 
 

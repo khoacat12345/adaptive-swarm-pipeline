@@ -244,11 +244,14 @@ def make_handler(root: Path, ledger: Path):
         def log_message(self, fmt, *args):        # im lang: khong spam stderr
             return
 
-        def _send(self, status: int, body: bytes, content_type: str) -> None:
+        def _send(self, status: int, body: bytes, content_type: str,
+                  extra_headers: dict | None = None) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for key, value in (extra_headers or {}).items():
+                self.send_header(str(key), str(value))
             self.end_headers()
             try:
                 self.wfile.write(body)
@@ -308,6 +311,24 @@ def make_handler(root: Path, ledger: Path):
                 elif route == "/api/plan":
                     import job as job_module
                     self._json(job_module.read_plan_state(root))
+                elif route == "/api/plan/md":
+                    import job as job_module
+                    import plan_md
+                    plan_state = job_module.read_plan_state(root)
+                    plan = plan_state.get("plan")
+                    if not plan:
+                        self._json({"error": "no plan submitted"}, 404)
+                        return
+                    path = plan_md.write_markdown(
+                        root, plan, plan_state.get("decision"),
+                        job_module.read_state(root))
+                    body = path.read_bytes()
+                    query = parse_qs(parsed.query)
+                    download = (query.get("download") or ["0"])[0].lower() in (
+                        "1", "true", "yes")
+                    disposition = "attachment" if download else "inline"
+                    self._send(200, body, "text/markdown; charset=utf-8", {
+                        "Content-Disposition": f'{disposition}; filename="{path.name}"'})
                 elif route == "/api/quota":
                     import quota as quota_module
                     tracker = quota_module.QuotaTracker(root=root).refresh()
@@ -401,7 +422,7 @@ def make_handler(root: Path, ledger: Path):
                     try:
                         result = job_module.start_run(
                             root, token=str(payload.get("token") or ""),
-                            reviewer=str(payload.get("reviewer") or "wave"),
+                            reviewer=str(payload.get("reviewer") or "heuristic"),
                             model=payload.get("model") or None)
                     except PermissionError as exc:
                         self._json({"error": str(exc)}, 403)

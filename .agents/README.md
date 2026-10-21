@@ -559,19 +559,26 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
 `verify_command`, `target_files`, `sandbox_files`, `level`, `max_rounds`, `depends_on`.
 
 - Duyet **ca plan** mot lan; chay tuan tu theo topo, dung ngay khi 1 buoc fail.
-- Dashboard co **Approve & Run** (duyet + chay ngay) va **Run job** o War room
-  (chon `wave` 5 agent hoac `heuristic` 0 reviewer). Approve-only van duoc giu.
+- Dashboard co **Approve & Run** (duyet + chay ngay) va **Run job** o War room.
+  Mac dinh `heuristic` (0 reviewer request / $0); chon `wave` (5 agent) hoac dung
+  `--reviewer wave` khi muon bat 4 reviewer. Approve-only van duoc giu.
 - Khong duyet / timeout -> **khong ghi file nao**.
 - Moi subtask tu chon model theo W0-W8 + quota (fallback ladder).
 - Token 1 lan chi in ra CLI; dashboard khong tra token qua API.
 - Dashboard (tieng Anh) hien them **quota bar** (plan chung 5h/7d/30d + model dang
   dung) va **quick access**: copy lenh `job.py --plan ... --wait --open` de chay lai.
-- **4 stage pages** (deep link): `#plan` (plan intelligence + subtasks + approval),
+- **Overview** ngan: 5 agent + Lead, flow Plan -> Code -> Review -> Verify -> Apply,
+  khong bar chart. **Plan** dai: phase theo dependency wave, key points + chi tiet
+  gap/mo, link `Open full plan (.md)` + `Download`. **Chat** kieu chatbox: Lead ben
+  phai, tat ca vai khac ben trai, avatar SVG, tach tung reviewer thanh bubble rieng.
+- **4 stage pages** (deep link): `#plan` (intelligence + phases + approval),
   `#warroom` (Lead + 5 agents: Coder, Security, QA, Perf, Docs; orange = running,
   blue = next, green = approved, gray = idle/standby), `#verify` (machine contract +
   ledger evidence), `#done` (files, duration, tokens, reproduce command). `#analyze`
   redirects to `#plan`. War room co replay slider (0 request) va canh bao `heuristic`
   (reviewer khong duoc goi).
+- `GET /api/plan/md` tra plan day du dang Markdown (`.agents/tmp/plans/<job>.md`),
+  `?download=1` de tai.
 - `GET /api/team` tra 5 agent + route + wave verdict + model health (read-only).
 - **Timestamps**: gio bat dau run, gio tung event trong chat, gio cap nhat plan, gio
   doc quota (checked).
@@ -1249,9 +1256,9 @@ classifier/clarify cap nhat; nghiem thu **47/47 PASS** (gom 5 suite hoi quy Phas
 do duoc (so file, risk keyword, context, modality, fail count) va bang dinh tuyen
 main/escalate uu tien ngon-bo-re; `validate_roles()` chan trung ho o vai kiem toan;
 `FallbackReviewer` cho reviewer co chuoi du phong; `quota.py` doc usage THAT tu
-`opencode stats` va cat theo tran Go (5h=20%, tuan=50%, thang=100%), `recipe_c --route`
+`opencode.db` + console meters, cat theo tran Go; `recipe_c --route`
 tu day escalate len khi main sap can; `recipe_c --route` ghi event `router.decided`.
-Nghiem thu **57/57 PASS** (gom Level 3 + Phase 4) va **15/15** quota.
+Nghiem thu Phase 6A **70/70**, quota **26/26**, Level 3 **47/47**, Phase 4 **36/36**.
 
 **Phase 6A — job plan + duyet (da lam):** `job.py` nhan `plan.json` (subtasks +
 `depends_on` + verify), ghi plan vao `.agents/tmp/`, in URL dashboard kem token;

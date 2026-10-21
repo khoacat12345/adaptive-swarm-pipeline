@@ -231,8 +231,51 @@ def build_timeline(events: list[dict], run_id: str, *, limit: int = 200) -> list
             "status": norm["status"],
             "duration_ms": norm["duration_ms"],
             "message": _message(event, norm),
+            "details": _public_details(norm.get("details") or {}),
         })
     return timeline
+
+
+_PUBLIC_DETAIL_KEYS = (
+    "job_id", "task_id", "status", "level", "round", "mode", "command",
+    "exit_code", "timed_out", "target", "files", "changed", "verdict",
+    "reasons", "per_role", "skipped", "requests", "error", "attempts",
+    "fallback_attempts", "rolled_back", "budget_exceeded", "secrets_blocked",
+    "plan_ok", "chain", "work_type", "label", "main", "escalate", "degraded",
+    "why", "model", "path", "bytes_written", "atomic", "sha256", "output_tail",
+    "transaction", "history", "warnings", "nodes", "problems", "hints",
+)
+
+
+def _public_details(details: dict) -> dict:
+    """Only expose fields the dashboard actually needs; never raw secrets."""
+    result = {}
+    for key in _PUBLIC_DETAIL_KEYS:
+        if key not in details:
+            continue
+        value = details[key]
+        if key == "per_role" and isinstance(value, list):
+            roles = []
+            for item in value[:8]:
+                if not isinstance(item, dict):
+                    continue
+                roles.append({
+                    "role": item.get("role"),
+                    "model": item.get("model"),
+                    "verdict": item.get("verdict"),
+                    "reasons": [str(reason)[:900] for reason in (item.get("reasons") or [])[:6]],
+                    "reviewer": item.get("reviewer"),
+                })
+            result[key] = roles
+        elif key == "attempts" and isinstance(value, list):
+            result[key] = [
+                {"model": item.get("model"), "round": item.get("round"),
+                 "status": item.get("status"), "latency_ms": item.get("latency_ms")}
+                for item in value[:8] if isinstance(item, dict)
+            ]
+        elif isinstance(value, (str, int, float, bool, list, dict)):
+            result[key] = value
+    return result
 
 
 def render_timeline(timeline: list[dict], *, color: bool = True) -> str:

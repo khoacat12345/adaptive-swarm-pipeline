@@ -70,8 +70,11 @@ python .agents/memory.py                     # loi hay gap + goi y
 ```
 
 Dashboard: `http://127.0.0.1:8080/` (sidebar run history | chat da agent | diff &
-inspector). 4 stage pages: `#plan` (intelligence + subtasks), `#warroom`, `#verify`,
-`#done`. `#analyze` redirect to `#plan`. Server chi bind loopback, khong mo ra mang.
+inspector). 4 stage pages: `#plan` (intelligence + dependency phases + subtasks),
+`#warroom`, `#verify`, `#done`. `#analyze` redirect to `#plan`. Chat la chatbox:
+Lead ben phai, cac vai khac ben trai. Full plan `.md` tai `/api/plan/md`.
+Run mac dinh `heuristic` (0 reviewer); wave chi khi chon/`--reviewer wave`.
+Server chi bind loopback, khong mo ra mang.
 
 ## Nghiem thu
 
@@ -83,11 +86,11 @@ python .agents/tests/test_phase3.py --fast  # 51/51
 python .agents/tests/test_phase4.py         # 36/36 (gom ca 4 suite tren)
 python .agents/tests/test_level3.py         # 47/47 (Level 3 + hoi quy 5 suite)
 python .agents/tests/test_phase5.py         # 57/57 (router + FallbackReviewer + hoi quy)
-python .agents/tests/test_quota.py          # 15/15 (quota that + route theo quota)
-python .agents/tests/test_phase6.py         # 57/57 (plan + duyet + state/control + chay)
-python .agents/tests/test_planner.py        # 16/16 (goal -> plan + webhook)
-python .agents/tests/test_wave.py           # 19/19 (4 reviewer song song)
-python .agents/tests/test_telegram.py       # 14/14 (bot 2 chieu)
+python .agents/tests/test_quota.py          # 26/26 (quota that + route theo quota)
+python .agents/tests/test_phase6.py         # 70/70 (plan + duyet + state/control + chay)
+python .agents/tests/test_planner.py        # 17/17 (goal -> plan + webhook)
+python .agents/tests/test_wave.py           # 21/21 (4 reviewer song song)
+python .agents/tests/test_telegram.py       # 15/15 (bot 2 chieu)
 ```
 
 ## Bat bien (khong duoc vi pham)
