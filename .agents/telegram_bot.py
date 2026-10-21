@@ -134,10 +134,12 @@ def handle_update(update: dict, *, root, chat_id, send) -> dict:
 def run(root, *, token: str, chat_id: str, poll_timeout: int = 25,
         once: bool = False) -> int:
     offset = None
+    # Bo qua backlog cu (tranh mot /approve cu quyet dinh plan moi).
+    seed = api_call("getUpdates", {"offset": -1, "limit": 1}, token=token, timeout=15)
+    seed_items = seed.get("result") or []
+    offset = (int(seed_items[-1].get("update_id") or 0) + 1) if seed_items else 0
     while True:
-        payload: dict = {"timeout": poll_timeout}
-        if offset is not None:
-            payload["offset"] = offset
+        payload: dict = {"timeout": poll_timeout, "offset": offset}
         data = api_call("getUpdates", payload, token=token,
                         timeout=poll_timeout + 10)
         if not data.get("ok"):

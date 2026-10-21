@@ -197,8 +197,9 @@ def test_run_job(checks: Checks) -> None:
     report = job.run_job(make_plan(), root=root, coder_factory=factory,
                          use_router=False, log=True)
     checks.check("run: opinion injected",
-                 bool(captured) and all("USER DIRECTION" in item for item in captured),
-                 captured)
+                 bool(captured) and "USER DIRECTION" in captured[0], captured)
+    checks.check("run: opinion cleared after use",
+                 len(captured) > 1 and "USER DIRECTION" not in captured[1], captured)
     checks.check("run: state done", job.read_state(root).get("phase") == "done",
                  job.read_state(root))
     checks.check("run: applied", report["status"] == "applied", report)

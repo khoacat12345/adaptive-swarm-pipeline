@@ -574,6 +574,12 @@ class AgenticCoder(Coder):
         wanted = set(targets)
         for relative in work_order.sandbox_files or targets:
             source = (self.project_root or Path.cwd()) / relative
+            project_root = (self.project_root or Path.cwd()).resolve()
+            try:
+                source.resolve().relative_to(project_root)
+            except (ValueError, OSError):
+                self.secrets_blocked.append({"file": relative, "kind": "path_escape"})
+                continue
             if not source.exists():
                 continue
             reason = secret_scan.is_sensitive_path(source)
@@ -848,16 +854,16 @@ class OpenCodeReviewer(Reviewer):
         self.raise_on_error = raise_on_error
 
     def _run_cli(self, prompt: str) -> str:
-        completed = subprocess.run(
-            [self.binary, "run", "--format", "json", "-m", self.model, prompt],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=self.timeout,
-        )
-        if completed.returncode != 0:
-            blob = f"{completed.stderr or ''}\n{completed.stdout or ''}"
-            raise WorkerError(f"exit {completed.returncode}: {blob[-400:]}",
-                              kind=classify_cli_error(blob))
-        return extract_text_events(completed.stdout or "")[0]
+        base = Path(tempfile.gettempdir()) / "opencode"
+        base.mkdir(parents=True, exist_ok=True)
+        workdir = tempfile.mkdtemp(prefix="reviewer_", dir=str(base))
+        try:
+            text, _usage = run_opencode_cli(self.binary, self.model, prompt,
+                                            agent="build", cwd=workdir,
+                                            timeout=self.timeout)
+            return text
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
 
     def review(self, work_order, *, diff: str, new_content: str, old_content: str,
                level: int, sink) -> dict:
@@ -1030,10 +1036,13 @@ class RoleReviewer(Reviewer):
         base = Path(tempfile.gettempdir()) / "opencode"
         base.mkdir(parents=True, exist_ok=True)
         workdir = tempfile.mkdtemp(prefix="review_", dir=str(base))
-        text, _usage = run_opencode_cli(self.binary, self.model, prompt,
-                                        agent="build", cwd=workdir,
-                                        timeout=self.timeout)
-        return text
+        try:
+            text, _usage = run_opencode_cli(self.binary, self.model, prompt,
+                                            agent="build", cwd=workdir,
+                                            timeout=self.timeout)
+            return text
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
 
     def _prompt(self, work_order, diff: str) -> str:
         focus = ROLE_PROMPTS.get(self.role, "general correctness")

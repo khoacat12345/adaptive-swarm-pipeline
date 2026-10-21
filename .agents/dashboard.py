@@ -24,6 +24,7 @@ Server chi bind 127.0.0.1 (khong mo ra mang).
 from __future__ import annotations
 
 import json
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -35,6 +36,7 @@ import schema
 MAX_CONTENT_BYTES = 200_000
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
+_GENERATE_LOCK = threading.Lock()
 
 
 # --------------------------------------------------------------------------
@@ -942,9 +944,17 @@ def make_handler(root: Path, ledger: Path):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self._send(status, body, "application/json; charset=utf-8")
 
+        def _host_ok(self) -> bool:
+            """Chan DNS rebinding: chi nhan Host localhost/127.0.0.1."""
+            host = (self.headers.get("Host") or "").split(":")[0].strip().lower()
+            return host in ("127.0.0.1", "localhost", "::1", "[::1]")
+
         def do_GET(self):                       # noqa: N802
             parsed = urlparse(self.path)
             route = parsed.path.rstrip("/") or "/"
+            if not self._host_ok():
+                self._json({"error": "forbidden host"}, 403)
+                return
             try:
                 if route == "/":
                     self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
@@ -1027,8 +1037,17 @@ def make_handler(root: Path, ledger: Path):
         def do_POST(self):                      # noqa: N802
             parsed = urlparse(self.path)
             route = parsed.path.rstrip("/") or "/"
+            if not self._host_ok():
+                self._json({"error": "forbidden host"}, 403)
+                return
             try:
                 length = int(self.headers.get("Content-Length") or 0)
+                if length > 64 * 1024:
+                    self._json({"error": "payload too large"}, 413)
+                    return
+                if "application/json" not in (self.headers.get("Content-Type") or ""):
+                    self._json({"error": "content-type must be application/json"}, 415)
+                    return
                 raw = self.rfile.read(length) if length else b""
                 payload = json.loads(raw.decode("utf-8") or "{}")
                 if route == "/api/plan/decision":
@@ -1047,31 +1066,32 @@ def make_handler(root: Path, ledger: Path):
                 elif route == "/api/plan/generate":
                     import job as job_module
                     import planner
-                    state = job_module.read_state(root)
-                    if state.get("phase") in ("running", "paused"):
-                        self._json({"error": "a job is running; wait or stop it"}, 409)
-                        return
                     goal = str(payload.get("goal") or "").strip()
                     if not goal:
                         self._json({"error": "goal is empty"}, 400)
                         return
-                    try:
-                        plan = planner.generate(goal, root=root)
-                    except Exception as exc:            # noqa: BLE001
-                        self._json({"error": f"planner failed: {exc}"[:400]}, 400)
-                        return
-                    out = Path(root) / ".agents" / "tmp" / "auto_plan.json"
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    out.write_text(json.dumps(plan, ensure_ascii=False, indent=2),
-                                   encoding="utf-8")
-                    try:
-                        info = job_module.submit_plan(
-                            plan, root, source=".agents/tmp/auto_plan.json")
-                    except Exception as exc:            # noqa: BLE001
-                        self._json({"error": f"plan rejected: {exc}"[:400]}, 400)
-                        return
-                    self._json({"plan": plan, "job_id": info["job_id"],
-                                "token": info["token"]})
+                    with _GENERATE_LOCK:
+                        state = job_module.read_state(root)
+                        if state.get("phase") in ("running", "paused"):
+                            self._json({"error": "a job is running; wait or stop it"}, 409)
+                            return
+                        try:
+                            plan = planner.generate(goal, root=root)
+                        except Exception as exc:            # noqa: BLE001
+                            self._json({"error": f"planner failed: {exc}"[:400]}, 400)
+                            return
+                        out = Path(root) / ".agents" / "tmp" / "auto_plan.json"
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        out.write_text(json.dumps(plan, ensure_ascii=False, indent=2),
+                                       encoding="utf-8")
+                        try:
+                            info = job_module.submit_plan(
+                                plan, root, source=".agents/tmp/auto_plan.json")
+                        except Exception as exc:            # noqa: BLE001
+                            self._json({"error": f"plan rejected: {exc}"[:400]}, 400)
+                            return
+                        self._json({"plan": plan, "job_id": info["job_id"],
+                                    "token": info["token"]})
                 elif route == "/api/control":
                     import job as job_module
                     try:
