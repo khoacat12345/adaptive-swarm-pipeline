@@ -262,6 +262,22 @@ def test_dashboard_api(checks: Checks) -> None:
         server.server_close()
 
 
+def test_auto_dashboard(checks: Checks) -> None:
+    root = make_root("autodash")
+    server, started = job.ensure_dashboard(root, 0)
+    checks.check("auto-dashboard: khoi dong duoc", started and server is not None)
+    if server is None:
+        return
+    try:
+        port = server.server_address[1]
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        checks.check("auto-dashboard: health ok", data.get("ok") is True, data)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_no_regression(checks: Checks, *, fast: bool = False) -> None:
     if fast:
         print("[skip] hoi quy Phase 5 (--fast)")
@@ -279,17 +295,19 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     checks = Checks()
-    print("[1/6] validate plan ...")
+    print("[1/7] validate plan ...")
     test_validate(checks)
-    print("[2/6] topo order ...")
+    print("[2/7] topo order ...")
     test_topo(checks)
-    print("[3/6] approval flow ...")
+    print("[3/7] approval flow ...")
     test_approval(checks)
-    print("[4/6] run job ...")
+    print("[4/7] run job ...")
     test_run_job(checks)
-    print("[5/6] dashboard API ...")
+    print("[5/7] dashboard API ...")
     test_dashboard_api(checks)
-    print("[6/6] khong hoi quy ...")
+    print("[6/7] auto-open dashboard ...")
+    test_auto_dashboard(checks)
+    print("[7/7] khong hoi quy ...")
     test_no_regression(checks, fast=args.fast)
 
     print("")

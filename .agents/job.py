@@ -32,7 +32,9 @@ import argparse
 import json
 import secrets
 import sys
+import threading
 import time
+import webbrowser
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -262,6 +264,18 @@ def wait_for_decision(root, *, timeout: float = DEFAULT_TIMEOUT,
     return "timeout"
 
 
+def ensure_dashboard(root, port: int):
+    """Khoi dong dashboard local neu port con trong. Tra (server, started)."""
+    import dashboard
+    try:
+        server = dashboard.make_server(port, root=root)
+    except OSError:
+        return None, False
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, True
+
+
 # --------------------------------------------------------------------------
 # Chay job
 # --------------------------------------------------------------------------
@@ -365,6 +379,8 @@ def main(argv=None) -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--open", action="store_true",
+                        help="tu khoi dong dashboard neu can va mo trinh duyet")
     args = parser.parse_args(argv)
 
     plan = load_plan(args.plan)
@@ -373,30 +389,44 @@ def main(argv=None) -> int:
     print(f"job     : {info['job_id']} ({info['subtasks']} subtask)")
     print(f"dashboard: {url}")
 
-    if args.decision:
-        decide(args.root, args.decision, token=info["token"])
-    elif args.wait:
-        print("dang cho duyet tren dashboard...")
-        result = wait_for_decision(args.root, timeout=args.timeout)
-        if result != "approved":
-            print(f"KHONG CHAY: {result}")
+    server = None
+    if args.open:
+        server, started = ensure_dashboard(args.root, args.port)
+        print(f"dashboard: {'da khoi dong' if started else 'da co san'} tren port {args.port}")
+        try:
+            webbrowser.open(url)
+        except Exception:                       # noqa: BLE001
+            pass
+
+    try:
+        if args.decision:
+            decide(args.root, args.decision, token=info["token"])
+        elif args.wait:
+            print("dang cho duyet tren dashboard...")
+            result = wait_for_decision(args.root, timeout=args.timeout)
+            if result != "approved":
+                print(f"KHONG CHAY: {result}")
+                return 2
+
+        state = read_plan_state(args.root)
+        if (state.get("decision") or {}).get("status") != "approved":
+            print("plan chua duoc duyet (dung --wait hoac --decision approve)")
             return 2
 
-    state = read_plan_state(args.root)
-    if (state.get("decision") or {}).get("status") != "approved":
-        print("plan chua duoc duyet (dung --wait hoac --decision approve)")
-        return 2
-
-    report = run_job(plan, root=args.root, allow_escalate=args.allow_escalate,
-                     force=args.force, dry_run=args.dry_run)
-    if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
-    else:
-        print(f"status  : {report['status']} ({report['duration_ms']}ms)")
-        for item in report["subtasks"]:
-            chain = " -> ".join((item.get("route") or {}).get("chain") or [])
-            print(f"  {item['id']:<6} {item['status']:<10} {chain}")
-    return 0 if report["status"] in ("applied", "dry-run") else 1
+        report = run_job(plan, root=args.root, allow_escalate=args.allow_escalate,
+                         force=args.force, dry_run=args.dry_run)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(f"status  : {report['status']} ({report['duration_ms']}ms)")
+            for item in report["subtasks"]:
+                chain = " -> ".join((item.get("route") or {}).get("chain") or [])
+                print(f"  {item['id']:<6} {item['status']:<10} {chain}")
+        return 0 if report["status"] in ("applied", "dry-run") else 1
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":

@@ -539,8 +539,9 @@ cung khan. Xem nhanh: `python .agents/quota.py`.
 ### Job plan + duyet (Phase 6A)
 
 ```bash
-python .agents/job.py --plan plan.json --root <du an> --wait
-# mo URL in ra (kem ?token=...), bam Duyet / Tu choi
+python .agents/job.py --plan plan.json --root <du an> --wait --open
+# --open: tu khoi dong dashboard neu port trong + mo trinh duyet kem token
+# khong co --open: chi in URL de ban tu mo
 ```
 
 Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objective`,
