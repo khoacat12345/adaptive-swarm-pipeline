@@ -342,8 +342,14 @@ HTML = r"""<!doctype html>
   .step.done{border-color:#14532d;color:#9be7c4}
   .step.done .num{background:#14532d;color:#9be7c4}
   .arrow{color:#334155;font-size:12px}
+  /* goal bar */
+  .goalbar{display:flex;gap:8px;align-items:center;margin:10px 18px 0}
+  .goalbar input{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+                 color:var(--fg);padding:8px 12px;font-size:12px}
+  .goalbar input::placeholder{color:#5b6b7c}
+  .goalbar .ctl:disabled{opacity:.6;cursor:default}
   /* roadmap */
-  .roadmap{padding:6px 10px 10px;max-height:34vh;overflow:auto}
+  .roadmap{padding:6px 10px 10px;max-height:34vh;overflow:auto;overflow-wrap:anywhere;min-width:0}
   .roadmap .rhead{font-size:11px;color:#c7d2fe;margin:4px 0 8px}
   .roadmap .ritem{display:flex;gap:8px;align-items:flex-start;padding:5px 0;
                   border-bottom:1px solid var(--line);font-size:11px}
@@ -382,6 +388,11 @@ HTML = r"""<!doctype html>
   <div id="statusMessage"><span class="dot"></span>loading...</div>
 </header>
 <div id="stepper" class="stepper"></div>
+<div class="goalbar">
+  <input id="goalInput" placeholder="Describe a goal (e.g. add JWT auth + tests)...">
+  <button id="goalBtn" class="ctl" onclick="planGoal()">Plan</button>
+  <span id="goalMsg" class="qk"></span>
+</div>
 <div id="planPanel" class="plan" style="display:none"></div>
 <div id="quotaBar" class="quota"></div>
 <div id="teamBar" class="quota" style="display:none"></div>
@@ -441,6 +452,7 @@ let quotaSig = '';
 let jobSig = '';
 let jobState = null;
 let currentJobId = '';
+let sessionToken = '';
 const fmt = (ms) => ms >= 60000 ? (ms/60000).toFixed(1)+'m' : ms >= 1000 ? (ms/1000).toFixed(1)+'s' : (ms||0)+'ms';
 const num = (n) => (n||0).toLocaleString('en-US');
 const clock = (iso) => iso ? new Date(iso).toLocaleTimeString() : '';
@@ -501,7 +513,7 @@ function renderChat(){
       </div>
     </div>`;
   }).join('');
-  box.lastElementChild?.scrollIntoView({block:'nearest'});
+  box.scrollTop = box.scrollHeight;
 }
 
 function renderInspector(diff){
@@ -524,11 +536,11 @@ function renderInspector(diff){
     <div class="cards">
       <div class="card"><div class="k">Requests</div><div class="v">${num(requests)}</div></div>
       <div class="card"><div class="k">Token in / out</div><div class="v">${num(usage.in_tokens)} / ${num(usage.out_tokens)}</div></div>
-      <div class="card"><div class="k">Thoi gian</div><div class="v">${fmt(totalMs)}</div></div>
+      <div class="card"><div class="k">Time</div><div class="v">${fmt(totalMs)}</div></div>
     </div>
-    <div class="verify"><div class="k" style="font-size:10px;color:var(--dim);letter-spacing:1px">LENH VERIFY MAY THAT</div>
+    <div class="verify"><div class="k" style="font-size:10px;color:var(--dim);letter-spacing:1px">REAL MACHINE VERIFY</div>
       <code>${esc(run.verify_command || '(khong ghi nhan)')}</code></div>
-    <div class="diffhead"><div class="t">${esc(diff?.target || '')} ${diff?`(${diff.changed_lines} dong thay doi)`:''}</div>
+    <div class="diffhead"><div class="t">${esc(diff?.target || '')} ${diff?`(${diff.changed_lines} changed lines)`:''}</div>
       <div class="t">${esc(diff?.old_label||'')} &rarr; ${esc(diff?.new_label||'')}</div></div>
     <pre class="diff">${rendered || '<div class="ctx">No changes / no file</div>'}</pre>`;
 }
@@ -580,7 +592,7 @@ async function decidePlan(kind){
   try{
     const response = await fetch('/api/plan/decision', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({decision: kind, token: token})
+      body: JSON.stringify({decision: kind, token: sessionToken || token})
     });
     const data = await response.json();
     if(!response.ok){ alert(data.error || ('HTTP ' + response.status)); return; }
@@ -740,11 +752,44 @@ async function renderJob(){
   }catch(_){ /* job endpoint optional */ }
 }
 
+async function planGoal(){
+  const input = el('goalInput');
+  const goal = input.value.trim();
+  if(!goal){ input.focus(); return; }
+  const button = el('goalBtn');
+  button.disabled = true;
+  button.textContent = 'Planning...';
+  el('goalMsg').textContent = 'planner is thinking (can take about a minute)...';
+  try{
+    const response = await fetch('/api/plan/generate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({goal: goal})
+    });
+    const data = await response.json();
+    if(!response.ok){
+      el('goalMsg').textContent = data.error || ('HTTP ' + response.status);
+      return;
+    }
+    sessionToken = data.token || '';
+    input.value = '';
+    el('goalMsg').textContent = `plan ${data.job_id} ready - review and approve below`;
+    planSig = '';
+    jobSig = '';
+    await renderPlan();
+    await renderJob();
+  }catch(err){
+    el('goalMsg').textContent = err.message;
+  }finally{
+    button.disabled = false;
+    button.textContent = 'Plan';
+  }
+}
+
 async function setControl(action, value){
   try{
     const response = await fetch('/api/control', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({action: action, token: token, value: value || ''})
+      body: JSON.stringify({action: action, token: sessionToken || token, value: value || ''})
     });
     const data = await response.json();
     if(!response.ok){
@@ -985,6 +1030,34 @@ def make_handler(root: Path, ledger: Path):
                         self._json({"error": str(exc)}, 400)
                         return
                     self._json(result)
+                elif route == "/api/plan/generate":
+                    import job as job_module
+                    import planner
+                    state = job_module.read_state(root)
+                    if state.get("phase") in ("running", "paused"):
+                        self._json({"error": "a job is running; wait or stop it"}, 409)
+                        return
+                    goal = str(payload.get("goal") or "").strip()
+                    if not goal:
+                        self._json({"error": "goal is empty"}, 400)
+                        return
+                    try:
+                        plan = planner.generate(goal, root=root)
+                    except Exception as exc:            # noqa: BLE001
+                        self._json({"error": f"planner failed: {exc}"[:400]}, 400)
+                        return
+                    out = Path(root) / ".agents" / "tmp" / "auto_plan.json"
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_text(json.dumps(plan, ensure_ascii=False, indent=2),
+                                   encoding="utf-8")
+                    try:
+                        info = job_module.submit_plan(
+                            plan, root, source=".agents/tmp/auto_plan.json")
+                    except Exception as exc:            # noqa: BLE001
+                        self._json({"error": f"plan rejected: {exc}"[:400]}, 400)
+                        return
+                    self._json({"plan": plan, "job_id": info["job_id"],
+                                "token": info["token"]})
                 elif route == "/api/control":
                     import job as job_module
                     try:

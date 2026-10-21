@@ -42,6 +42,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import ledger                        # noqa: E402
+import notify                        # noqa: E402
 import recipe_c                      # noqa: E402
 import router                        # noqa: E402
 import workers                       # noqa: E402
@@ -354,6 +355,8 @@ def submit_plan(plan: dict, root, *, token: str | None = None, source: str | Non
                      for item in plan["subtasks"]],
         "team": {},
     })
+    notify.notify("plan.submitted", {"job_id": plan.get("job_id"),
+                                     "subtasks": len(plan["subtasks"])}, root=root)
     return {"job_id": plan.get("job_id"), "token": token,
             "plan_path": str(plan_path(root)), "subtasks": len(plan["subtasks"])}
 
@@ -386,6 +389,8 @@ def decide(root, decision: str, *, token: str, log: bool = True) -> dict:
     job_state = read_state(root)
     if job_state:
         write_state(root, {**job_state, "phase": status})
+    notify.notify("plan.approved" if status == "approved" else "plan.rejected",
+                  {"job_id": payload.get("job_id")}, root=root)
     return payload
 
 
@@ -551,6 +556,9 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
                                   "subtasks": [{"id": r["id"], "status": r["status"]}
                                                for r in records]},
                             root=root)
+    notify.notify("job.done", {"job_id": plan.get("job_id"), "status": status,
+                               "seconds": round(payload["duration_ms"] / 1000, 1)},
+                  root=root)
     return payload
 
 

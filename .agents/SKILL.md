@@ -84,6 +84,7 @@ python .agents/tests/test_level3.py         # 47/47 (Level 3 + hoi quy 5 suite)
 python .agents/tests/test_phase5.py         # 57/57 (router + FallbackReviewer + hoi quy)
 python .agents/tests/test_quota.py          # 15/15 (quota that + route theo quota)
 python .agents/tests/test_phase6.py         # 57/57 (plan + duyet + state/control + chay)
+python .agents/tests/test_planner.py        # 16/16 (goal -> plan + webhook)
 ```
 
 ## Bat bien (khong duoc vi pham)
@@ -121,6 +122,8 @@ python .agents/tests/test_phase6.py         # 57/57 (plan + duyet + state/contro
 | `.agents/router.py` | chon model theo loai viec W0-W8 (main/escalate, khac ho) |
 | `.agents/quota.py` | doc usage that tu `opencode stats`, cat theo tran Go |
 | `.agents/job.py` | plan + duyet tren dashboard + chay tuan tu |
+| `.agents/planner.py` | goal -> plan.json (W4 planner) |
+| `.agents/notify.py` | webhook 1 chieu (Discord/Telegram/generic) |
 | `.agents/fallback.py` | chuoi du phong + health thu dong |
 | `.agents/safe_writer.py` | nguoi ghi file duy nhat (backup/atomic/rollback) |
 | `.agents/draft/` | ban nhap cua Coder (de xem diff) |

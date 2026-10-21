@@ -31,7 +31,36 @@ from pathlib import Path
 
 import secret_scan
 
-DEFAULT_OPENCODE_BIN = os.path.join(os.environ.get("APPDATA") or "", "npm", "opencode.cmd")
+_NPM_BIN = os.path.join(os.environ.get("APPDATA") or "", "npm")
+_SHIM = os.path.join(_NPM_BIN, "opencode.cmd")
+
+
+def unwrap_cmd_shim(binary: str) -> str:
+    """Doi `opencode.cmd` (batch shim cua npm) sang binary that.
+
+    Tren Windows, `subprocess` chay file `.cmd` qua `cmd.exe /c`, ma `cmd.exe` cat
+    argv ngay tai newline dau tien. Prompt cua planner/coder luon nhieu dong, nen
+    di qua shim thi model chi nhan duoc DONG DAU (goal, file tree, schema deu mat).
+    Goi thang `opencode.exe` thi argv duoc giu nguyen tung byte.
+    """
+    path = Path(binary)
+    if path.suffix.lower() not in (".cmd", ".bat"):
+        return str(binary)
+    for candidate in (path.parent / "node_modules" / "@opencode" / "cli" / "bin" / "opencode.exe",
+                      path.parent / "node_modules" / "@opencode" / "cli" / "bin" / "opencode"):
+        if candidate.is_file():
+            return str(candidate)
+    return str(binary)
+
+
+def resolve_binary(binary: str | None = None) -> str:
+    """Binary uu tien: tham so -> $OPENCODE_BIN -> PATH -> shim npm (da unwrap)."""
+    chosen = (binary or os.environ.get("OPENCODE_BIN")
+              or shutil.which("opencode") or _SHIM)
+    return unwrap_cmd_shim(chosen)
+
+
+DEFAULT_OPENCODE_BIN = unwrap_cmd_shim(_SHIM)
 
 
 def _same_text(left: str, right: str) -> bool:
@@ -372,7 +401,7 @@ class OpenCodeCoder(Coder):
         super().__init__()
         self.name = f"opencode:{model}"
         self.model = model
-        self.binary = binary or shutil.which("opencode") or DEFAULT_OPENCODE_BIN
+        self.binary = resolve_binary(binary)
         self.timeout = timeout
         # Windows gioi han command line ~32k ky tu, ma prompt di qua argv.
         # 20k ky tu (~500 dong code) la nguong an toan; vuot qua thi cat bot va
@@ -514,7 +543,7 @@ class AgenticCoder(Coder):
         super().__init__()
         self.name = f"agentic:{model}"
         self.model = model
-        self.binary = binary or shutil.which("opencode") or DEFAULT_OPENCODE_BIN
+        self.binary = resolve_binary(binary)
         self.timeout = timeout
         self.agent = agent
         self.debug_dir = Path(debug_dir) if debug_dir else None
@@ -802,7 +831,7 @@ class OpenCodeReviewer(Reviewer):
         super().__init__()
         self.name = f"opencode-review:{model}"
         self.model = model
-        self.binary = binary or shutil.which("opencode") or DEFAULT_OPENCODE_BIN
+        self.binary = resolve_binary(binary)
         self.timeout = timeout
         self.runner = runner or self._run_cli
         # True: loi ha tang (429/timeout) -> raise de FallbackReviewer chuyen model.

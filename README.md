@@ -1,5 +1,7 @@
 # Adaptive Swarm Pipeline
 
+![Adaptive Swarm dashboard](docs/dashboard.png)
+
 A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
@@ -69,6 +71,31 @@ Without `--route`, the coder chain comes from `.agents/config.json`.
 Missing `verify_command` is rejected immediately. Level 1/2 take one target file;
 Level 3 takes two or more and runs as one atomic transaction.
 
+## Goal -> plan (W4 planner)
+
+```bash
+python .agents/planner.py --goal "Add JWT auth and tests" --root . --submit
+```
+
+Or type the goal in the dashboard's input and click **Plan**: the planner reads the
+project tree, proposes 1-5 subtasks with verification, validates that every target
+exists and that dependencies are acyclic, then submits the plan for approval.
+
+Planner chain: Qwen3.8 Max -> GLM-5.3 -> free fallbacks. If the first plan is
+invalid it retries once with the validation errors attached.
+
+## Notifications (one-way)
+
+Create `.agents/notify.json`:
+
+```json
+{"enabled": true, "kind": "discord", "url": "https://discord.com/api/webhooks/..."}
+```
+
+Kinds: `discord` (`content`), `telegram` (`chat_id` + `text`; `url` is the bot
+`sendMessage` endpoint), `generic` (`text`). Events: `plan.submitted`,
+`plan.approved`, `plan.rejected`, `job.done`. Notification failures never break a job.
+
 ## Tests
 
 ```bash
@@ -76,6 +103,8 @@ python .agents/tests/test_phase4.py      # observation layer
 python .agents/tests/test_level3.py      # multi-file transaction + regressions
 python .agents/tests/test_phase5.py      # router + fallback reviewer + regressions
 python .agents/tests/test_quota.py       # quota math + quota-aware routing
+python .agents/tests/test_phase6.py      # plan approval + job executor
+python .agents/tests/test_planner.py     # goal -> plan + webhook notifications
 python .agents/tests/smoke_suite.py      # engine + 10 real tasks
 ```
 
@@ -90,6 +119,9 @@ Hard model-selection tasks live in `.agents/tests/hard_tasks.py`; see
 | `.agents/safe_writer.py` | backup, atomic write, transaction, journal, rollback |
 | `.agents/router.py` | work-type router (W0-W8) with cross-family chains |
 | `.agents/quota.py` | real spend from `opencode stats` (shared + per-model caps) |
+| `.agents/job.py` | plan approval, state/control, sequential executor |
+| `.agents/planner.py` | goal -> plan.json (W4 planner) |
+| `.agents/notify.py` | one-way Discord/Telegram/generic webhooks |
 | `.agents/workers.py` | coders/reviewers (agentic CLI, scripted, fallback) |
 | `.agents/ledger.py`, `schema.py`, `replay.py`, `dashboard.py` | evidence + observability |
 | `.agents/tests/` | acceptance suites and hard tasks |

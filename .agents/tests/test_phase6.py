@@ -342,6 +342,17 @@ def test_dashboard_api(checks: Checks) -> None:
         status, body = post({"action": "pause", "token": "dash-token"}, "/api/control")
         checks.check("dashboard: control pause -> 200", status == 200, body)
         checks.check("dashboard: paused", job.read_control(root)["paused"] is True)
+
+        import planner
+        original_generate = planner.generate
+        planner.generate = lambda goal, root: make_plan()
+        try:
+            status, body = post({"goal": "fix a"}, "/api/plan/generate")
+        finally:
+            planner.generate = original_generate
+        checks.check("dashboard: generate plan",
+                     status == 200 and bool(body.get("token")) and body.get("job_id") == "J1",
+                     body)
     finally:
         server.shutdown()
         server.server_close()
