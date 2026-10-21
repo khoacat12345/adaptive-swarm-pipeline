@@ -99,7 +99,7 @@ Free dry-run (same free model for all four roles, $0):
 
 ```cmd
 set SWARM_WAVE_ROLES=security=opencode/deepseek-v4.1-flash-free,qa=opencode/deepseek-v4.1-flash-free,perf=opencode/deepseek-v4.1-flash-free,docs=opencode/deepseek-v4.1-flash-free
-python .agents/job.py --plan scratch/swarm_demo/plan_wave.json --root . --reviewer wave --decision approve
+python .agents/job.py --plan scratch/swarm_demo/plan_wave.json --root . --reviewer wave --model opencode/deepseek-v4.1-flash-free --decision approve
 ```
 
 ## Notifications (one-way)

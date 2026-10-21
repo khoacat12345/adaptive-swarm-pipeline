@@ -455,7 +455,7 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             verify_timeout: int | None = None, log: bool = True,
             use_router: bool = True, allow_escalate: bool = False,
             force: bool = False, dry_run: bool = False,
-            reviewer_kind: str = "heuristic") -> dict:
+            reviewer_kind: str = "heuristic", model: str | None = None) -> dict:
     problems = validate_plan(plan)
     if problems:
         raise ValueError("plan khong hop le: " + "; ".join(problems[:8]))
@@ -524,7 +524,7 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             update_state(phase="stopped", current=None)
             break
 
-        chain = route_plan["chain"] if route_plan else []
+        chain = [model] if model else (route_plan["chain"] if route_plan else [])
         coder = (coder_factory(order, chain) if coder_factory
                  else _default_coder(chain))
         sub_started = time.perf_counter()
@@ -605,6 +605,8 @@ def main(argv=None) -> int:
     parser.add_argument("--allow-escalate", action="store_true")
     parser.add_argument("--reviewer", default="heuristic",
                         choices=("heuristic", "wave", "none"))
+    parser.add_argument("--model", default=None,
+                        help="override the coder model (useful for free dry-runs)")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -650,7 +652,7 @@ def main(argv=None) -> int:
 
         report = run_job(plan, root=args.root, allow_escalate=args.allow_escalate,
                          force=args.force, dry_run=args.dry_run,
-                         reviewer_kind=args.reviewer)
+                         reviewer_kind=args.reviewer, model=args.model)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
