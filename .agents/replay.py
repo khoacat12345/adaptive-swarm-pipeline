@@ -103,6 +103,16 @@ def _message(event: dict, norm: dict) -> str:
             extra = ""
         return (f"router chon {data.get('work_type')} ({data.get('label')}): "
                 f"{' -> '.join(data.get('chain') or [])}{extra}")
+    if kind == "plan.submitted":
+        return f"plan {data.get('job_id')}: {len(data.get('subtasks') or [])} subtask - cho duyet"
+    if kind == "plan.approved":
+        return f"plan {data.get('job_id')} duoc duyet"
+    if kind == "plan.rejected":
+        return f"plan {data.get('job_id')} bi tu choi"
+    if kind == "job.start":
+        return f"job {data.get('job_id')} bat dau ({data.get('subtasks')} subtask)"
+    if kind == "job.done":
+        return f"job {data.get('job_id')} ket thuc: {data.get('status')}"
     if kind == "recipe.ladder":
         history = [item for item in (data.get("history") or []) if isinstance(item, dict)]
         levels = " -> ".join(str(item.get("level_name")) for item in history)

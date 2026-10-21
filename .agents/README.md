@@ -536,6 +536,21 @@ hoac `--allow-escalate`) -> **fallback re/free** (deepseek/glm free) -> `exhaust
 (chan run, `--force` de bo qua). Khong bao gio tu nang cap khi main can ma escalate
 cung khan. Xem nhanh: `python .agents/quota.py`.
 
+### Job plan + duyet (Phase 6A)
+
+```bash
+python .agents/job.py --plan plan.json --root <du an> --wait
+# mo URL in ra (kem ?token=...), bam Duyet / Tu choi
+```
+
+Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objective`,
+`verify_command`, `target_files`, `sandbox_files`, `level`, `max_rounds`, `depends_on`.
+
+- Duyet **ca plan** mot lan; chay tuan tu theo topo, dung ngay khi 1 buoc fail.
+- Khong duyet / timeout -> **khong ghi file nao**.
+- Moi subtask tu chon model theo W0-W8 + quota (fallback ladder).
+- Token 1 lan chi in ra CLI; dashboard khong tra token qua API.
+
 ### Work Order (5 truong)
 
 `objective`, `boundaries`, `input_context`, `acceptance_criteria`, `verify_command`.
@@ -1198,6 +1213,12 @@ main/escalate uu tien ngon-bo-re; `validate_roles()` chan trung ho o vai kiem to
 `opencode stats` va cat theo tran Go (5h=20%, tuan=50%, thang=100%), `recipe_c --route`
 tu day escalate len khi main sap can; `recipe_c --route` ghi event `router.decided`.
 Nghiem thu **57/57 PASS** (gom Level 3 + Phase 4) va **15/15** quota.
+
+**Phase 6A — job plan + duyet (da lam):** `job.py` nhan `plan.json` (subtasks +
+`depends_on` + verify), ghi plan vao `.agents/tmp/`, in URL dashboard kem token;
+nguoi dung bam Duyet/Tu choi tren 127.0.0.1; chi khi approved moi chay tuan tu, moi
+subtask 1 Work Order + transaction va tu route W0-W8 + quota. Timeout = tu choi.
+Nghiem thu **32/32 PASS** (gom Phase 5 hoi quy).
 
 **Chua lam (co y):** executor song song (Level 3 chay tuan tu trong 1 giao dich),
 backoff luy tien cho cooldown, do model tra phi tren task that (benchmark hien chi

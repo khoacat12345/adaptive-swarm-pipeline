@@ -300,6 +300,22 @@ HTML = r"""<!doctype html>
   .hunk{color:#7dd3fc;background:#0e1c29}
   .ctx{color:#9aa9ba}
   .empty{color:var(--dim);padding:30px 16px;text-align:center;font-size:12px}
+  /* plan approval */
+  .plan{margin:10px 18px 0;background:var(--panel);border:1px solid #2c4a5e;border-radius:12px;padding:12px 14px}
+  .plan .planhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .plan .planhead b{color:#7dd3fc}
+  .plan table{width:100%;border-collapse:collapse;font-size:11px}
+  .plan th{text-align:left;color:var(--dim);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line)}
+  .plan td{padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+  .plan code{font-family:Consolas,monospace;color:#9fe3c0;font-size:10.5px}
+  .plan .planactions{margin-top:10px;display:flex;gap:8px}
+  .plan button{border:0;border-radius:8px;padding:7px 16px;font-size:12px;cursor:pointer;font-weight:600}
+  .plan button.ok{background:#14532d;color:#9be7c4}
+  .plan button.no{background:#4c1d1d;color:#ffb4b4}
+  .pill{font-size:10px;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.5px}
+  .pill.pending{background:#2a2310;color:#fbbf24}
+  .pill.approved{background:#0f2a22;color:#34d399}
+  .pill.rejected{background:#2a1010;color:#f87171}
   ::-webkit-scrollbar{width:10px;height:10px}
   ::-webkit-scrollbar-thumb{background:#1c2937;border-radius:8px}
   ::-webkit-scrollbar-track{background:transparent}
@@ -310,6 +326,7 @@ HTML = r"""<!doctype html>
   <h1><span>&#9679;</span> Adaptive Swarm <span>Pipeline</span></h1>
   <div id="statusMessage"><span class="dot"></span>dang tai...</div>
 </header>
+<div id="planPanel" class="plan" style="display:none"></div>
 <main>
   <section class="col" id="sidebar">
     <div class="colhead">Run history
@@ -342,6 +359,8 @@ let state = {runs:[], selected:null, data:null, timer:null, showAll:false,
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '');
 const sigOf = (value) => { try { return JSON.stringify(value); } catch (_) { return String(value); } };
+const token = new URLSearchParams(location.search).get('token') || '';
+let planSig = '';
 const fmt = (ms) => ms >= 60000 ? (ms/60000).toFixed(1)+'m' : ms >= 1000 ? (ms/1000).toFixed(1)+'s' : (ms||0)+'ms';
 const num = (n) => (n||0).toLocaleString('en-US');
 
@@ -431,8 +450,52 @@ function renderInspector(diff){
     <pre class="diff">${rendered || '<div class="ctx">Khong co thay doi / chua co file</div>'}</pre>`;
 }
 
-async function selectRun(runId, force=false){
-  if(state.selected !== runId){ state.selected = runId; force = true; }
+async function renderPlan(){
+  try{
+    const data = await getJSON('/api/plan');
+    const panel = el('planPanel');
+    if(!data.plan){ panel.style.display='none'; panel.innerHTML=''; planSig=''; return; }
+    const sig = sigOf(data);
+    if(sig === planSig) return;
+    planSig = sig;
+    const decision = data.decision || {};
+    const status = decision.status || 'pending';
+    const rows = (data.plan.subtasks || []).map(s => `<tr>
+      <td><b>${esc(s.id)}</b></td>
+      <td>${esc(s.title || '')}</td>
+      <td><code>${esc((s.target_files || []).join(', '))}</code></td>
+      <td><code>${esc(s.verify_command || '')}</code></td>
+      <td>${esc((s.depends_on || []).join(', ') || '-')}</td>
+    </tr>`).join('');
+    const actions = status === 'pending'
+      ? `<button class="ok" onclick="decidePlan('approve')">Duyet</button>
+         <button class="no" onclick="decidePlan('reject')">Tu choi</button>`
+      : `<span class="pill ${status}">${status}</span>`;
+    panel.style.display = 'block';
+    panel.innerHTML = `<div class="planhead">
+        <b>Plan ${esc(data.plan.job_id)}</b>
+        <span>${esc(data.plan.objective || '')}</span>
+        <span class="pill ${status}">${status}</span></div>
+      <table><thead><tr><th>ID</th><th>Viec</th><th>File</th><th>Verify</th><th>Dep</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <div class="planactions">${actions}</div>`;
+  }catch(_){ /* dashboard khong co plan endpoint -> bo qua */ }
+}
+
+async function decidePlan(kind){
+  try{
+    const response = await fetch('/api/plan/decision', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({decision: kind, token: token})
+    });
+    const data = await response.json();
+    if(!response.ok){ alert(data.error || ('HTTP ' + response.status)); return; }
+    planSig = '';
+    await renderPlan();
+  }catch(err){ alert(err.message); }
+}
+
+async function selectRun(runId, force=false){  if(state.selected !== runId){ state.selected = runId; force = true; }
   renderRuns();
   if(force) el('statusMessage').innerHTML = '<span class="dot"></span>dang tai run...';
   try{
@@ -458,6 +521,7 @@ async function refresh(force=false){
     const data = await getJSON('/api/runs?filter=' + (state.showAll ? 'all' : 'recipe'));
     state.runs = data.runs || [];
     renderRuns(force);          // chi ve lai khi danh sach hoac selected doi
+    renderPlan();
     if(!state.selected && state.runs.length) await selectRun(state.runs[0].run_id, true);
     else if(state.selected) await selectRun(state.selected);
   }catch(err){
@@ -533,6 +597,34 @@ def make_handler(root: Path, ledger: Path):
                     self._json({"ok": True, "ledger": str(ledger),
                                 "runs": len(load_runs(root, ledger)),
                                 "schema": schema.SCHEMA_SEMVER})
+                elif route == "/api/plan":
+                    import job as job_module
+                    self._json(job_module.read_plan_state(root))
+                else:
+                    self._send(404, b"not found", "text/plain; charset=utf-8")
+            except Exception as exc:            # noqa: BLE001
+                self._json({"error": str(exc)[:300]}, 500)
+
+        def do_POST(self):                      # noqa: N802
+            parsed = urlparse(self.path)
+            route = parsed.path.rstrip("/") or "/"
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if length else b""
+                payload = json.loads(raw.decode("utf-8") or "{}")
+                if route == "/api/plan/decision":
+                    import job as job_module
+                    try:
+                        result = job_module.decide(
+                            root, payload.get("decision") or "",
+                            token=str(payload.get("token") or ""))
+                    except PermissionError as exc:
+                        self._json({"error": str(exc)}, 403)
+                        return
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 400)
+                        return
+                    self._json(result)
                 else:
                     self._send(404, b"not found", "text/plain; charset=utf-8")
             except Exception as exc:            # noqa: BLE001
