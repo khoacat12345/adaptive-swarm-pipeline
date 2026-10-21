@@ -564,12 +564,12 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
 - Token 1 lan chi in ra CLI; dashboard khong tra token qua API.
 - Dashboard (tieng Anh) hien them **quota bar** (plan chung 5h/7d/30d + model dang
   dung) va **quick access**: copy lenh `job.py --plan ... --wait --open` de chay lai.
-- **5 stage pages** (deep link): `#analyze` (scope, dependency, verify/sandbox coverage,
-  risks, agent readiness), `#plan` (subtask cards + approval), `#warroom` (Lead + 5
-  agents: Coder, Security, QA, Perf, Docs; orange = running, blue = next, green =
-  approved, gray = idle/standby), `#verify` (machine contract + ledger evidence),
-  `#done` (files, duration, tokens, reproduce command). War room co replay slider
-  (0 request) va canh bao `heuristic` (reviewer khong duoc goi).
+- **4 stage pages** (deep link): `#plan` (plan intelligence + subtasks + approval),
+  `#warroom` (Lead + 5 agents: Coder, Security, QA, Perf, Docs; orange = running,
+  blue = next, green = approved, gray = idle/standby), `#verify` (machine contract +
+  ledger evidence), `#done` (files, duration, tokens, reproduce command). `#analyze`
+  redirects to `#plan`. War room co replay slider (0 request) va canh bao `heuristic`
+  (reviewer khong duoc goi).
 - `GET /api/team` tra 5 agent + route + wave verdict + model health (read-only).
 - **Timestamps**: gio bat dau run, gio tung event trong chat, gio cap nhat plan, gio
   doc quota (checked).

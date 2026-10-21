@@ -158,6 +158,9 @@ def test_approval(checks: Checks) -> None:
     root = make_root("approval")
     info = job.submit_plan(make_plan(), root, token="tok123")
     checks.check("approval: submit tra token", info["token"] == "tok123")
+    job.submit_plan(make_plan(), root)
+    checks.check("approval: giu token khi resubmit cung job",
+                 job.token_path(root).read_text(encoding="utf-8").strip() == "tok123")
     checks.check("approval: decision pending",
                  job.read_plan_state(root)["decision"]["status"] == "pending")
     checks.check("approval: khong lo token trong state",
@@ -306,9 +309,9 @@ def test_dashboard_api(checks: Checks) -> None:
             html = response.read().decode("utf-8")
         checks.check("dashboard: HTML co view plan", 'id="view-plan"' in html
                      and 'id="nav"' in html)
-        checks.check("dashboard: 5 stage pages",
+        checks.check("dashboard: 4 stage pages",
                      all(f'id="view-{name}"' in html for name in
-                         ("analyze", "plan", "warroom", "verify", "done")), html[:200])
+                         ("plan", "warroom", "verify", "done")), html[:200])
 
         with urllib.request.urlopen(base + "/api/job", timeout=5) as response:
             job_data = json.loads(response.read().decode("utf-8"))

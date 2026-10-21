@@ -144,6 +144,18 @@ def write_control(root, payload: dict) -> dict:
     return payload
 
 
+def _existing_token(root, job_id: str | None) -> str:
+    """Reuse the token when the same job is re-submitted (stale dashboard tabs)."""
+    try:
+        old_plan = json.loads(plan_path(root).read_text(encoding="utf-8"))
+        old_token = token_path(root).read_text(encoding="utf-8").strip()
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if old_token and str(old_plan.get("job_id") or "") == str(job_id or ""):
+        return old_token
+    return ""
+
+
 def _require_token(root, token: str) -> None:
     try:
         expected = token_path(root).read_text(encoding="utf-8").strip()
@@ -346,7 +358,7 @@ def submit_plan(plan: dict, root, *, token: str | None = None, source: str | Non
         plan["_source"] = str(source)
     directory = _dir(root)
     directory.mkdir(parents=True, exist_ok=True)
-    token = token or secrets.token_hex(8)
+    token = token or _existing_token(root, plan.get("job_id")) or secrets.token_hex(8)
 
     with _LOCK:
         if not force:

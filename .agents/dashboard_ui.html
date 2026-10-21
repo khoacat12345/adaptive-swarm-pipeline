@@ -423,13 +423,7 @@
       </div>
     </section>
 
-    <!-- ANALYZE -->
-    <section class="view" id="view-analyze">
-      <div class="stepper"></div>
-      <div id="analyzeBody" class="muted">No plan yet.</div>
-    </section>
-
-    <!-- PLAN -->
+    <!-- PLAN (intelligence + subtasks) -->
     <section class="view" id="view-plan">
       <div class="stepper"></div>
       <div class="card">
@@ -437,7 +431,9 @@
           <h2 style="margin:0">Plan</h2>
           <span id="planStatus" class="pill">none</span>
         </div>
-        <div id="planBody" class="muted">No plan submitted.</div>
+        <div id="planTop"></div>
+        <div id="planIntel"></div>
+        <div id="planSubs"></div>
       </div>
     </section>
 
@@ -670,16 +666,18 @@ async function loadRun(runId, silent=false){
 
 /* ---------- navigation ---------- */
 function switchView(view){
+  if(view === 'analyze') view = 'plan';
   state.view = view;
-  if(location.hash !== '#' + view) history.pushState(null, '', '#' + view);
-  const navView = ['analyze','warroom','verify','done'].includes(view) ? 'overview' : view;
+  if(location.hash !== '#' + view){
+    history.pushState(null, '', location.pathname + location.search + '#' + view);
+  }
+  const navView = ['warroom','verify','done'].includes(view) ? 'overview' : view;
   document.querySelectorAll('.nav button').forEach((button) =>
     button.classList.toggle('active', button.dataset.view === navView));
   document.querySelectorAll('.view').forEach((section) =>
     section.classList.toggle('active', section.id === 'view-' + view));
   const titles = {overview:['Overview','Mission control'],
-    analyze:['Analyze','Plan intelligence before any file is written'],
-    plan:['Plan','Approve or reject the current plan'],
+    plan:['Plan','Intelligence, subtasks and approval'],
     warroom:['War room','Five agents, one Lead, live state'],
     verify:['Verify','The real machine decides what passes'],
     done:['Done','Applied, verified, summarized'],
@@ -698,11 +696,12 @@ function switchView(view){
   }
   state.pageSig = state.pageSig || {};
   state.pageSig[view] = null;
+  if(view === 'plan') state.pageSig['plan-intel'] = null;
   if(view === 'drafts') loadDrafts();
   if(view === 'workspaces') loadWorkspaces();
   if(view === 'quota') renderUsage();
   if(view === 'chat') renderChat();
-  if(['analyze','plan','warroom','verify','done'].includes(view)) render();
+  if(['plan','warroom','verify','done'].includes(view)) render();
   if(view === 'warroom') ensureWarRun();
 }
 
@@ -723,8 +722,7 @@ function render(){
 
   renderStepper(jobState, plan, decision);
   if(state.view === 'overview') renderOverview(plan, jobState, control);
-  if(state.view === 'analyze') renderAnalyze(plan, jobState, decision, control);
-  if(state.view === 'plan') renderPlan(plan, decision, jobState);
+  if(state.view === 'plan') renderPlan(plan, decision, jobState, control);
   if(state.view === 'warroom') renderWarRoom(plan, jobState, decision);
   if(state.view === 'verify') renderVerify(plan, jobState, decision);
   if(state.view === 'done') renderDone(plan, jobState, decision);
@@ -737,7 +735,7 @@ function render(){
 
 function renderStepper(jobState, plan, decision){
   state.jobState = jobState;
-  const steps = ['Analyze','Plan','War room','Verify','Done'];
+  const steps = ['Plan','War room','Verify','Done'];
   const phase = jobState.phase || '';
   const timeline = runContext(decision, phase).timeline;
   const approved = ['approved', 'done'].includes((decision || {}).status) ||
@@ -747,20 +745,23 @@ function renderStepper(jobState, plan, decision){
     ['done', 'stopped'].includes(phase);
   const verifyDone = timeline.some((item) => item.event_type === 'safe_writer.verify') ||
     phase === 'done';
-  const flags = [!!plan, approved, warDone, verifyDone, phase === 'done'];
+  const flags = [!!plan && approved, warDone, verifyDone, phase === 'done'];
   let current = flags.findIndex((value) => !value);
-  if(current < 0) current = 4;
+  if(current < 0) current = 3;
   const stopped = phase === 'stopped';
   if(stopped){
     const reachedVerify = timeline.some((item) => item.event_type === 'safe_writer.verify');
-    current = reachedVerify ? 3 : 2;
+    current = reachedVerify ? 2 : 1;
   }
+  const stageOf = {plan:0, warroom:1, verify:2, done:3};
+  const viewStage = state.view === 'analyze' ? 0 : stageOf[state.view];
+  if(viewStage != null) current = viewStage;
   const signature = phase + '|' + current + '|' + stopped;
   if(state.stepperSig === signature) return;
   state.stepperSig = signature;
   const html = steps.map((name, index) => {
-    const cls = index < current ? 'done'
-      : index === current ? 'active' + (stopped ? ' bad' : '') : '';
+    const cls = index === current ? 'active' + (stopped ? ' bad' : '')
+      : flags[index] ? 'done' : '';
     return `<button type="button" class="step ${cls}" onclick="openStep(${index})"
       aria-current="${index === current ? 'step' : 'false'}"
       title="Open ${name}"><span class="n">${index + 1}</span>${name}</button>`;
@@ -769,7 +770,7 @@ function renderStepper(jobState, plan, decision){
 }
 
 function openStep(index){
-  const views = ['analyze','plan','warroom','verify','done'];
+  const views = ['plan','warroom','verify','done'];
   switchView(views[index] || 'overview');
 }
 
@@ -887,11 +888,15 @@ function riskItem(cls, title, text){
     <div><b>${esc(title)}</b><p>${esc(text)}</p></div></div>`;
 }
 
-function renderAnalyze(plan, jobState, decision, control){
-  if(!guardRender('analyze', {plan, jobState, decision, team:state.teamData, run:state.run})) return;
-  const box = $('#analyzeBody');
+function renderAnalyze(plan, jobState, decision, control, options){
+  const target = (options && options.target) || '#analyzeBody';
+  const embedded = !!(options && options.embedded);
+  const key = (options && options.key) || 'analyze';
+  if(!guardRender(key, {plan, jobState, decision, team:state.teamData, run:state.run})) return;
+  const box = $(target);
+  if(!box) return;
   if(!plan){
-    box.innerHTML = `<div class="hero">
+    box.innerHTML = embedded ? '' : `<div class="hero">
       <div><div class="eyebrow">Plan intelligence</div><h2>No plan to analyze</h2>
         <p>Type a goal on Overview and press Plan. This page then shows scope,
         dependencies, verification coverage, risks and agent readiness before any file is written.</p></div>
@@ -998,7 +1003,7 @@ function renderAnalyze(plan, jobState, decision, control){
       <span class="muted" style="font-size:10.5px;margin-left:auto">${esc(quotaText)} · ${esc(healthText)}</span></div>`;
   }).join('');
 
-  box.innerHTML = `<div class="hero">
+  const heroHtml = embedded ? '' : `<div class="hero">
     <div><div class="eyebrow">Plan intelligence · ${esc(plan.job_id || '')}</div>
       <h2>${esc(plan.objective || 'Untitled plan')}</h2>
       <p>${esc(subs.length)} subtask(s), ${esc(files.length)} file(s), ${esc(rounds)} round(s).
@@ -1008,9 +1013,8 @@ function renderAnalyze(plan, jobState, decision, control){
       <button class="btn ghost" onclick="switchView('plan')">Open plan</button>
       <button class="btn ghost" onclick="switchView('warroom')">War room</button>
     </div>
-  </div>
-
-  <div class="statgrid">
+  </div>`;
+  box.innerHTML = heroHtml + `<div class="statgrid">
     ${statCard('Subtasks', subs.length, applied + ' already applied')}
     ${statCard('Files', files.length, shared.length + ' shared')}
     ${statCard('Verify', (subs.length - missingVerify.length) + '/' + subs.length, 'machine commands')}
@@ -1019,7 +1023,7 @@ function renderAnalyze(plan, jobState, decision, control){
     ${statCard('Phase', phase, 'approval: ' + (decision.status || 'pending'))}
   </div>
 
-  <div class="grid g2">
+  <div class="grid g2" style="align-items:start">
     <div class="card"><h2>Execution order</h2>
       <p class="muted" style="margin:0 0 8px;font-size:11px">Dependencies are enforced; the rest runs in this order.</p>
       <div class="deprail">${order.map((item, index) =>
@@ -1042,7 +1046,7 @@ function renderAnalyze(plan, jobState, decision, control){
     </div>
   </div>
 
-  <div class="grid g2" style="margin-top:14px">
+  <div class="grid g2" style="margin-top:14px;align-items:start">
     <div class="card"><h2>Files in scope</h2>
       ${files.length ? files.map((file) => {
         const ids = fileUse[file] || [];
@@ -1059,7 +1063,7 @@ function renderAnalyze(plan, jobState, decision, control){
     </div>
   </div>
 
-  <div class="grid g2" style="margin-top:14px">
+  <div class="grid g2" style="margin-top:14px;align-items:start">
     <div class="card"><h2>Agent readiness</h2>${agentHtml}
       <p class="muted" style="margin:8px 0 0;font-size:10.5px">
         Reviewer mode: <b>${esc(route.reviewer_mode || 'heuristic')}</b>.
@@ -1079,20 +1083,25 @@ function renderAnalyze(plan, jobState, decision, control){
   </div>`;
 }
 
-function renderPlan(plan, decision, jobState){
+function renderPlan(plan, decision, jobState, control){
+  if(!guardRender('plan', {plan, decision, jobState,
+    root:state.planState && state.planState.root})) return;
   const status = $('#planStatus');
   status.className = 'pill ' + STATUS_CLASS(decision.status || jobState.phase);
   status.textContent = decision.status || jobState.phase || 'none';
-  if(!plan){ $('#planBody').innerHTML = 'No plan submitted.'; return; }
+  if(!plan){
+    $('#planTop').innerHTML = '<p class="muted">No plan submitted.</p>';
+    $('#planIntel').innerHTML = '';
+    $('#planSubs').innerHTML = '';
+    return;
+  }
   const subs = mergedSubtasks(plan, jobState);
   const source = plan._source || '.agents/tmp/plan.json';
   const root = (state.planState && state.planState.root) || '.';
   const command = 'python .agents/job.py --plan ' + source + ' --root "' + root + '" --wait --open';
-  const applied = subs.filter((item) => ['applied', 'done'].includes(item.status)).length;
   const files = uniqueFiles(subs, 'target_files');
   const maxLevel = Math.max(0, ...subs.map((item) => Number(item.level || 0)));
   const pending = decision.status === 'pending';
-  const order = topoOrder(subs);
   const actions = pending ? `<div class="row" style="margin-bottom:12px">
       <button class="btn ok" onclick="decide('approve')">Approve plan</button>
       <button class="btn bad" onclick="decide('reject')">Reject</button>
@@ -1118,33 +1127,22 @@ function renderPlan(plan, decision, jobState){
         <div class="k">Requests</div><div>${esc(item.requests != null ? item.requests : '-')}</div>
       </div></div></details>`;
   }).join('');
-  $('#planBody').innerHTML = `<div class="hero">
+  $('#planTop').innerHTML = `<div class="hero">
       <div><div class="eyebrow">Plan · ${esc(plan.job_id || '')}</div>
         <h2>${esc(plan.objective || 'Untitled plan')}</h2>
         <p>${esc(subs.length)} subtask(s), ${esc(files.length)} file(s), max level ${esc(maxLevel || '-')}.
-        Dependencies run top-to-bottom; the machine verifies each step.</p></div>
+        Intelligence and subtask detail live together; the machine verifies each step.</p></div>
       <div class="actions"><span class="pill ${STATUS_CLASS(decision.status || jobState.phase)}">${esc(decision.status || jobState.phase || 'pending')}</span>
-        <button class="btn ghost" onclick="switchView('analyze')">Analyze</button></div>
+        <button class="btn ghost" onclick="switchView('warroom')">War room</button></div>
     </div>
     ${actions}
     <div class="quick" style="margin-bottom:12px"><span class="k">run this plan</span>
       <code id="planCmd">${esc(command)}</code>
-      <button class="copy" onclick="copyCommand(this)">Copy</button></div>
-    <div class="statgrid">
-      ${statCard('Subtasks', subs.length, applied + ' applied')}
-      ${statCard('Files', files.length, 'in scope')}
-      ${statCard('Max level', maxLevel || '-', 'transaction size')}
-      ${statCard('Approval', decision.status || 'pending', 'gate')}
-      ${statCard('Verify', subs.filter((item) => item.verify_command).length + '/' + subs.length, 'commands')}
-    </div>
-    <div class="card" style="margin-bottom:12px"><h2>Execution order</h2>
-      <div class="deprail">${order.map((item, index) =>
-        `<div class="depnode"><b>${esc(item.id)}</b><span>${esc(item.title || '')}</span>
-          <div class="muted" style="font-size:9.5px">${item.depends_on && item.depends_on.length
-            ? 'after ' + esc(item.depends_on.join(', ')) : 'starts first'}</div></div>` +
-        (index < order.length - 1 ? '<span class="deparrow">&#8594;</span>' : '')).join('')}</div>
-    </div>
-    <div class="card"><h2>Subtasks</h2>${cards || '<p class="muted">No subtasks.</p>'}</div>`;
+      <button class="copy" onclick="copyCommand(this)">Copy</button></div>`;
+  renderAnalyze(plan, jobState, decision, control || {}, {
+    target:'#planIntel', embedded:true, key:'plan-intel'
+  });
+  $('#planSubs').innerHTML = `<div class="card"><h2>Subtasks</h2>${cards || '<p class="muted">No subtasks.</p>'}</div>`;
   const setCmd = $('#setCommand');
   if(setCmd) setCmd.innerHTML = `<span class="k">command</span><code id="planCmd2">${esc(command)}</code>
     <button class="copy" onclick="copyCommand(this)">Copy</button>`;
@@ -1336,7 +1334,7 @@ function renderWarRoom(plan, jobState, decision){
       ${idx != null ? `<span class="chip">replay ${esc(String(idx + 1))}/${esc(String(timeline.length))}</span>` : ''}
       <span class="chip ${data.wave_active ? 'ok' : 'warn'}">reviewer: ${esc(data.reviewer_mode || 'heuristic')}</span>
       ${stale ? `<span class="chip warn">no events for ${esc(String(lastAge))}s</span>` : ''}
-      <button class="btn ghost" onclick="switchView('analyze')">Analyze</button>
+      <button class="btn ghost" onclick="switchView('plan')">Plan</button>
       <button class="btn ghost" onclick="switchView('verify')">Verify</button>
     </div></div>
 
@@ -1477,6 +1475,28 @@ function renderVerify(plan, jobState, decision){
     ${statCard('Exit evidence', evidence.length, 'ledger events')}
     ${statCard('Budget', requestsUsed + '/8', 'requests used')}
     ${statCard('Verify time', run.duration_ms ? fmtDuration(run.duration_ms) : '-', 'whole run')}
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card" style="border-left:3px solid ${done ? 'var(--ok)' : stopped ? 'var(--bad)' : 'var(--warn)'}">
+      <div class="spread"><h2 style="margin:0">Gate</h2>
+        <span class="pill ${done ? 'ok' : stopped ? 'bad' : 'warn'}">${done ? 'PASS' : stopped ? 'FAIL' : 'WAITING'}</span></div>
+      <div class="kv" style="margin-top:8px">
+        <div class="k">Contract</div><div><span class="code">${esc(contractCmd || 'MISSING')}</span></div>
+        <div class="k">Exit code</div><div class="mono">${done ? '0' : stopped ? 'non-zero / stopped' : 'not run yet'}</div>
+        <div class="k">Runs on</div><div>the real project tree, not a copy</div>
+        <div class="k">On failure</div><div>byte-exact rollback of every target file</div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="copy" data-cmd="${esc(contractCmd)}" onclick="copyCmd(this)">Copy command</button>
+        ${done || stopped ? `<button class="btn ghost" onclick="openDiff()">Open diff</button>` : ''}
+      </div>
+    </div>
+    <div class="card"><h2>If it fails</h2>
+      ${riskItem('bad', '1. Read the real error', 'Open Chat, select this run and read the verify output. Do not trust a model summary.')}
+      ${riskItem('warn', '2. Fix or re-plan', 'Change the plan/order and run again; never edit the verify command to make it pass.')}
+      ${riskItem('ok', '3. Rollback is automatic', 'A non-zero exit restores the original bytes before the next attempt.')}
+    </div>
   </div>
 
   <div class="card"><h2>How a change gets through</h2>
@@ -1906,7 +1926,7 @@ function renderSettings(plan, jobState, control){
   const health = state.health || {};
   $('#notifyState').textContent = health.notify ? 'configured' : 'not found';
   $('#telegramState').textContent = health.telegram ? 'enabled' : 'not configured';
-  renderPlan(plan, (state.job && state.job.decision) || {}, jobState);
+  renderPlan(plan, (state.job && state.job.decision) || {}, jobState, control);
   $('#pauseBtn').textContent = control.paused ? 'Resume' : 'Pause';
   $('#pauseBtn2').textContent = control.paused ? 'Resume' : 'Pause';
 }
@@ -1945,7 +1965,11 @@ async function decide(kind){
       body:JSON.stringify({decision:kind, token:authToken()})});
     toast('Plan ' + kind + 'd');
     await refreshAll();
-  }catch(error){ toast(error.message); }
+  }catch(error){
+    toast(error.message === 'token khong dung'
+      ? 'Control token expired. Open the fresh dashboard link from job.py --open.'
+      : error.message);
+  }
 }
 
 async function setControl(action, value){
@@ -1954,7 +1978,12 @@ async function setControl(action, value){
       body:JSON.stringify({action, token:authToken(), value:value || ''})});
     $('#controlMsg').textContent = action + ' ok';
     await refreshAll();
-  }catch(error){ $('#controlMsg').textContent = error.message; toast(error.message); }
+  }catch(error){
+    const message = error.message === 'token khong dung'
+      ? 'Control token expired. Open the fresh dashboard link from job.py --open.'
+      : error.message;
+    $('#controlMsg').textContent = message; toast(message);
+  }
 }
 function togglePause(){
   const paused = !!(state.job && state.job.control && state.job.control.paused);
@@ -2012,14 +2041,16 @@ document.querySelectorAll('.nav button').forEach((button) =>
 $('#goal').addEventListener('keydown', (event) => { if(event.key === 'Enter') planGoal(); });
 $('#opinion').addEventListener('keydown', (event) => { if(event.key === 'Enter') sendOpinion(); });
 
-const VIEWS = ['overview','analyze','plan','warroom','verify','done','chat','workspaces','quota','drafts','settings'];
+const VIEWS = ['overview','plan','warroom','verify','done','chat','workspaces','quota','drafts','settings'];
 const initialView = (location.hash || '#overview').slice(1);
 const runParam = new URLSearchParams(location.search).get('run');
 if(runParam) state.selected = runParam;
-switchView(VIEWS.includes(initialView) ? initialView : 'overview');
+switchView(initialView === 'analyze' ? 'plan'
+  : VIEWS.includes(initialView) ? initialView : 'overview');
 window.addEventListener('hashchange', () => {
   const view = (location.hash || '#overview').slice(1);
-  if(VIEWS.includes(view) && view !== state.view) switchView(view);
+  const target = view === 'analyze' ? 'plan' : view;
+  if(VIEWS.includes(target) && target !== state.view) switchView(target);
 });
 refreshAll();
 setInterval(() => {
