@@ -574,7 +574,7 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
 - **4 stage pages** (deep link): `#plan` (intelligence + phases + approval),
   `#warroom` (Lead + 5 agents: Coder, Security, QA, Perf, Docs; orange = running,
   blue = next, green = approved, gray = idle/standby), `#verify` (machine contract +
-  ledger evidence), `#done` (files, duration, tokens, reproduce command). `#analyze`
+  ledger evidence), `#report` (files, duration, tokens, reproduce command; `#done` alias). `#analyze`
   redirects to `#plan`. War room co replay slider (0 request) va canh bao `heuristic`
   (reviewer khong duoc goi).
 - `GET /api/plan/md` tra plan day du dang Markdown (`.agents/tmp/plans/<job>.md`),

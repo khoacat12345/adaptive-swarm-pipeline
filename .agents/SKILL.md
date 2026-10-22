@@ -71,7 +71,7 @@ python .agents/memory.py                     # loi hay gap + goi y
 
 Dashboard: `http://127.0.0.1:8080/` (sidebar run history | chat da agent | diff &
 inspector). 4 stage pages: `#plan` (intelligence + dependency phases + subtasks),
-`#warroom`, `#verify`, `#done`. `#analyze` redirect to `#plan`. Chat la chatbox:
+`#warroom`, `#verify`, `#report`. `#analyze` redirect to `#plan`, `#done` alias to `#report`. Chat la chatbox:
 Lead ben phai, cac vai khac ben trai. Full plan `.md` tai `/api/plan/md`.
 Run mac dinh `heuristic` (0 reviewer); wave chi khi chon/`--reviewer wave`.
 Server chi bind loopback, khong mo ra mang.
