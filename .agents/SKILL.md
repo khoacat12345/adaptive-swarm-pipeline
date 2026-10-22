@@ -102,7 +102,7 @@ python .agents/tests/test_telegram.py       # 15/15 (bot 2 chieu)
 3. **Rollback nguyen byte.** Backup truoc khi ghi; verify fail -> tra ve dung hash cu.
    Level 3: backup TAT CA file truoc, verify fail -> batch rollback toan bo, khong de
    file nao o trang thai do dang (co journal de khoi phuc sau crash).
-4. **Tran cung:** 8 request / 300 giay moi run; cham tran -> dung, khong ghi.
+4. **Budget:** soft cap 8 / hard cap 16 request, 300 giay moi run. Wave reviewer duoc burst 9-12 de du 4 reviewer; chi 1 lan/subtask, cham 16 -> hard abort, khong ghi.
 5. **Secret khong ra khoi may.** `.env`, khoa, token bi chan/redact truoc khi gui model.
 6. **Ledger append-only.** Khong sua, khong xoa event; schema v1.0.0 chi doc, khong
    rewrite file cu.

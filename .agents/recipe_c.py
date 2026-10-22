@@ -48,8 +48,10 @@ STATUS_DRY_RUN = "dry-run"
 
 VERIFY_TAIL_LINES = 8
 
-# Tran cung cho moi run (Task 3.7). Khong recipe nao duoc vuot.
-BUDGET_MAX_REQUESTS = 8
+# Tran mem 8 / tran cung 16. Wave co the burst 9-12 de du 4 reviewer.
+BUDGET_SOFT_REQUESTS = 8
+BUDGET_HARD_REQUESTS = 16
+BUDGET_MAX_REQUESTS = BUDGET_HARD_REQUESTS
 BUDGET_MAX_SECONDS = 300
 
 
@@ -306,8 +308,15 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
 
     root_path = Path(root or Path.cwd()).resolve()
     run_id = run_id or ledger.new_run_id("rc")
-    max_requests = (BUDGET_MAX_REQUESTS if max_requests is None
-                    else min(int(max_requests), BUDGET_MAX_REQUESTS))
+    wave_reviewer = (reviewer is not None
+                     and getattr(reviewer, "kind", "") == "wave-reviewer")
+    if max_requests is None:
+        hard_cap = BUDGET_HARD_REQUESTS if wave_reviewer else BUDGET_SOFT_REQUESTS
+    else:
+        hard_cap = min(int(max_requests), BUDGET_HARD_REQUESTS)
+    soft_cap = min(BUDGET_SOFT_REQUESTS, hard_cap)
+    burst_allowed = bool(wave_reviewer and hard_cap > soft_cap)
+    max_requests = hard_cap
     max_seconds = (BUDGET_MAX_SECONDS if max_seconds is None
                    else min(int(max_seconds), BUDGET_MAX_SECONDS))
 
@@ -498,7 +507,12 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         "hints": [],
         "route": route_plan,
         "budget": {
-            "max_requests": max_requests,
+            "max_requests": hard_cap,
+            "soft_cap": soft_cap,
+            "hard_cap": hard_cap,
+            "burst_allowed": burst_allowed,
+            "burst_used": False,
+            "burst_reason": None,
             "max_seconds": max_seconds,
             "requests_used": 0,
             "elapsed_s": 0.0,
@@ -510,27 +524,53 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         "session": [],
     }
 
+    # Worker objects (nhat la WaveReviewer) duoc job.py tai su dung qua cac
+    # subtask; chi tinh request PHAT SINH trong lan chay nay.
+    base_coder_calls = int(getattr(coder, "calls", 0) or 0)
+    base_reviewer_calls = (int(getattr(reviewer, "calls", 0) or 0)
+                           if reviewer is not None else 0)
+
     def requests_used() -> int:
-        used = int(getattr(coder, "calls", 0) or 0)
+        used = max(0, int(getattr(coder, "calls", 0) or 0) - base_coder_calls)
         if reviewer is not None:
-            used += int(getattr(reviewer, "calls", 0) or 0)
+            used += max(0, int(getattr(reviewer, "calls", 0) or 0) - base_reviewer_calls)
         return used
 
-    def budget_check(*, starting: bool) -> bool:
-        """False = da cham tran -> phai dung ngay, rollback (chua apply gi).
+    burst_logged = False
 
-        `starting=True` (dau vong): khong duoc BAT DAU khi da dung het tran.
-        `starting=False` (sau 1 lan goi): chi dung khi lan goi do da VUOT tran;
-        neu vua dung bang tran thi van phai apply ban sua vua verify duoc.
-        """
+    def log_budget_event(event_type: str, data: dict, status: str = "info") -> None:
+        if not log:
+            return
+        ledger.append_event(event_type, run_id=run_id,
+                            result={"status": status},
+                            data=data, root=root_path)
+
+    def budget_check(*, starting: bool) -> bool:
+        """Soft 8, hard 16. Wave duoc burst de chay du 4 reviewer."""
+        nonlocal burst_logged
         elapsed = time.perf_counter() - started
         used = requests_used()
         report["budget"]["requests_used"] = used
         report["budget"]["elapsed_s"] = round(elapsed, 2)
-        over_requests = used >= max_requests if starting else used > max_requests
+        if burst_allowed and used >= soft_cap:
+            report["budget"]["burst_used"] = True
+            if not burst_logged:
+                burst_logged = True
+                report["budget"]["burst_reason"] = "wave needs 4 reviewers"
+                log_budget_event("budget.soft_cap_reached", {
+                    "used": used, "soft_cap": soft_cap, "hard_cap": hard_cap,
+                    "task_id": work_order.task_id}, status="info")
+                log_budget_event("budget.burst_started", {
+                    "used": used, "soft_cap": soft_cap, "hard_cap": hard_cap,
+                    "task_id": work_order.task_id, "reason": "wave reviewers"},
+                    status="info")
+        over_requests = used >= hard_cap if starting else used > hard_cap
         if over_requests:
             report["budget"]["exceeded"] = "requests"
-            report["error"] = f"vuot tran chi phi: {used}/{max_requests} requests"
+            report["error"] = f"vuot tran chi phi: hard limit {hard_cap} reached: {used}/{hard_cap} requests"
+            log_budget_event("budget.hard_abort", {
+                "used": used, "hard_cap": hard_cap, "task_id": work_order.task_id,
+                "reason": report["error"]}, status="fail")
             return False
         if elapsed >= max_seconds:
             report["budget"]["exceeded"] = "time"
@@ -538,9 +578,16 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
             return False
         return True
 
-    # FallbackCoder tu kiem tra ngan sach truoc MOI lan doi model.
+    # Wave can 4 reviewer: giu 4 request cuoi cho ho, coder toi da 12/16.
+    reserved = 0
+    if reviewer is not None and getattr(reviewer, "kind", "") == "wave-reviewer":
+        reserved = min(len(getattr(reviewer, "roles", {}) or {}), hard_cap - 1)
+    coder_cap = max(1, hard_cap - reserved)
+    report["budget"]["reserved_reviewer"] = reserved
+    report["budget"]["coder_cap"] = coder_cap
+    # FallbackCoder/AgenticCoder/OpenCodeCoder deu ton trong limit_check nay.
     if hasattr(coder, "limit_check"):
-        coder.limit_check = lambda: requests_used() < max_requests
+        coder.limit_check = lambda: requests_used() < coder_cap
     # Wave reviewer can biet con bao nhieu request truoc khi bat 4 con song song.
     if reviewer is not None and hasattr(reviewer, "budget_left"):
         reviewer.budget_left = lambda: max(0, max_requests - requests_used())
@@ -592,6 +639,8 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
             return attempts[-1].get("model")
         return getattr(coder, "model", None)
 
+    failure_sigs: list[tuple] = []
+    coder_fail_sigs: list[tuple] = []
     for round_index in range(1, work_order.max_rounds + 1):
         # Tran chi phi/thoi gian: kiem tra TRUOC khi ton them request nao.
         if not budget_check(starting=True):
@@ -626,6 +675,16 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                         result={"status": "fail", "error": report["error"]},
                         data=dict(report["budget"]), root=root_path,
                     )
+                break
+            failure_sig = (getattr(exc, "kind", "error"), str(exc)[:160])
+            coder_fail_sigs.append(failure_sig)
+            if coder_fail_sigs.count(failure_sig) >= 2:
+                report["budget"]["exceeded"] = "loop"
+                report["error"] = "loop detected: coder repeated the same error"
+                log_budget_event("budget.hard_abort", {
+                    "used": requests_used(), "hard_cap": hard_cap,
+                    "task_id": work_order.task_id,
+                    "reason": report["error"]}, status="fail")
                 break
             feedback = _feedback("coder", str(exc)[:300], "", round_index)
             report["feedback"].append(feedback)
@@ -748,6 +807,17 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
             )
         report["draft_verify"] = {key: value for key, value in draft_verify.items()}
         if draft_verify["exit_code"] != 0:
+            signature = (str(draft_verify.get("error") or ""),
+                         tuple(draft_verify.get("output_tail") or [])[-2:])
+            failure_sigs.append(signature)
+            if failure_sigs.count(signature) >= 2:
+                report["budget"]["exceeded"] = "loop"
+                report["error"] = "loop detected: same verify failure repeated twice"
+                log_budget_event("budget.hard_abort", {
+                    "used": requests_used(), "hard_cap": hard_cap,
+                    "task_id": work_order.task_id,
+                    "reason": "same verify failure repeated"}, status="fail")
+                break
             feedback = _feedback(
                 f"verify-ban-nhap ({draft_verify['mode']})",
                 str(draft_verify.get("error") or "verify that bai"),
@@ -797,6 +867,14 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                     level=work_order.level, sink=sink,
                 )
             report["review"] = dict(review)
+            report["reviewer_fallback"] = bool(review.get("fallback_reason"))
+            if report["reviewer_fallback"]:
+                report["budget"]["burst_used"] = True
+                log_budget_event("budget.fallback_heuristic", {
+                    "task_id": work_order.task_id,
+                    "used": requests_used(),
+                    "reason": review.get("fallback_reason"),
+                    "skipped": review.get("skipped") or []}, status="info")
             if review.get("verdict") != "approve":
                 feedback = _feedback(
                     "reviewer", "bi tu choi", "; ".join(review.get("reasons") or [])[:400],
@@ -909,9 +987,22 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         report["final_sha256"] = report["files"][0]["final_sha256"]
         report["file_changed"] = any(item["changed"] for item in report["files"])
     report["duration_ms"] = int((time.perf_counter() - started) * 1000)
-    report["coder_calls"] = getattr(coder, "calls", 0)
-    report["reviewer_calls"] = getattr(reviewer, "calls", 0) if reviewer else 0
+    report["coder_calls"] = max(0, int(getattr(coder, "calls", 0) or 0) - base_coder_calls)
+    report["reviewer_calls"] = (max(0, int(getattr(reviewer, "calls", 0) or 0)
+                                    - base_reviewer_calls) if reviewer else 0)
     report["requests"] = report["coder_calls"] + report["reviewer_calls"]
+    if burst_allowed and report["requests"] > soft_cap:
+        report["budget"]["burst_used"] = True
+        if not burst_logged:
+            burst_logged = True
+            report["budget"]["burst_reason"] = "wave needs 4 reviewers"
+            log_budget_event("budget.soft_cap_reached", {
+                "used": report["requests"], "soft_cap": soft_cap,
+                "hard_cap": hard_cap, "task_id": work_order.task_id}, status="info")
+            log_budget_event("budget.burst_started", {
+                "used": report["requests"], "soft_cap": soft_cap,
+                "hard_cap": hard_cap, "task_id": work_order.task_id,
+                "reason": "wave reviewers"}, status="info")
     report["budget"]["requests_used"] = report["requests"]
     report["budget"]["elapsed_s"] = round((time.perf_counter() - started), 2)
 
@@ -975,6 +1066,10 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                   "models": report["fallback"]["models"],
                   "budget_exceeded": report["budget"]["exceeded"],
                   "secrets_blocked": len(blocked),
+                  "reviewer_fallback": bool(report.get("reviewer_fallback")),
+                  "reviewer_skipped": (report.get("review") or {}).get("skipped") or [],
+                  "budget": dict(report["budget"]),
+                  "burst": bool(report["budget"].get("burst_used")),
                   "plan_ok": report["plan_ok"]},
             root=root_path,
         )
@@ -1001,7 +1096,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-fallback", action="store_true",
                         help="tat chuoi du phong, ep dung 1 model")
     parser.add_argument("--max-requests", type=int, default=None,
-                        help=f"tran request moi run (toi da {BUDGET_MAX_REQUESTS}, chi ha duoc)")
+                        help=f"hard cap request moi run (toi da {BUDGET_MAX_REQUESTS}; wave co soft 8)")
     parser.add_argument("--max-seconds", type=int, default=None,
                         help=f"tran thoi gian moi run (toi da {BUDGET_MAX_SECONDS}s, chi ha duoc)")
     parser.add_argument("--route", action="store_true",

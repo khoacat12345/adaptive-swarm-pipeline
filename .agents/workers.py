@@ -315,6 +315,8 @@ class Coder:
         self.usage: dict = {}
         # Kinh nghiem tu memory.py (Phase 4), recipe tu gan truoc khi chay.
         self.hints: list[str] = []
+        # recipe co the dat tran rieng de giu request cho reviewer wave.
+        self.limit_check = None
 
     def bind_workspace(self, project_root, sandbox=None) -> None:
         """Cho worker biet du an that va thu muc tam duoc phep lam viec."""
@@ -430,6 +432,8 @@ class OpenCodeCoder(Coder):
 
     def patch(self, work_order, *, current_content: str, feedback: str | None,
               round_index: int) -> dict:
+        if self.limit_check is not None and not self.limit_check():
+            raise WorkerError("coder request budget reserved for reviewers", kind="budget")
         self.calls += 1
         content = current_content
         if len(content) > self.max_content_chars:
@@ -438,6 +442,10 @@ class OpenCodeCoder(Coder):
             current_file=work_order.target_files[0] if work_order.target_files else "",
             content=content, feedback=feedback,
         )
+        prompt += ("\n\nQUY TAC OUTPUT BAT BUOC: chi tra ve DUY NHAT mot object JSON hop le, "
+                   "khong markdown, khong giai thich, khong text thua. "
+                   "Dung {\"format\":\"whole\",\"content\":\"<toan bo file moi>\"} "
+                   "hoac {\"format\":\"replace\",\"edits\":[{\"search\":\"...\",\"replace\":\"...\"}]}.")
         prompt += self._hints_block()
         prompt, _findings = secret_scan.scan_text(prompt, filename="prompt")
         try:
@@ -468,9 +476,9 @@ AGENTIC_PROMPT = (
     "TIEU CHI NGHIEM THU: {criteria}\n"
     "Lenh verify: {verify}\n"
     "\n"
-    "Hay sua truc tiep noi dung file. Ban duoc phep chay lenh verify de tu kiem tra.\n"
+    "Hay sua truc tiep noi dung file. KHONG can chay lenh verify; he thong se tu verify sau do.\n"
     "Chi sua file tren; khong tao file moi, khong sua file test.\n"
-    "Khi xong, tra loi ngan gon (1-3 cau).\n"
+    "Toi da 2 tool call: doc file neu can, roi sua file. Khi xong, tra loi ngan gon (1-3 cau).\n"
 )
 
 # Level 3: mot lan goi model, sua NHIEU file trong cung thu muc tam. Cac file
@@ -485,10 +493,10 @@ AGENTIC_PROMPT_MULTI = (
     "TIEU CHI NGHIEM THU: {criteria}\n"
     "Lenh verify (chay cho CA du an): {verify}\n"
     "\n"
-    "Hay sua truc tiep noi dung cac file. Ban duoc phep chay lenh verify de tu kiem tra.\n"
+    "Hay sua truc tiep noi dung cac file. KHONG can chay lenh verify; he thong se tu verify sau do.\n"
     "Chi sua cac file liet ke tren; khong tao file moi, khong sua file test.\n"
     "Neu mot file khong can doi, hay de nguyen (he thong giu ban goc).\n"
-    "Khi xong, tra loi ngan gon (1-3 cau).\n"
+    "Toi da 2 tool call: doc file neu can, roi sua file. Khi xong, tra loi ngan gon (1-3 cau).\n"
 )
 
 
@@ -621,6 +629,8 @@ class AgenticCoder(Coder):
 
     def _patch_files(self, work_order, files: dict, *, feedback: str | None,
                      round_index: int) -> dict:
+        if self.limit_check is not None and not self.limit_check():
+            raise WorkerError("coder request budget reserved for reviewers", kind="budget")
         self.calls += 1
         if not self.cwd:
             raise WorkerError("chua bind_workspace -> khong co thu muc tam", kind="config")
@@ -1098,7 +1108,8 @@ class WaveReviewer(Reviewer):
     """4 reviewer chay SONG SONG, chi doc; tong hop thanh 1 ket luan.
 
     `budget_left()` (tuy chon) tra so request con lai; wave chi chay toi da
-    so do, phan con lai ghi vao `skipped` - khong bao gio vuot tran 8.
+    so do. Neu khong du ca 4 role, wave fallback heuristic 0 request thay vi
+    reject oan; hard cap cua recipe la 16.
     """
 
     kind = "wave-reviewer"
@@ -1125,11 +1136,18 @@ class WaveReviewer(Reviewer):
         reviewers = reviewers[:allowed]
         skipped = all_roles[len(reviewers):]
 
-        if not reviewers:
-            findings = {"verdict": "reject", "level": work_order.level,
-                        "task_id": work_order.task_id,
-                        "reasons": ["no reviewer budget left"], "reviewer": self.name,
-                        "per_role": [], "skipped": skipped}
+        if len(reviewers) < len(all_roles):
+            # Graceful degradation: khong du ca 4 reviewer -> dung heuristic 0
+            # request de khong reject oan mot ban da verify exit 0.
+            fallback = HeuristicReviewer()
+            findings = getattr(fallback, method)(work_order, **kwargs)
+            findings.update({
+                "reviewer": self.name + ":heuristic-fallback",
+                "fallback_reason": "wave budget exhausted",
+                "skipped": all_roles,
+                "per_role": [],
+                "budget_skipped": True,
+            })
             sink = kwargs.get("sink")
             if sink is not None:
                 sink.write(findings)

@@ -447,13 +447,16 @@ _RUN_PROC: subprocess.Popen | None = None
 
 
 def start_run(root, *, token: str, reviewer: str = "heuristic",
-              model: str | None = None) -> dict:
+              model: str | None = None, coder: str = "agentic") -> dict:
     """Start the already-approved plan in a background process."""
     global _RUN_PROC
     _require_token(root, token)
     reviewer = str(reviewer or "heuristic").lower()
     if reviewer not in ("heuristic", "wave", "none"):
         raise ValueError("reviewer phai la heuristic, wave hoac none")
+    coder = str(coder or "agentic").lower()
+    if coder not in ("agentic", "opencode"):
+        raise ValueError("coder phai la agentic hoac opencode")
     with _RUN_LOCK:
         if _RUN_PROC is not None and _RUN_PROC.poll() is None:
             raise ValueError("a job is already running")
@@ -473,7 +476,8 @@ def start_run(root, *, token: str, reviewer: str = "heuristic",
         out_dir.mkdir(parents=True, exist_ok=True)
         log_path = out_dir / ("run_" + time.strftime("%Y%m%d-%H%M%S") + ".log")
         cmd = [sys.executable, str(Path(__file__).resolve()), "--resume",
-               "--root", str(Path(root).resolve()), "--reviewer", reviewer]
+               "--root", str(Path(root).resolve()), "--reviewer", reviewer,
+               "--coder", coder]
         if model:
             cmd += ["--model", str(model)]
         creationflags = 0x08000000 if os.name == "nt" else 0
@@ -512,7 +516,9 @@ def ensure_dashboard(root, port: int):
 # --------------------------------------------------------------------------
 # Chay job
 # --------------------------------------------------------------------------
-def _default_coder(chain: list[str]):
+def _default_coder(chain: list[str], coder_kind: str = "agentic"):
+    if coder_kind == "opencode":
+        return workers.OpenCodeCoder(chain[0])
     import fallback
     if len(chain) <= 1:
         return workers.AgenticCoder(chain[0])
@@ -525,7 +531,8 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             verify_timeout: int | None = None, log: bool = True,
             use_router: bool = True, allow_escalate: bool = False,
             force: bool = False, dry_run: bool = False,
-            reviewer_kind: str = "heuristic", model: str | None = None) -> dict:
+            reviewer_kind: str = "heuristic", model: str | None = None,
+            coder_kind: str = "agentic") -> dict:
     problems = validate_plan(plan)
     if problems:
         raise ValueError("plan khong hop le: " + "; ".join(problems[:8]))
@@ -597,7 +604,7 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
 
         chain = [model] if model else (route_plan["chain"] if route_plan else [])
         coder = (coder_factory(order, chain) if coder_factory
-                 else _default_coder(chain))
+                 else _default_coder(chain, coder_kind))
         sub_started = time.perf_counter()
         try:
             report = recipe_c.run(order, coder=coder, reviewer=review,
@@ -622,9 +629,14 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
         entry = records[-1]
         team = state.get("team") or {}
         if chain:
+            review_info = report.get("review") or {}
+            reviewer_name = review_info.get("reviewer") or getattr(review, "kind", "reviewer")
+            if review_info.get("fallback_reason"):
+                reviewer_name = "heuristic-fallback"
             team = {"coder": chain[0],
                     "fallback": chain[1] if len(chain) > 1 else None,
-                    "reviewer": getattr(review, "kind", "reviewer"),
+                    "reviewer": reviewer_name,
+                    "reviewer_fallback": bool(review_info.get("fallback_reason")),
                     "verify": order.verify_command}
         subtasks_state = [dict(sub) for sub in state.get("subtasks", [])]
         for sub in subtasks_state:
@@ -679,6 +691,9 @@ def main(argv=None) -> int:
     parser.add_argument("--allow-escalate", action="store_true")
     parser.add_argument("--reviewer", default="heuristic",
                         choices=("heuristic", "wave", "none"))
+    parser.add_argument("--coder", default="agentic",
+                        choices=("agentic", "opencode"),
+                        help="agentic = multi-turn tool loop; opencode = one-shot patch")
     parser.add_argument("--model", default=None,
                         help="override the coder model (useful for free dry-runs)")
     parser.add_argument("--force", action="store_true")
@@ -743,7 +758,8 @@ def main(argv=None) -> int:
 
         report = run_job(plan, root=args.root, allow_escalate=args.allow_escalate,
                          force=args.force, dry_run=args.dry_run,
-                         reviewer_kind=args.reviewer, model=args.model)
+                         reviewer_kind=args.reviewer, model=args.model,
+                         coder_kind=args.coder)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:

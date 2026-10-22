@@ -423,7 +423,8 @@ def make_handler(root: Path, ledger: Path):
                         result = job_module.start_run(
                             root, token=str(payload.get("token") or ""),
                             reviewer=str(payload.get("reviewer") or "heuristic"),
-                            model=payload.get("model") or None)
+                            model=payload.get("model") or None,
+                            coder=str(payload.get("coder") or "agentic"))
                     except PermissionError as exc:
                         self._json({"error": str(exc)}, 403)
                         return

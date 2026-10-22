@@ -46,6 +46,19 @@ class Checks:
         return self.total - len(self.failures)
 
 
+class CountingCoder(workers.Coder):
+    """Fake coder that reports N model calls, to test burst/hard cap."""
+
+    def __init__(self, calls: int, content: str) -> None:
+        super().__init__()
+        self.target_calls = calls
+        self.content = content
+
+    def patch(self, work_order, *, current_content, feedback, round_index):
+        self.calls = self.target_calls
+        return {"format": "whole", "content": self.content}
+
+
 class Fake(workers.Reviewer):
     def __init__(self, role: str, verdict: str, *, delay: float = 0.0,
                  boom: bool = False) -> None:
@@ -122,15 +135,19 @@ def test_budget(checks: Checks) -> None:
     wave.budget_left = lambda: 2
     result = wave.review(make_order(), diff="+x", new_content="x", old_content="",
                          level=2, sink=None)
-    checks.check("wave: budget 2 -> chay 2", len(result["per_role"]) == 2, result)
-    checks.check("wave: budget 2 -> skip 2", len(result["skipped"]) == 2, result)
-    checks.check("wave: calls = 2", wave.calls == 2, wave.calls)
+    checks.check("wave: budget 2 -> heuristic fallback",
+                 result["verdict"] == "approve" and result.get("fallback_reason"), result)
+    checks.check("wave: budget 2 -> skip ca 4", len(result["skipped"]) == 4, result)
+    checks.check("wave: calls = 0", wave.calls == 0, wave.calls)
 
     wave = make_wave(roles)
     wave.budget_left = lambda: 0
     result = wave.review(make_order(), diff="+x", new_content="x", old_content="",
                          level=2, sink=None)
-    checks.check("wave: budget 0 -> reject", result["verdict"] == "reject", result)
+    checks.check("wave: budget 0 -> heuristic fallback",
+                 result["verdict"] == "approve" and result.get("fallback_reason"),
+                 result)
+    checks.check("wave: budget 0 -> skip 4", len(result["skipped"]) == 4, result)
     checks.check("wave: budget 0 -> khong goi", wave.calls == 0, wave.calls)
 
     wave = make_wave(roles)
@@ -181,6 +198,63 @@ def test_recipe_integration(checks: Checks) -> None:
                  report.get("review"))
 
 
+def test_recipe_budget_fallback(checks: Checks) -> None:
+    root = TEMP_ROOT / "budget-fallback"
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    (root / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    (root / "check.py").write_text(
+        "from calc import add\nassert add(2, 3) == 5\nprint('OK')\n", encoding="utf-8")
+    script = {"W1": [{"format": "whole", "content": "def add(a, b):\n    return a + b\n"}]}
+    roles = {role: "approve" for role in ("security", "qa", "perf", "docs")}
+    report = recipe_c.run(make_order(), coder=workers.ScriptedCoder(script),
+                          reviewer=make_wave(roles), root=root,
+                          run_id="wave-budget-1", log=False, max_requests=1)
+    checks.check("wave-budget: verify van apply", report["status"] == "applied",
+                 report["status"])
+    checks.check("wave-budget: heuristic fallback",
+                 bool((report.get("review") or {}).get("fallback_reason")), report.get("review"))
+    checks.check("wave-budget: reviewer 0 request", report["reviewer_calls"] == 0,
+                 report["reviewer_calls"])
+
+
+def test_burst(checks: Checks) -> None:
+    roles = {role: "approve" for role in ("security", "qa", "perf", "docs")}
+    fixed = "def add(a, b):\n    return a + b\n"
+
+    root = TEMP_ROOT / "burst-ok"
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    (root / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    (root / "check.py").write_text(
+        "from calc import add\nassert add(2, 3) == 5\nprint('OK')\n", encoding="utf-8")
+    report = recipe_c.run(make_order(), coder=CountingCoder(10, fixed),
+                          reviewer=make_wave(roles), root=root,
+                          run_id="wave-burst-ok", log=False)
+    checks.check("burst: 10 coder + 4 reviewer -> applied",
+                 report["status"] == "applied", report["status"])
+    checks.check("burst: du 4 reviewer", report["reviewer_calls"] == 4,
+                 report["reviewer_calls"])
+    checks.check("burst: 14 request + burst flag",
+                 report["requests"] == 14 and report["budget"].get("burst_used"),
+                 report["budget"])
+
+    root = TEMP_ROOT / "burst-hard"
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    (root / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    (root / "check.py").write_text(
+        "from calc import add\nassert add(2, 3) == 5\nprint('OK')\n", encoding="utf-8")
+    report = recipe_c.run(make_order(), coder=CountingCoder(20, fixed),
+                          reviewer=make_wave(roles), root=root,
+                          run_id="wave-burst-hard", log=False)
+    checks.check("burst: 20 coder -> hard abort",
+                 report["status"] == "aborted"
+                 and report["budget"].get("exceeded") == "requests", report["budget"])
+    checks.check("burst: error hard limit 16",
+                 "hard limit 16" in (report.get("error") or ""), report.get("error"))
+
+
 def test_sink(checks: Checks) -> None:
     import json
     import permissions
@@ -218,19 +292,23 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     checks = Checks()
-    print("[1/7] aggregate ...")
+    print("[1/9] aggregate ...")
     test_aggregate(checks)
-    print("[2/7] budget ...")
+    print("[2/9] budget ...")
     test_budget(checks)
-    print("[3/7] parallel ...")
+    print("[3/9] parallel ...")
     test_parallel(checks)
-    print("[4/7] review_set ...")
+    print("[4/9] review_set ...")
     test_review_set(checks)
-    print("[5/7] recipe integration ...")
+    print("[5/9] recipe integration ...")
     test_recipe_integration(checks)
-    print("[6/7] ledger findings ...")
+    print("[6/9] recipe budget fallback ...")
+    test_recipe_budget_fallback(checks)
+    print("[7/9] burst 8->16 ...")
+    test_burst(checks)
+    print("[8/9] ledger findings ...")
     test_sink(checks)
-    print("[7/7] khong hoi quy ...")
+    print("[9/9] khong hoi quy ...")
     test_no_regression(checks, fast=args.fast)
 
     print("")

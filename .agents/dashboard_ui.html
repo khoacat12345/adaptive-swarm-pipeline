@@ -3128,7 +3128,7 @@
       if (maxLevel >= 3) risks.push(['warn', 'Level 3 transaction',
         'All target files are backed up and roll back together. One bad file stops the whole batch.']);
       if (rounds > subs.length) risks.push(['warn', 'Retry budget',
-        rounds + ' rounds across ' + subs.length + ' subtask(s); the hard cap is 8 requests per run.']);
+        rounds + ' rounds across ' + subs.length + ' subtask(s); soft cap 8, hard cap 16 (wave burst).']);
       if (!approved) risks.push(['warn', 'Approval gate is ' + (decision.status || 'pending'),
         'Nothing is written before approval. Review the plan, then approve it.']);
       const freeChain = (route.chain || []).filter((model) => String(model).includes('-free'));
@@ -3189,7 +3189,7 @@
     ${statCard('Files', files.length, shared.length + ' shared')}
     ${statCard('Verify', (subs.length - missingVerify.length) + '/' + subs.length, 'machine commands')}
     ${statCard('Max level', maxLevel || '-', maxLevel >= 3 ? 'multi-file atomic' : maxLevel <= 1 ? 'single file' : 'standard write')}
-    ${statCard('Rounds', rounds, 'hard cap 8 requests')}
+    ${statCard('Rounds', rounds, 'soft 8 / hard 16 requests')}
     ${statCard('Phase', phase, 'approval: ' + (decision.status || 'pending'))}
   </div>
 
@@ -3545,8 +3545,9 @@
         : 'No route decided yet';
       const displayPhase = idx != null ? 'replay' : phase;
       const requestsUsed = Number((state.run && state.run.run && state.run.run.requests) || 0);
-      const budgetPct = Math.min(100, requestsUsed / 8 * 100);
-      const budgetCls = requestsUsed >= 8 ? 'bad' : requestsUsed >= 6 ? 'warn' : '';
+      const hardCap = (data.wave_active || requestsUsed > 8) ? 16 : 8;
+      const budgetPct = Math.min(100, requestsUsed / hardCap * 100);
+      const budgetCls = requestsUsed >= hardCap ? 'bad' : requestsUsed >= 8 ? 'warn' : '';
       const lastAge = activeEvent && activeEvent.timestamp
         ? Math.max(0, Math.round((Date.now() - new Date(activeEvent.timestamp).getTime()) / 1000)) : null;
       const stale = ['running', 'paused'].includes(phase) && lastAge != null && lastAge > 30;
@@ -3567,8 +3568,13 @@
 
   ${['approved', 'stopped'].includes(phase) ? `<div class="card" style="margin-bottom:12px;border-color:#0b6d96;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
     <div><b>Ready to run</b>
-      <div class="muted" style="font-size:11px">The plan is ${esc(phase)}. Pick the reviewer mode and start the job; progress appears here within a few seconds.</div></div>
+      <div class="muted" style="font-size:11px">The plan is ${esc(phase)}. Pick reviewer/coder mode and start the job; progress appears here within a few seconds.</div></div>
     <div class="row">
+      <select id="runCoder" class="btn ghost" style="padding:7px 8px"
+        title="agentic uses a multi-turn tool loop; opencode uses one-shot patch (fewer requests)">
+        <option value="agentic" selected>agentic</option>
+        <option value="opencode">opencode one-shot</option>
+      </select>
       <select id="runReviewer" class="btn ghost" style="padding:7px 8px"
         title="Default heuristic costs 0 reviewer requests; wave calls 4 reviewer models">
         <option value="heuristic" selected>heuristic · 0 reviewers / $0</option>
@@ -3621,7 +3627,8 @@
         <div class="k">Last wave</div><div>${data.last_wave
           ? esc((data.last_wave.verdict || 'done') + ' · ' + (data.last_wave.at || ''))
           : 'no wave review yet'}</div>
-        <div class="k">Budget</div><div>${requestsUsed}/8 requests
+        <div class="k">Budget</div><div>${requestsUsed}/${hardCap} requests
+          ${requestsUsed > 8 ? '<span class="chip warn">Burst</span>' : ''}
           <div class="hbar2" style="margin-top:4px"><i class="${budgetCls}" style="width:${budgetPct}%"></i></div></div>
       </div></div>
     <div class="card"><h2>Live feed</h2>
@@ -3694,7 +3701,8 @@
         last.rolled_back ? ['bad', 'rolled back'] : null,
         last.budget_exceeded ? ['warn', 'budget hit'] : null,
         last.secrets_blocked ? ['bad', 'secrets blocked'] : null,
-        last.plan_ok === false ? ['bad', 'plan not ok'] : null
+        last.plan_ok === false ? ['bad', 'plan not ok'] : null,
+        last.reviewer_fallback ? ['warn', 'heuristic fallback'] : null
       ].filter(Boolean);
       box.innerHTML = `<div class="hero">
     <div><div class="eyebrow">Verify · machine contract</div>
@@ -3719,7 +3727,7 @@
     ${statCard('Commands', subs.length - missing + '/' + subs.length, 'machine checked')}
     ${statCard('Run status', run.status || phase, 'from the ledger')}
     ${statCard('Exit evidence', evidence.length, 'ledger events')}
-    ${statCard('Budget', requestsUsed + '/8', 'requests used')}
+    ${statCard('Budget', requestsUsed + (requestsUsed > 8 ? '/16 (Burst)' : '/8'), 'requests used')}
     ${statCard('Verify time', run.duration_ms ? fmtDuration(run.duration_ms) : '-', 'whole run')}
   </div>
 
@@ -3807,7 +3815,8 @@
         last.rolled_back ? ['bad', 'rolled back'] : null,
         last.budget_exceeded ? ['warn', 'budget hit'] : null,
         last.secrets_blocked ? ['bad', 'secrets blocked'] : null,
-        last.fallback_attempts ? ['warn', last.fallback_attempts + ' fallback'] : null
+        last.fallback_attempts ? ['warn', last.fallback_attempts + ' fallback'] : null,
+        last.reviewer_fallback ? ['warn', 'heuristic fallback'] : null
       ].filter(Boolean);
       const source = plan._source || '.agents/tmp/plan.json';
       const command = 'python .agents/job.py --plan ' + source + ' --wait --open';
@@ -4089,6 +4098,7 @@
       if (d.files) rows.push(`<div><b>Files</b> <span class="mono">${esc([].concat(d.files).join(', '))}</span></div>`);
       if (d.verdict) rows.push(`<div><b>Verdict</b> ${esc(d.verdict)}</div>`);
       if (d.error) rows.push(`<div><b>Error</b> <span class="mono">${esc(d.error)}</span></div>`);
+      if (d.fallback_reason) rows.push(`<div><b>Reviewer fallback</b> wave skipped: ${esc(d.fallback_reason)}</div>`);
       if (d.reasons && !message.extra) {
         rows.push(`<div><b>Reasons</b><pre>${esc([].concat(d.reasons).join('\n'))}</pre></div>`);
       }
@@ -4437,16 +4447,19 @@
       }
       const select = $('#runReviewer');
       const reviewer = select ? select.value : 'heuristic';
+      const coderSelect = $('#runCoder');
+      const coder = coderSelect ? coderSelect.value : 'agentic';
       if (button) { button.disabled = true; button.textContent = 'Starting...'; }
       try {
         const data = await api('/api/run', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: authToken(), reviewer })
+          body: JSON.stringify({ token: authToken(), reviewer, coder })
         });
         toast('Run started · pid ' + data.pid + ' · ' + reviewer);
         state.pageSig = {};
         await refreshAll();
-        if (state.view !== 'warroom') switchView('warroom');
+        setOverviewTab('warroom');
+        if (state.view !== 'overview') switchView('overview');
       } catch (error) {
         toast(error.message === 'token khong dung'
           ? 'Control token expired. Open the fresh dashboard link from job.py --open.'

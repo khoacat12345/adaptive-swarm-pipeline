@@ -941,7 +941,7 @@ python .agents/plan_validator.py --plan plan.json
 - Tu vong 3: **cat phien**, copy lai tu ban goc + brief ngan
   (`PHIEN MOI` + draft gan nhat + loi chua xu ly) de chong phinh context va ao giac.
 - `MAX_ROUNDS_HARD_CAP` nang 2 -> 4 de quy tac nay co hieu luc; **mac dinh Work
-  Order van la 2**, va tran 8 request van chan truoc.
+  Order van la 2**, va tran 8 request (hard 16 khi wave) van chan truoc.
 - Moi vong ghi `session_events` (`fresh | resume`, `context_reset`) vao report.
 
 ### 4. Secret Scanner (3.5) — `secret_scan.py`
@@ -973,11 +973,17 @@ request nao truoc khi du ro.
 
 ### 6. Budget cap (3.7) — trong `recipe_c.run`
 
-- Tran cung moi run: **8 request** va **300 giay**. Hai co `--max-requests` /
-  `--max-seconds` chi de **ha xuong**, khong the nang (tran la tuyet doi).
+- **Soft cap 8 / hard cap 16** request va **300 giay** moi run. Wave reviewer duoc
+  burst 9-12 de chay du 4 reviewer (Security, QA, Perf, Docs) ngay ca khi test da pass.
+- Chi **1 lan burst / subtask**; cham **16 = hard abort** ngay, ghi `budget.hard_abort`.
+  Coder bi giu toi da 12 request (reserve 4 cho reviewer).
+- Circuit breaker: verify fail lap lai cung mot loi -> dung ngay, khong cho cham 16.
+- Hai co `--max-requests` / `--max-seconds` chi de **ha xuong**, khong the nang.
 - Kiem tra **truoc moi vong** va **sau moi lan coder** (vi mot lan fallback co the
-  dot nhieu request). Cham tran -> dung ngay, ghi `budget.exceeded`, file goc
-  khong doi (chua apply gi).
+  dot nhieu request). Cham tran -> dung ngay, ghi `budget.exceeded` + `budget.hard_abort`,
+  file goc khong doi (chua apply gi).
+- Ledger ghi `budget.soft_cap_reached`, `budget.burst_started`,
+  `budget.fallback_heuristic`, `budget.hard_abort`.
 - `fallback.py` nhan `limit_check` tu recipe nen khong the "vuot tran bang
   cach doi model".
 
@@ -1240,7 +1246,7 @@ smoke suite 10 task: **10/10 PASS, apply fail 0%, 53/53 engine check**.
 dong, <=6 node, <=2 nhanh, verify_command bat buoc, omitted phai co reason),
 session policy (2 vong giu phien, vong 3+ mo moi + brief), secret scanner
 (chan file nhay cam / redact prompt, khong ghi secret vao ledger), clarify gate
-(1 lan hoi), tran cung 8 request + 300 giay, cost report tu ledger; nghiem thu
+(1 lan hoi), soft cap 8 / hard cap 16 + burst wave + 300 giay, cost report tu ledger; nghiem thu
 **55/55 PASS** (gom 1 lan goi model that de thu fallback), smoke suite van 53/53.
 **Phase 4 — da lam:** schema ledger v1.0.0 (normalize event cu, giu truong la), replay
 CLI (timeline mau, 0 request), dashboard 3 cot bang `http.server`, memory engine

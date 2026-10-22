@@ -164,6 +164,8 @@ def build(root, ledger) -> dict:
             "secrets_blocked": int(done_data.get("secrets_blocked") or 0),
             "plan_ok": done_data.get("plan_ok"),
             "fallback_attempts": int(done_data.get("fallback_attempts") or 0),
+            "reviewer_fallback": bool(done_data.get("reviewer_fallback")),
+            "reviewer_skipped": done_data.get("reviewer_skipped") or [],
         } if done_event else None,
         "plan_job": plan.get("job_id"),
         "plan_file": (plan_state.get("plan") or {}).get("_source"),

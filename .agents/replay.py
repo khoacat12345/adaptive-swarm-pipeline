@@ -123,6 +123,8 @@ def _message(event: dict, norm: dict) -> str:
         return f"verify ban nhap ({data.get('mode', '?')}) exit={code}"
     if kind == "reviewer.findings":
         verdict = data.get("verdict") or norm["status"]
+        if data.get("fallback_reason"):
+            return f"wave fallback heuristic ({verdict}) - review budget exhausted"
         per_role = data.get("per_role") or []
         if per_role:
             roles = ", ".join(
@@ -244,6 +246,7 @@ _PUBLIC_DETAIL_KEYS = (
     "plan_ok", "chain", "work_type", "label", "main", "escalate", "degraded",
     "why", "model", "path", "bytes_written", "atomic", "sha256", "output_tail",
     "transaction", "history", "warnings", "nodes", "problems", "hints",
+    "fallback_reason", "budget_skipped", "reviewer_fallback", "reviewer_skipped",
 )
 
 

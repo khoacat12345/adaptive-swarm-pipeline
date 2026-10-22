@@ -184,6 +184,14 @@ def test_approval(checks: Checks) -> None:
     checks.check("run: chua approve bi chan", blocked)
     checks.check("run: mac dinh heuristic",
                  inspect.signature(job.start_run).parameters["reviewer"].default == "heuristic")
+    checks.check("run: mac dinh agentic",
+                 inspect.signature(job.start_run).parameters["coder"].default == "agentic")
+    try:
+        job.start_run(root, token="tok123", coder="bad")
+        blocked = False
+    except ValueError:
+        blocked = True
+    checks.check("run: coder la bi chan", blocked)
     checks.check("approval: decision pending",
                  job.read_plan_state(root)["decision"]["status"] == "pending")
     checks.check("approval: khong lo token trong state",
