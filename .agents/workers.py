@@ -1057,9 +1057,14 @@ class RoleReviewer(Reviewer):
         return (
             f"Ban la reviewer {self.role.upper()}, quyen READ-ONLY.\n"
             f"Chi tap trung: {focus}.\n"
+            "BAN DANG O MOT THU MUC TAM RONG. Chi duoc danh gia diff + tieu chi ben duoi.\n"
+            "KHONG duoc ket luan reject chi vi khong thay file/repo trong cwd; file that\n"
+            "do Lead va verify quan ly. Dung git/ls de tim repo trong cwd la sai.\n"
             "Chi bao loi THAT, co bang chung trong diff. Khong binh luan style.\n"
             f"MUC TIEU: {work_order.objective}\n"
             f"TIEU CHI: {work_order.acceptance_criteria}\n"
+            f"VERIFY: {work_order.verify_command}\n"
+            f"FILES: {', '.join(work_order.target_files or [])}\n"
             f"```diff\n{diff[:20000]}\n```\n"
             'Tra ve JSON: {"verdict":"approve"|"reject","reasons":["..."]}'
         )
