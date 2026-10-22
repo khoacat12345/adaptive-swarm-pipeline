@@ -571,12 +571,13 @@ Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objec
   khong bar chart. **Plan** dai: phase theo dependency wave, key points + chi tiet
   gap/mo, link `Open full plan (.md)` + `Download`. **Chat** kieu chatbox: Lead ben
   phai, tat ca vai khac ben trai, avatar SVG, tach tung reviewer thanh bubble rieng.
-- **4 stage pages** (deep link): `#plan` (intelligence + phases + approval),
-  `#warroom` (Lead + 5 agents: Coder, Security, QA, Perf, Docs; orange = running,
-  blue = next, green = approved, gray = idle/standby), `#verify` (machine contract +
-  ledger evidence), `#report` (files, duration, tokens, reproduce command; `#done` alias). `#analyze`
-  redirects to `#plan`. War room co replay slider (0 request) va canh bao `heuristic`
-  (reviewer khong duoc goi).
+- **Sidebar dung 7 muc**: Overview, Plan, Chat, Workspaces, Usage, Drafts, Settings.
+  **Overview** la dashboard tong hop: Plan snapshot, Flow `Plan -> Code -> Review ->
+  Verify -> Report`, va 3 sub-tab **War room / Verify / Report** (graph 5 agent + replay,
+  gate exit code, file/duration). Deep link `#warroom`, `#verify`, `#report` mo dung
+  sub-tab trong Overview, khong co trang rieng. **Plan** la trang doc lap: dependency
+  phases, key points, chi tiet gap/mo, file `.md`. War room co replay slider (0 request)
+  va canh bao `heuristic` (reviewer khong duoc goi).
 - `GET /api/plan/md` tra plan day du dang Markdown (`.agents/tmp/plans/<job>.md`),
   `?download=1` de tai.
 - `GET /api/team` tra 5 agent + route + wave verdict + model health (read-only).

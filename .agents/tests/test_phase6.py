@@ -360,9 +360,11 @@ def test_dashboard_api(checks: Checks) -> None:
             html = response.read().decode("utf-8")
         checks.check("dashboard: HTML co view plan", 'id="view-plan"' in html
                      and 'id="nav"' in html)
-        checks.check("dashboard: 4 stage pages",
+        checks.check("dashboard: 7 sidebar views + integrated overview",
                      all(f'id="view-{name}"' in html for name in
-                         ("plan", "warroom", "verify", "done")), html[:200])
+                         ("overview", "plan", "chat", "workspaces", "quota", "drafts", "settings"))
+                     and all(f'id="{name}"' in html for name in
+                             ("overviewTabs", "warBody", "verifyBody", "doneBody")), html[:200])
 
         with urllib.request.urlopen(base + "/api/job", timeout=5) as response:
             job_data = json.loads(response.read().decode("utf-8"))

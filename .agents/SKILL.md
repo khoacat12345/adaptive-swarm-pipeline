@@ -69,10 +69,11 @@ python .agents/cost_report.py                # token / request / fallback
 python .agents/memory.py                     # loi hay gap + goi y
 ```
 
-Dashboard: `http://127.0.0.1:8080/` (sidebar run history | chat da agent | diff &
-inspector). 4 stage pages: `#plan` (intelligence + dependency phases + subtasks),
-`#warroom`, `#verify`, `#report`. `#analyze` redirect to `#plan`, `#done` alias to `#report`. Chat la chatbox:
-Lead ben phai, cac vai khac ben trai. Full plan `.md` tai `/api/plan/md`.
+Dashboard: `http://127.0.0.1:8080/` (sidebar 7 muc: Overview, Plan, Chat, Workspaces,
+Usage, Drafts, Settings). Overview tong hop: Plan snapshot + Flow 5 buoc + 3 sub-tab
+War room / Verify / Report (graph + replay, gate, report). Plan la trang doc lap.
+Deep link `#warroom`, `#verify`, `#report` mo dung sub-tab Overview; `#analyze` -> Plan.
+Chat la chatbox: Lead ben phai, cac vai khac ben trai. Full plan `.md` tai `/api/plan/md`.
 Run mac dinh `heuristic` (0 reviewer); wave chi khi chon/`--reviewer wave`.
 Server chi bind loopback, khong mo ra mang.
 

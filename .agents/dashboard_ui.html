@@ -1700,6 +1700,57 @@
       text-decoration: none
     }
 
+    .ov-subtabs {
+      display: flex;
+      gap: 4px;
+      background: var(--panel2);
+      padding: 4px;
+      border-radius: 10px;
+      margin: 10px 0 12px;
+      width: max-content;
+      max-width: 100%;
+      flex-wrap: wrap
+    }
+
+    .ov-subtabs button {
+      background: transparent;
+      border: 0;
+      color: var(--dim);
+      padding: 7px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      gap: 7px;
+      align-items: center
+    }
+
+    .ov-subtabs button b {
+      font-size: 11px
+    }
+
+    .ov-subtabs button span {
+      font-size: 9.5px;
+      color: var(--dim2);
+      font-family: Consolas, monospace
+    }
+
+    .ov-subtabs button.active {
+      background: #16283a;
+      color: #e2f3ff
+    }
+
+    .ov-panel {
+      display: none
+    }
+
+    .ov-panel.active {
+      display: block
+    }
+
+    .ov-snapshot {
+      width: 100%
+    }
+
     .ov-agents {
       margin-top: 8px
     }
@@ -2379,26 +2430,6 @@
             <path d="M4 6h.01M4 12h.01M4 18h.01" />
           </svg>
           <span>Plan</span><span class="badge" id="planBadge" style="display:none">1</span></button>
-        <button data-view="warroom">
-          <svg viewBox="0 0 24 24">
-            <circle cx="12" cy="5" r="2" />
-            <circle cx="5" cy="19" r="2" />
-            <circle cx="19" cy="19" r="2" />
-            <path d="M12 7l-5 10M12 7l5 10M7 19h10" />
-          </svg>
-          <span>War room</span></button>
-        <button data-view="verify">
-          <svg viewBox="0 0 24 24">
-            <path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6l7-3z" />
-            <path d="M9 12l2 2 4-4" />
-          </svg>
-          <span>Verify</span></button>
-        <button data-view="report">
-          <svg viewBox="0 0 24 24">
-            <path d="M6 3h9l4 4v14H6z" />
-            <path d="M15 3v5h4M9 12h6M9 16h6" />
-          </svg>
-          <span>Report</span></button>
         <button data-view="chat">
           <svg viewBox="0 0 24 24">
             <path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z" />
@@ -2457,6 +2488,10 @@
             <div class="ov-card muted">Loading mission control...</div>
           </div>
         </div>
+        <div class="ov-subtabs" id="overviewTabs"></div>
+        <div id="overviewWar" class="ov-panel active"><div id="warBody" class="muted">No active run.</div></div>
+        <div id="overviewVerify" class="ov-panel"><div id="verifyBody" class="muted">No plan yet.</div></div>
+        <div id="overviewReport" class="ov-panel"><div id="doneBody" class="muted">No report yet.</div></div>
         <div class="card goalcard">
           <div class="spread" style="margin-bottom:8px">
             <h2 style="margin:0">New goal</h2>
@@ -2474,7 +2509,6 @@
 
       <!-- PLAN (intelligence + subtasks) -->
       <section class="view" id="view-plan">
-        <div class="stepper"></div>
         <div class="card">
           <div class="spread" style="margin-bottom:8px">
             <h2 style="margin:0">Plan</h2>
@@ -2487,24 +2521,6 @@
             <div class="intel-body" id="planIntel"></div>
           </details>
         </div>
-      </section>
-
-      <!-- WAR ROOM -->
-      <section class="view" id="view-warroom">
-        <div class="stepper"></div>
-        <div id="warBody" class="muted">No active run.</div>
-      </section>
-
-      <!-- VERIFY -->
-      <section class="view" id="view-verify">
-        <div class="stepper"></div>
-        <div id="verifyBody" class="muted">No plan yet.</div>
-      </section>
-
-      <!-- DONE -->
-      <section class="view" id="view-done">
-        <div class="stepper"></div>
-        <div id="doneBody" class="muted">No completed job.</div>
       </section>
 
       <!-- CHAT -->
@@ -2699,7 +2715,7 @@
         case 'qa': return `<svg ${common}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M7 15h10"/></svg>`;
         case 'perf': return `<svg ${common}><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>`;
         case 'docs': return `<svg ${common}><path d="M4 5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2V5z"/><path d="M8 3v18M11 8h4M11 12h4"/></svg>`;
-        case 'systembot': return `<svg ${common}><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M8 13h.01M16 13h.01M9 17h6"/></svg>`;
+        case 'systembot': return `<svg ${common}><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.3 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 2.6h5l.3-2.6a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1z"/></svg>`;
         case 'reviewer': return `<svg ${common}><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
         default: return `<svg ${common}><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.3 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 2.6h5l.3-2.6a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1z"/></svg>`;
       }
@@ -2714,7 +2730,7 @@
     const state = {
       view: 'overview', runs: [], selected: null, run: null, diff: null, job: null, planState: null,
       quota: null, health: null, drafts: null, workspaces: [], chatTab: 'timeline', follow: false,
-      chatFilter: 'all', hourlyMode: 'cost', teamData: null, replayIndex: null, replayTimer: null, pageSig: {},
+      chatFilter: 'all', overviewTab: 'warroom', hourlyMode: 'cost', teamData: null, replayIndex: null, replayTimer: null, pageSig: {},
       token: new URLSearchParams(location.search).get('token') || '', sessionToken: '',
       lastQuota: 0, sig: {}
     };
@@ -2758,7 +2774,7 @@
         if (state.selected) await loadRun(state.selected, true);
         $('#connDot').classList.remove('off');
         render();
-        if (state.view === 'warroom') ensureWarRun();
+        if (state.view === 'overview') ensureWarRun();
       } catch (error) {
         $('#connDot').classList.add('off');
         $('#updatedAt').textContent = 'offline';
@@ -2783,19 +2799,22 @@
     /* ---------- navigation ---------- */
     function switchView(view) {
       if (view === 'analyze') view = 'plan';
-      if (view === 'report') view = 'done';
-      const hashView = view === 'done' ? 'report' : view;
-      state.view = view;
-      if (location.hash !== '#' + hashView) {
-        history.pushState(null, '', location.pathname + location.search + '#' + hashView);
+      const tabAlias = { warroom: 'warroom', verify: 'verify', report: 'report', done: 'report' };
+      if (tabAlias[view]) {
+        state.overviewTab = tabAlias[view];
+        view = 'overview';
       }
-      const navView = view === 'done' ? 'report' : view;
+      state.view = view;
+      if (location.hash !== '#' + view) {
+        history.pushState(null, '', location.pathname + location.search + '#' + view);
+      }
+      const navView = view;
       document.querySelectorAll('.nav button').forEach((button) =>
         button.classList.toggle('active', button.dataset.view === navView));
       document.querySelectorAll('.view').forEach((section) =>
         section.classList.toggle('active', section.id === 'view-' + view));
       const titles = {
-        overview: ['Overview', 'Mission control'],
+        overview: ['Overview', 'Plan, agents, verify and report'],
         plan: ['Plan', 'Intelligence, subtasks and approval'],
         warroom: ['War room', 'Five agents, one Lead, live state'],
         verify: ['Verify', 'The real machine decides what passes'],
@@ -2811,7 +2830,7 @@
       $('#pageSub').textContent = title[1];
       document.title = title[0] + ' · Adaptive Swarm';
       window.scrollTo(0, 0);
-      if (view !== 'warroom' && state.replayTimer) {
+      if (view !== 'overview' && state.replayTimer) {
         clearInterval(state.replayTimer); state.replayTimer = null; state.replayIndex = null;
       }
       state.pageSig = state.pageSig || {};
@@ -2821,8 +2840,8 @@
       if (view === 'workspaces') loadWorkspaces();
       if (view === 'quota') renderUsage();
       if (view === 'chat') renderChat();
-      if (['overview', 'plan', 'warroom', 'verify', 'done'].includes(view)) render();
-      if (view === 'warroom') ensureWarRun();
+      if (['overview', 'plan'].includes(view)) render();
+      if (view === 'overview') ensureWarRun();
     }
 
     /* ---------- render ---------- */
@@ -2840,12 +2859,13 @@
       const badge = $('#planBadge');
       badge.style.display = decision.status === 'pending' ? 'inline-block' : 'none';
 
-      renderStepper(jobState, plan, decision);
-      if (state.view === 'overview') renderOverview(plan, jobState, control);
+      if (state.view === 'overview') {
+        renderOverview(plan, jobState, decision, control);
+        renderWarRoom(plan, jobState, decision);
+        renderVerify(plan, jobState, decision);
+        renderDone(plan, jobState, decision);
+      }
       if (state.view === 'plan') renderPlan(plan, decision, jobState, control);
-      if (state.view === 'warroom') renderWarRoom(plan, jobState, decision);
-      if (state.view === 'verify') renderVerify(plan, jobState, decision);
-      if (state.view === 'done') renderDone(plan, jobState, decision);
       if (state.view === 'workspaces') renderWorkspaces();
       if (state.view === 'quota') renderUsage();
       if (state.view === 'settings') renderSettings(plan, jobState, control);
@@ -3541,8 +3561,8 @@
       ${idx != null ? `<span class="chip">replay ${esc(String(idx + 1))}/${esc(String(timeline.length))}</span>` : ''}
       <span class="chip ${data.wave_active ? 'ok' : 'warn'}">reviewer: ${esc(data.reviewer_mode || 'heuristic')}</span>
       ${stale ? `<span class="chip warn">no events for ${esc(String(lastAge))}s</span>` : ''}
-      <button class="btn ghost" onclick="switchView('plan')">Plan</button>
-      <button class="btn ghost" onclick="switchView('verify')">Verify</button>
+      <button class="btn ghost" onclick="document.getElementById('overviewHero').scrollIntoView({behavior:'smooth'})">Plan</button>
+      <button class="btn ghost" onclick="setOverviewTab('verify')">Verify</button>
     </div></div>
 
   ${['approved', 'stopped'].includes(phase) ? `<div class="card" style="margin-bottom:12px;border-color:#0b6d96;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
@@ -3850,16 +3870,26 @@
       renderChat();
     }
 
-    function renderOverview(plan, jobState, control) {
+    function applyOverviewTab() {
+      const tab = state.overviewTab || 'warroom';
+      document.querySelectorAll('#overviewTabs button').forEach((button) =>
+        button.classList.toggle('active', button.dataset.tab === tab));
+      const panels = { warroom: 'overviewWar', verify: 'overviewVerify', report: 'overviewReport' };
+      Object.entries(panels).forEach(([key, id]) => {
+        const node = document.getElementById(id);
+        if (node) node.classList.toggle('active', key === tab);
+      });
+    }
+
+    function setOverviewTab(tab) {
+      state.overviewTab = tab;
+      applyOverviewTab();
+    }
+
+    function renderOverview(plan, jobState, decision, control) {
       const box = $('#overviewHero');
       if (!box) return;
-      const decision = (state.job && state.job.decision) ||
-        (state.planState && state.planState.decision) || {};
       const phase = jobState.phase || 'idle';
-      if (!guardRender('overview', {
-        plan, jobState, decision,
-        team: state.teamData, run: state.run, replay: state.replayIndex
-      })) return;
       const team = jobState.team || {};
       const data = state.teamData || {};
       const subs = plan ? mergedSubtasks(plan, jobState) : [];
@@ -3879,61 +3909,36 @@
         { role: 'perf', label: 'Perf', model: null },
         { role: 'docs', label: 'Docs', model: null }
       ];
-      const roleState = (role, item) => {
-        if (!plan) return 'idle';
-        if (phase === 'done') {
-          if (role === 'coder') return 'done';
-          return (waveActive && !item.standby && ['approve', 'reject'].includes(item.verdict)) ? 'done' : 'idle';
-        }
-        if (['running', 'paused'].includes(phase)) {
-          if (last && String(last.node).toLowerCase() === 'reviewer') {
-            if (role === 'coder') return 'done';
-            return waveActive ? 'active' : 'idle';
-          }
-          if (role === 'coder') return 'active';
-          return waveActive ? 'next' : 'idle';
-        }
-        if (phase === 'approved' || phase === 'stopped') return role === 'coder' ? 'next' : 'idle';
-        return 'idle';
-      };
-      const stateLabel = (state) => state === 'active' ? 'running'
-        : state === 'next' ? 'next' : state === 'done' ? 'done' : 'idle';
-      const tree = `<div class="tree-lead">${agentAvatar('lead', 22)}
-      <div><b>Lead</b><span>${esc(phase === 'done' ? 'applied' : phase)}</span></div></div>
-    <div class="tree-children">${roleRows.map((item) => {
-        const st = roleState(item.role, item);
-        const mode = item.standby ? 'standby' : item.skipped ? 'skipped' : stateLabel(st);
-        return `<div class="tree-agent ${st}" title="${esc(item.label)} · ${esc(item.model || 'not assigned')}">
-        ${agentAvatar(item.role, 15, 'sm')}
-        <div style="min-width:0"><b>${esc(item.label)}</b>
-          <span>${esc(item.model ? shortModel(item.model) : 'not assigned')}</span></div>
-        <span class="chip ${mode === 'running' ? 'warn' : mode === 'done' ? 'ok' : ''}" style="margin-left:auto">${esc(mode)}</span>
-      </div>`;
-      }).join('')}</div>`;
+      if (!guardRender('overview', { plan, jobState, decision, team: data, run: state.run })) {
+        applyOverviewTab();
+        return;
+      }
       const stepIndex = (() => {
         if (!plan) return 0;
         if (decision.status === 'pending') return 0;
-        if (phase === 'done') return 3;
-        if (phase === 'approved' || phase === 'stopped') return 0;
+        if (phase === 'done') return 4;
+        if (phase === 'approved' || phase === 'stopped') return 1;
         if (['running', 'paused'].includes(phase)) {
           const type = String((last && last.event_type) || '');
           const node = String((last && last.node) || '').toLowerCase();
-          if (type === 'recipe.done') return 3;
-          if (type.includes('reviewer')) return 1;
-          if (type.includes('safe_writer.verify') || node === 'systembot') return 2;
-          if (node === 'coder' || type.includes('recipe.coder')) return 0;
-          return 0;
+          if (type === 'recipe.done') return 4;
+          if (type.includes('reviewer')) return 2;
+          if (type.includes('safe_writer.verify') || node === 'systembot') return 3;
+          if (node === 'coder' || type.includes('recipe.coder')) return 1;
+          return 1;
         }
         return 0;
       })();
       const verifyCount = subs.filter((item) => item.verify_command).length;
       const flow = [
-        { label: 'Code', icon: 'coder', value: requests ? `${requests} req` : 'pending', target: 'warroom' },
-        { label: 'Review', icon: 'reviewer', value: waveActive ? '4 agents' : (data.reviewer_mode || 'heuristic'), target: 'warroom' },
-        { label: 'Verify', icon: 'security', value: phase === 'done' ? 'exit 0' : verifyCount ? `${verifyCount} cmd` : 'pending', target: 'verify' },
-        { label: 'Report', icon: 'docs', value: applied ? `${applied}/${subs.length} applied` : files.length ? `${files.length} file` : 'pending', target: 'report' }
+        { label: 'Plan', icon: 'docs', value: plan ? `${subs.length} subtask / ${phaseCount} phase` : 'no plan', action: 'top' },
+        { label: 'Code', icon: 'coder', value: requests ? `${requests} req` : 'pending', action: 'warroom' },
+        { label: 'Review', icon: 'reviewer', value: waveActive ? '4 agents' : (data.reviewer_mode || 'heuristic'), action: 'warroom' },
+        { label: 'Verify', icon: 'security', value: phase === 'done' ? 'exit 0' : verifyCount ? `${verifyCount} cmd` : 'pending', action: 'verify' },
+        { label: 'Report', icon: 'docs', value: applied ? `${applied}/${subs.length} applied` : files.length ? `${files.length} file` : 'pending', action: 'report' }
       ];
       const flowDone = [
+        !!plan && ['approved', 'done'].includes(decision.status || phase),
         !!plan && (requests > 0 || ['running', 'paused', 'done'].includes(phase)),
         !!plan && (!!data.last_wave || phase === 'done'),
         !!plan && (phase === 'done' || timeline.some((item) => item.event_type === 'safe_writer.verify')),
@@ -3947,57 +3952,58 @@
         actions.push(`<button class="btn primary" onclick="decide('approve', true)">Approve &amp; Run</button>`);
         actions.push(`<button class="btn ghost" onclick="switchView('plan')">Open plan</button>`);
       } else if (['approved', 'stopped'].includes(phase)) {
-        actions.push(`<button class="btn primary" onclick="switchView('warroom')">Run job</button>`);
+        actions.push(`<button class="btn primary" onclick="setOverviewTab('warroom')">Run job</button>`);
         actions.push(`<button class="btn ghost" onclick="switchView('plan')">Open plan</button>`);
       } else if (phase === 'done') {
-        actions.push(`<button class="btn ghost" onclick="switchView('verify')">Verify evidence</button>`);
+        actions.push(`<button class="btn ghost" onclick="setOverviewTab('verify')">Verify gate</button>`);
         actions.push(`<button class="btn ghost" onclick="switchView('chat')">Open chat</button>`);
       } else {
-        actions.push(`<button class="btn primary" onclick="switchView('warroom')">War room</button>`);
-        actions.push(`<button class="btn ghost" onclick="switchView('plan')">Open plan</button>`);
+        actions.push(`<button class="btn primary" onclick="setOverviewTab('warroom')">War room</button>`);
+        actions.push(`<button class="btn ghost" onclick="switchView('chat')">Open chat</button>`);
       }
-      box.innerHTML = `<div class="ov-hero">
-    <div class="ov-card">
-      <div class="ov-head">
-        <div style="min-width:0">
-          <div class="eyebrow">${plan ? 'Mission control' : 'Adaptive Swarm'}</div>
-          <div class="ov-title">${esc(plan ? (plan.job_id || 'Active plan') : 'No plan yet')}</div>
-          <p class="ov-obj">${esc(plan ? (plan.objective || '') : 'Describe a goal below; the planner turns it into verified subtasks.')}</p>
-          <div class="chips">
-            <span class="pill ${STATUS_CLASS(status)}">${esc(status || 'idle')}</span>
-            <span class="chip">${esc(roleRows.length)} agents + Lead</span>
-            <span class="chip">${esc(subs.length)} subtask</span>
-            <span class="chip">${esc(files.length)} file</span>
+      const tabs = [
+        { key: 'warroom', label: 'War room', meta: waveActive ? '5 agents' : (data.reviewer_mode || 'heuristic') },
+        { key: 'verify', label: 'Verify', meta: phase === 'done' ? 'PASS' : (phase === 'stopped' ? 'FAIL' : 'pending') },
+        { key: 'report', label: 'Report', meta: phase === 'done' ? 'applied' : (phase === 'idle' ? 'no run' : 'in progress') }
+      ];
+      box.innerHTML = `<div class="ov-card ov-snapshot">
+        <div class="ov-head">
+          <div style="min-width:0">
+            <div class="eyebrow">${plan ? 'Mission control' : 'Adaptive Swarm'}</div>
+            <div class="ov-title">${esc(plan ? (plan.job_id || 'Active plan') : 'No plan yet')}</div>
+            <p class="ov-obj">${esc(plan ? (plan.objective || '') : 'Describe a goal below; the planner turns it into verified subtasks.')}</p>
+            <div class="chips">
+              <span class="pill ${STATUS_CLASS(status)}">${esc(status || 'idle')}</span>
+              <span class="chip">${esc(roleRows.length)} agents + Lead</span>
+              <span class="chip">${esc(subs.length)} subtask</span>
+              <span class="chip">${esc(files.length)} file</span>
+              <span class="chip">${esc(phaseCount)} phase</span>
+            </div>
+            ${plan ? `<div class="ov-planline">
+              <span class="k">Plan snapshot</span>
+              <span>${esc(subs.length)} subtask / ${esc(phaseCount)} phase / ${esc(files.length)} file</span>
+              <span class="muted">approval: ${esc(decision.status || 'pending')}</span>
+              <button class="linkbtn" onclick="switchView('plan')">Full plan</button>
+              <a class="linkbtn" href="/api/plan/md" target="_blank" rel="noopener">Full plan .md</a>
+            </div>` : ''}
           </div>
-          ${plan ? `<div class="ov-planline">
-            <span class="k">Plan summary</span>
-            <span>${esc(subs.length)} subtask · ${esc(phaseCount)} phase(s) · ${esc(files.length)} file(s)</span>
-            <span class="muted">approval: ${esc(decision.status || 'pending')}</span>
-            <button class="linkbtn" onclick="switchView('plan')">Full plan</button>
-            <a class="linkbtn" href="/api/plan/md" target="_blank" rel="noopener">.md</a>
-          </div>` : ''}
+          <div class="actions" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${actions.join('')}</div>
         </div>
-        <div class="actions" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${actions.join('')}</div>
-      </div>
-      <div class="ov-agents">${tree}</div>
-    </div>
-    <div class="ov-card">
-      <div class="spread"><h2 style="margin:0">Flow</h2>
-        <span class="muted" style="font-size:10.5px">${esc(phase === 'done' ? 'completed' : plan ? 'current: ' + flow[stepIndex].label : 'waiting for a goal')}</span></div>
-      <div class="flow5">${flow.map((item, index) =>
-        `<button type="button" class="flowstep ${index === stepIndex ? 'active' : flowDone[index] ? 'done' : ''}"
-          style="--ac:${(AGENT_META[item.icon] || AGENT_META.system).color}"
-          onclick="switchView('${item.target}')">
-          <span class="fi">${agentIcon(item.icon, 16)}<b>${esc(item.label)}</b></span>
-          <span>${esc(item.value)}</span></button>` +
-        (index < flow.length - 1 ? '<span class="flowarrow">&#8594;</span>' : '')).join('')}</div>
-      <div class="ov-actions">
-        <button class="btn ghost" onclick="switchView('warroom')">Watch war room</button>
-        <button class="btn ghost" onclick="switchView('chat')">Open chat</button>
-        <span class="muted" style="font-size:10px;align-self:center">Click a stage to open its full page.</span>
-      </div>
-    </div>
-  </div>`;
+        <div class="flow5">${flow.map((item, index) => {
+          const click = item.action === 'top'
+            ? "document.getElementById('overviewHero').scrollIntoView({behavior:'smooth'})"
+            : `setOverviewTab('${item.action}')`;
+          return `<button type="button" class="flowstep ${index === stepIndex ? 'active' : flowDone[index] ? 'done' : ''}"
+            style="--ac:${(AGENT_META[item.icon] || AGENT_META.system).color}" onclick="${click}">
+            <span class="fi">${agentIcon(item.icon, 16)}<b>${esc(item.label)}</b></span>
+            <span>${esc(item.value)}</span></button>` +
+            (index < flow.length - 1 ? '<span class="flowarrow">&#8594;</span>' : '');
+        }).join('')}</div>
+      </div>`;
+      $('#overviewTabs').innerHTML = tabs.map((tab) =>
+        `<button data-tab="${tab.key}" onclick="setOverviewTab('${tab.key}')">
+          <b>${esc(tab.label)}</b><span>${esc(tab.meta)}</span></button>`).join('');
+      applyOverviewTab();
     }
 
     async function loadWorkspaces() {
@@ -4522,16 +4528,21 @@
     $('#goal').addEventListener('keydown', (event) => { if (event.key === 'Enter') planGoal(); });
     $('#opinion').addEventListener('keydown', (event) => { if (event.key === 'Enter') sendOpinion(); });
 
-    const VIEWS = ['overview', 'plan', 'warroom', 'verify', 'done', 'report', 'chat', 'workspaces', 'quota', 'drafts', 'settings'];
+    const VIEWS = ['overview', 'plan', 'chat', 'workspaces', 'quota', 'drafts', 'settings'];
+    const STAGE_TABS = { warroom: 'warroom', verify: 'verify', report: 'report', done: 'report' };
     const initialView = (location.hash || '#overview').slice(1);
     const runParam = new URLSearchParams(location.search).get('run');
     if (runParam) state.selected = runParam;
-    switchView(initialView === 'analyze' ? 'plan'
-      : VIEWS.includes(initialView) ? initialView : 'overview');
+    switchView(STAGE_TABS[initialView] ? initialView
+      : initialView === 'analyze' ? 'plan'
+        : VIEWS.includes(initialView) ? initialView : 'overview');
     window.addEventListener('hashchange', () => {
       const view = (location.hash || '#overview').slice(1);
       const target = view === 'analyze' ? 'plan' : view;
-      if (VIEWS.includes(target) && target !== state.view) switchView(target);
+      if (VIEWS.includes(target) || STAGE_TABS[target]) {
+        if (STAGE_TABS[target]) state.overviewTab = STAGE_TABS[target];
+        switchView(target);
+      }
     });
     refreshAll();
     setInterval(() => {
