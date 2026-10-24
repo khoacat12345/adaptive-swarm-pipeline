@@ -220,7 +220,7 @@ Hard model-selection tasks live in `.agents/tests/hard_tasks.py`; see
 
 Install guide: [`docs/INSTALL.md`](docs/INSTALL.md).
 
-Full runbook: [`.agents/README.md`](.agents/README.md) (Vietnamese, no diacritics)
+Full runbook: [`.agents/README.md`](.agents/README.md) (English); Vietnamese archive: [`README.vi.md`](.agents/README.vi.md)
 and [`.agents/SKILL.md`](.agents/SKILL.md).
 
 ## Limitations (honest)

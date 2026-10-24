@@ -171,8 +171,8 @@ def test_replay(checks: Checks) -> None:
         [sys.executable, str(AGENTS_DIR / "replay.py"), "--last", "--ledger", str(ledger_path),
          "--no-color"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
-    checks.check("replay: ban nguoi doc co dong KET LUAN",
-                 human.returncode == 0 and "KET LUAN" in human.stdout, human.stdout[-200:])
+    checks.check("replay: human output has CONCLUSION",
+                 human.returncode == 0 and "CONCLUSION" in human.stdout, human.stdout[-200:])
 
 
 # --------------------------------------------------------------------------

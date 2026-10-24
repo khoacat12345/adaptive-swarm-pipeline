@@ -68,11 +68,11 @@ def _read_source(path: Path) -> tuple[str, str]:
 
 def _feedback(stage: str, error: str, detail: str, round_index: int) -> str:
     return (
-        f"VONG {round_index} THAT BAI o buoc [{stage}].\n"
-        f"Loi: {error}\n"
+        f"ROUND {round_index} FAILED at [{stage}].\n"
+        f"Error: {error}\n"
         f"{detail}\n"
-        "Hay sua lai cho dung. Luu y: file <= 150 dong moi dung format 'whole'; "
-        "file dai hon phai dung 'replace' (khoi SEARCH phai khop nguyen van) hoac 'symbol'."
+        "Fix it. Note: files <= 150 lines should use 'whole'; longer files must use "
+        "'replace' (SEARCH must match exactly) or 'symbol'."
     )
 
 
@@ -263,10 +263,10 @@ def _apply_transaction(work_order, *, gate, root: Path, run_id: str, round_index
                 )
             return result
 
-        rollback = tx.rollback(f"verify that bai (exit {bot['exit_code']})")
+        rollback = tx.rollback(f"verify failed (exit {bot['exit_code']})")
         result.update(
             rolled_back=bool(rollback.get("ok")),
-            error=f"verify that bai: exit_code={bot['exit_code']}",
+            error=f"verify failed: exit_code={bot['exit_code']}",
             transaction=tx.snapshot(),
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
@@ -274,12 +274,12 @@ def _apply_transaction(work_order, *, gate, root: Path, run_id: str, round_index
         rb = {"ok": False, "errors": [str(exc)[:200]]}
         if tx.state == "open":
             try:
-                rb = tx.rollback(f"loi khi ghi: {str(exc)[:200]}")
+                rb = tx.rollback(f"write error: {str(exc)[:200]}")
             except Exception as exc2:                   # noqa: BLE001
                 rb = {"ok": False, "errors": [str(exc2)[:200]]}
         result.update(
             rolled_back=bool(rb.get("ok")),
-            error=f"giao dich that bai: {str(exc)[:300]}",
+            error=f"transaction failed: {str(exc)[:300]}",
             transaction=tx.snapshot(),
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
@@ -379,7 +379,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
     verdict = plan_validator.validate_plan(plan)
     if not verdict["ok"]:
         raise work_order_module.WorkOrderRejected(
-            [f"plan bi tu choi: {error}" for error in verdict["errors"]])
+            [f"plan rejected: {error}" for error in verdict["errors"]])
     if log:
         ledger.append_event(
             "plan.validated", run_id=run_id,
@@ -572,14 +572,14 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         over_requests = used >= hard_cap if starting else used > hard_cap
         if over_requests:
             report["budget"]["exceeded"] = "requests"
-            report["error"] = f"vuot tran chi phi: hard limit {hard_cap} reached: {used}/{hard_cap} requests"
+            report["error"] = f"budget cap exceeded: hard limit {hard_cap} reached: {used}/{hard_cap} requests"
             log_budget_event("budget.hard_abort", {
                 "used": used, "hard_cap": hard_cap, "task_id": work_order.task_id,
                 "reason": report["error"]}, status="fail")
             return False
         if elapsed >= max_seconds:
             report["budget"]["exceeded"] = "time"
-            report["error"] = f"vuot tran thoi gian: {elapsed:.0f}s/{max_seconds}s"
+            report["error"] = f"time cap exceeded: {elapsed:.0f}s/{max_seconds}s"
             return False
         return True
 
@@ -608,7 +608,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
             text_value, encoding = _read_source(source_path)
         except (OSError, ValueError) as exc:
             report["status"] = STATUS_REJECTED
-            report["error"] = f"khong doc duoc file nguon {relative}: {exc}"
+            report["error"] = f"cannot read source file {relative}: {exc}"
             report["duration_ms"] = int((time.perf_counter() - started) * 1000)
             if log:
                 ledger.append_event(
@@ -837,7 +837,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                 break
             feedback = _feedback(
                 f"verify-ban-nhap ({draft_verify['mode']})",
-                str(draft_verify.get("error") or "verify that bai"),
+                str(draft_verify.get("error") or "verify failed"),
                 _tail(draft_verify.get("output_tail")), round_index,
             )
             report["feedback"].append(feedback)
@@ -990,7 +990,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                     "skipped": review.get("skipped") or []}, status="info")
             if review.get("verdict") != "approve":
                 feedback = _feedback(
-                    "reviewer", "bi tu choi", "; ".join(review.get("reasons") or [])[:400],
+                    "reviewer", "rejected", "; ".join(review.get("reasons") or [])[:400],
                     round_index,
                 )
                 report["feedback"].append(feedback)
@@ -1053,7 +1053,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
             # Ghi that bai truoc khi os.replace -> file goc van nguyen ven.
             feedback = _feedback("apply-write", str(exc)[:300], "", round_index)
             report["feedback"].append(feedback)
-            report["error"] = f"ghi file that bai: {exc}"
+            report["error"] = f"write failed: {exc}"
             continue
         report["apply"] = {
             "written": apply_report["written"],
@@ -1088,7 +1088,7 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
     if report["status"] is None:
         report["status"] = STATUS_ABORTED
         if not report["error"]:
-            report["error"] = ("het so vong (circuit breaker) hoac khong co ban sua nao verify duoc")
+            report["error"] = ("rounds exhausted (circuit breaker) or no patch passed verify")
 
     # Chot ha tang: MOI file phai dung trang thai mong doi.
     restore_tampered()

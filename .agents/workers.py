@@ -459,7 +459,8 @@ class OpenCodeCoder(Coder):
         prompt += ("\n\nQUY TAC OUTPUT BAT BUOC: chi tra ve DUY NHAT mot object JSON hop le, "
                    "khong markdown, khong giai thich, khong text thua. "
                    "Dung {\"format\":\"whole\",\"content\":\"<toan bo file moi>\"} "
-                   "hoac {\"format\":\"replace\",\"edits\":[{\"search\":\"...\",\"replace\":\"...\"}]}.")
+                   "hoac {\"format\":\"replace\",\"edits\":[{\"search\":\"...\",\"replace\":\"...\"}]}. "
+                   "Answer in English only.")
         prompt += self._hints_block()
         prompt, _findings = secret_scan.scan_text(prompt, filename="prompt")
         try:
@@ -493,6 +494,7 @@ AGENTIC_PROMPT = (
     "Hay sua truc tiep noi dung file. KHONG can chay lenh verify; he thong se tu verify sau do.\n"
     "Chi sua file tren; khong tao file moi, khong sua file test.\n"
     "Toi da 2 tool call: doc file neu can, roi sua file. Khi xong, tra loi ngan gon (1-3 cau).\n"
+    "Answer in English only; keep code identifiers unchanged."
 )
 
 # Level 3: mot lan goi model, sua NHIEU file trong cung thu muc tam. Cac file
@@ -903,7 +905,8 @@ class OpenCodeReviewer(Reviewer):
         prompt = (
             "Ban la reviewer doc lap, quyen READ-ONLY. Doc diff sau va tim loi that.\n"
             "Chi duyet khi: dung muc tieu, khong chen ma nguy hiem, khong xoa test.\n"
-            'Tra ve JSON: {"verdict":"approve"|"reject","reasons":["..."]}\n\n'
+            'Tra ve JSON: {"verdict":"approve"|"reject","reasons":["..."]}\n'
+            'Answer in English only.\n\n'
             f"MUC TIEU: {work_order.objective}\n"
             f"TIEU CHI: {work_order.acceptance_criteria}\n\n"
             f"```diff\n{diff[:20000]}\n```"
@@ -916,7 +919,7 @@ class OpenCodeReviewer(Reviewer):
         except Exception as exc:                            # noqa: BLE001
             if self.raise_on_error:
                 raise
-            verdict, reasons = "reject", [f"reviewer loi: {exc}"[:200]]
+            verdict, reasons = "reject", [f"reviewer error: {str(exc)[:200]}"]
         findings = {"verdict": verdict, "level": level, "task_id": work_order.task_id,
                     "reasons": reasons, "reviewer": self.name}
         if sink is not None:
@@ -950,7 +953,7 @@ class OpenCodeReviewer(Reviewer):
         except Exception as exc:                            # noqa: BLE001
             if self.raise_on_error:
                 raise
-            verdict, reasons = "reject", [f"reviewer loi: {exc}"[:200]]
+            verdict, reasons = "reject", [f"reviewer error: {str(exc)[:200]}"]
         findings = {"verdict": verdict, "level": level, "task_id": work_order.task_id,
                     "reasons": reasons, "files": list(diffs), "reviewer": self.name}
         if sink is not None:
@@ -1116,7 +1119,8 @@ class RoleReviewer(Reviewer):
             f"VERIFY: {work_order.verify_command}\n"
             f"FILES: {', '.join(work_order.target_files or [])}\n"
             f"```diff\n{diff[:20000]}\n```\n"
-            'Tra ve JSON: {"verdict":"approve"|"reject","reasons":["..."]}'
+            'Tra ve JSON: {"verdict":"approve"|"reject","reasons":["..."]}\n'
+            'Answer in English only.'
         )
 
     def review(self, work_order, *, diff: str, new_content: str, old_content: str,

@@ -74,72 +74,72 @@ def _short(value, limit: int = 110) -> str:
 
 
 def _message(event: dict, norm: dict) -> str:
-    """Cau mo ta 1 dong cho timeline (tieng Viet khong dau)."""
+    """One English line for the timeline."""
     kind = norm["event_type"]
     data = norm["details"]
     if kind == "recipe.start":
-        return (f"nhan task {data.get('task_id') or '?'} (Level {data.get('level')})"
+        return (f"task {data.get('task_id') or '?'} (Level {data.get('level')})"
                 f" - file {data.get('target')}"
                 f" | verify: {_short(data.get('verify_command'), 70)}")
     if kind == "plan.validated":
         nodes = data.get("nodes") or []
-        return f"plan hop le: {' -> '.join(str(node) for node in nodes)}"
+        return f"plan valid: {' -> '.join(str(node) for node in nodes)}"
     if kind == "clarify.required":
         problems = data.get("problems") or []
-        return f"DUNG - can lam ro {len(problems)} diem truoc khi chay"
+        return f"STOP - clarify {len(problems)} item(s) before running"
     if kind == "memory.hints":
         hints = data.get("hints") or []
-        return f"nap {len(hints)} goi y tu memory: {_short(hints[0], 80) if hints else ''}"
+        return f"loaded {len(hints)} memory hint(s): {_short(hints[0], 80) if hints else ''}"
     if kind == "recipe.coder":
-        state = "nhap ban sua" if norm["status"] in ("ok", "pass") else "that bai"
-        return f"{state} (vong {data.get('round')})"
+        state = "patch produced" if norm["status"] in ("ok", "pass") else "patch failed"
+        return f"{state} (round {data.get('round')})"
     if kind == "router.decided":
         if data.get("exhausted"):
-            extra = " [HET QUOTA]"
+            extra = " [QUOTA EXHAUSTED]"
         elif data.get("mode") == "fallback":
-            extra = " [HA CAP - free/re]"
+            extra = " [FALLBACK - free/cheap model]"
         elif data.get("mode") == "escalate":
             extra = " [ESCALATE]"
         else:
             extra = ""
-        return (f"router chon {data.get('work_type')} ({data.get('label')}): "
+        return (f"router selected {data.get('work_type')} ({data.get('label')}): "
                 f"{' -> '.join(data.get('chain') or [])}{extra}")
     if kind == "plan.submitted":
-        return f"plan {data.get('job_id')}: {len(data.get('subtasks') or [])} subtask - cho duyet"
+        return f"plan {data.get('job_id')}: {len(data.get('subtasks') or [])} subtask(s) - awaiting approval"
     if kind == "plan.approved":
-        return f"plan {data.get('job_id')} duoc duyet"
+        return f"plan {data.get('job_id')} approved"
     if kind == "plan.rejected":
-        return f"plan {data.get('job_id')} bi tu choi"
+        return f"plan {data.get('job_id')} rejected"
     if kind == "job.start":
-        return f"job {data.get('job_id')} bat dau ({data.get('subtasks')} subtask)"
+        return f"job {data.get('job_id')} started ({data.get('subtasks')} subtask(s))"
     if kind == "job.done":
-        return f"job {data.get('job_id')} ket thuc: {data.get('status')}"
+        return f"job {data.get('job_id')} finished: {data.get('status')}"
     if kind == "recipe.ladder":
         history = [item for item in (data.get("history") or []) if isinstance(item, dict)]
         levels = " -> ".join(str(item.get("level_name")) for item in history)
-        state = "ok" if norm["status"] in ("ok", "pass") else "that bai"
-        return f"format ladder {levels} ({len(history)} lan thu) {state}"
+        state = "ok" if norm["status"] in ("ok", "pass") else "failed"
+        return f"format ladder {levels} ({len(history)} attempt(s)) {state}"
     if kind == "recipe.draft_verify":
         code = data.get("exit_code")
-        return f"verify ban nhap ({data.get('mode', '?')}) exit={code}"
+        return f"draft verify ({data.get('mode', '?')}) exit={code}"
     if kind == "meeting.message":
         recipients = ", ".join(str(item) for item in (data.get("recipients") or []))
         body = _short(_redact(str(data.get("body") or "")), 90)
         return (f"{data.get('sender') or '?'} -> {recipients or '?'} "
                 f"[{data.get('kind') or 'message'}] {body}")
     if kind == "meeting.opened":
-        return f"mo phien hop round 1 ({len(data.get('roles') or [])} reviewer)"
+        return f"meeting opened, round 1 ({len(data.get('roles') or [])} reviewers)"
     if kind == "meeting.conflict":
-        return f"phat hien {len(data.get('conflicts') or [])} xung dot"
+        return f"meeting found {len(data.get('conflicts') or [])} conflict(s)"
     if kind == "meeting.rebuttal":
         return (f"rebuttal round 2: {data.get('sender') or '?'} -> "
                 f"{', '.join(str(item) for item in (data.get('recipients') or []))}")
     if kind == "meeting.vote":
         return f"vote {data.get('role') or '?'} = {data.get('verdict') or '?'}"
     if kind == "meeting.decision":
-        return f"quyet dinh meeting: {data.get('verdict') or '?'}"
+        return f"meeting decision: {data.get('verdict') or '?'}"
     if kind == "meeting.aborted":
-        return f"meeting abort: {_short(data.get('reason'), 80)}"
+        return f"meeting aborted: {_short(data.get('reason'), 80)}"
     if kind == "reviewer.findings":
         verdict = data.get("verdict") or norm["status"]
         if data.get("fallback_reason"):
@@ -152,41 +152,41 @@ def _message(event: dict, norm: dict) -> str:
                 for item in per_role if isinstance(item, dict))
             return f"wave {verdict}: {roles}"
         reasons = data.get("reasons") or []
-        return f"ket luan {verdict}" + (f": {_short('; '.join(map(str, reasons)), 90)}"
-                                        if reasons else "")
+        return f"verdict {verdict}" + (f": {_short('; '.join(map(str, reasons)), 90)}"
+                                       if reasons else "")
     if kind == "safe_writer.backup":
-        return f"backup truoc khi ghi {_short(data.get('target'), 60)}"
+        return f"backup before write {_short(data.get('target'), 60)}"
     if kind == "safe_writer.write":
-        return f"ghi atomic {_short(data.get('target'), 60)}"
+        return f"atomic write {_short(data.get('target'), 60)}"
     if kind == "safe_writer.verify":
-        return f"verify file that exit={data.get('exit_code')}"
+        return f"real-file verify exit={data.get('exit_code')}"
     if kind == "safe_writer.rollback":
-        return f"ROLLBACK ve ban backup {_short(data.get('target'), 60)}"
+        return f"ROLLBACK to backup {_short(data.get('target'), 60)}"
     if kind == "transaction.begin":
-        return f"mo giao dich da file: {', '.join(data.get('files') or [])}"
+        return f"multi-file transaction opened: {', '.join(data.get('files') or [])}"
     if kind == "transaction.commit":
-        return f"chot giao dich {len(data.get('files') or [])} file"
+        return f"transaction committed: {len(data.get('files') or [])} file(s)"
     if kind == "transaction.rollback":
-        return f"ROLLBACK toan bo {len(data.get('files') or [])} file: {_short(data.get('reason') or '', 60)}"
+        return f"ROLLBACK all {len(data.get('files') or [])} file(s): {_short(data.get('reason') or '', 60)}"
     if kind == "transaction.recovered":
-        return f"khoi phuc giao dich bi do giua chung: {', '.join(data.get('files') or [])}"
+        return f"recovered interrupted transaction: {', '.join(data.get('files') or [])}"
     if kind == "budget.exceeded":
-        return f"dung vi cham tran ({data.get('exceeded') or 'ngan sach'})"
+        return f"stopped at budget cap ({data.get('exceeded') or 'budget'})"
     if kind == "recipe.fallback":
-        return (f"fallback {data.get('failures', 0)} lan"
-                f" tren {len(data.get('models') or [])} model")
+        return (f"fallback {data.get('failures', 0)} time(s)"
+                f" across {len(data.get('models') or [])} model(s)")
     if kind == "recipe.guard.restore":
-        return f"guard khoi phuc file bi sua ngoai pipeline: {', '.join(data.get('files') or [])}"
+        return f"guard restored external edit(s): {', '.join(data.get('files') or [])}"
     if kind == "recipe.done":
         error = data.get("error")
         tail = f" - {_short(error, 80)}" if error else ""
-        return f"KET LUAN {data.get('status') or norm['status']}{tail}"
+        return f"CONCLUSION {data.get('status') or norm['status']}{tail}"
     if kind == "secret.blocked":
-        return "chan gui secret ra model"
+        return "blocked secret from leaving the machine"
     if kind == "system_bot.run":
-        return f"chay lenh may that ({_short(data.get('command'), 60)})"
+        return f"real machine command ({_short(data.get('command'), 60)})"
     if kind == "system_bot.blocked":
-        return f"guard chan lenh: {_short(data.get('reason') or data.get('category'), 70)}"
+        return f"guard blocked command: {_short(data.get('reason') or data.get('category'), 70)}"
     if kind.startswith("phase0") or kind.startswith("phase05"):
         return f"{kind} {_short(json.dumps(data, ensure_ascii=False), 80)}"
     return f"{kind} {_short(json.dumps(data, ensure_ascii=False), 90)}"

@@ -341,7 +341,7 @@ def test_budget_and_session(checks: Checks) -> None:
                           run_id="p3-budget-1", max_requests=1, max_seconds=300, log=False)
     checks.check("budget: cham tran request -> dung ngay",
                  report["budget"]["exceeded"] == "requests", str(report["budget"]))
-    checks.check("budget: bao ro within report", "tran chi phi" in (report["error"] or ""),
+    checks.check("budget: bao ro within report", "budget cap" in (report["error"] or ""),
                  str(report["error"]))
     checks.check("budget: file goc khong doi", (root / "calc.py").read_bytes() == before)
 
