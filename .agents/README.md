@@ -29,6 +29,7 @@ Windows uses `python` instead of `python3`.
 
 `scout.py` reads the local OpenCode model catalog and writes
 `.agents/config.json`. The router uses that catalog; OpenCode Go is optional.
+`config.json` is machine-local and is intentionally not committed.
 
 ## Run a task
 

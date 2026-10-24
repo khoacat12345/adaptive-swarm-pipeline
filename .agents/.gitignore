@@ -36,3 +36,5 @@ id_rsa
 id_ed25519
 .aws/
 .ssh/
+config.json
+config.json.bak

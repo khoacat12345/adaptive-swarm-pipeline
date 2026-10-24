@@ -70,8 +70,9 @@ Do not copy:
 .agents/__pycache__/
 ```
 
-`.agents/config.json` may be copied from another project on the same machine,
-but `scout --write` is the safe option when models or auth change.
+`.agents/config.json` is machine-local and is not committed. It may be copied
+from another project on the same machine, but `scout --write` is the safe option
+when models or auth change.
 
 ## OpenCode skill discovery
 
