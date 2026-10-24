@@ -90,6 +90,99 @@ ROUTES = {
            "why": "trong tai khi bat dong: reasoning cao nhat"},
 }
 
+# --------------------------------------------------------------------------
+# Catalog-aware selection (scout/config) - no hard-coded OpenCode Go needed.
+# --------------------------------------------------------------------------
+WORK_ROLE = {
+    "W1": "coder", "W2": "coder", "W3": "security",
+    "W4": "architect", "W5": "test_writer", "W6": "coder",
+    "W7": "architect", "W8": "architect",
+}
+CAP_WEIGHTS = {
+    "W1": {"code": .6, "reasoning": .2, "speed": .2},
+    "W2": {"code": .6, "reasoning": .3, "long_ctx": .1},
+    "W3": {"reasoning": .5, "code": .3, "long_ctx": .2},
+    "W4": {"reasoning": .6, "long_ctx": .2, "code": .2},
+    "W5": {"code": .5, "reasoning": .3, "long_ctx": .2},
+    "W6": {"vision": .6, "code": .2, "reasoning": .2},
+    "W7": {"long_ctx": .6, "reasoning": .3, "code": .1},
+    "W8": {"reasoning": .5, "long_ctx": .3, "code": .2},
+}
+
+
+def load_catalog(root=None) -> dict:
+    """Read the scout catalog embedded in config.json, if available."""
+    from pathlib import Path as _Path
+    if root is None:
+        path = _Path(__file__).with_name("config.json")
+    else:
+        base = _Path(root).resolve()
+        path = (base if base.name == ".agents" else base / ".agents") / "config.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    models = data.get("models") or {}
+    roles = data.get("roles") or {}
+    if not isinstance(models, dict) or not isinstance(roles, dict):
+        return {}
+    return {"models": models, "roles": roles, "path": str(path)}
+
+
+def _entry_score(entry: dict, work_type: str) -> float:
+    caps = entry.get("capabilities") or {}
+    weights = CAP_WEIGHTS.get(work_type, {"code": .5, "reasoning": .5})
+    score = sum(float(weights.get(key, 0.0)) * float(caps.get(key, 0.0) or 0.0)
+                for key in weights)
+    # Free/local models are preferred when capability is close.
+    if entry.get("is_free"):
+        score += 0.01
+    tier = str(entry.get("cost_tier") or "").lower()
+    if tier in ("high", "paid"):
+        score -= 0.05
+    return round(score, 4)
+
+
+def select_from_catalog(work_type: str, *, root=None) -> dict | None:
+    """Build a ROUTES-compatible entry from scout's local model catalog."""
+    catalog = load_catalog(root)
+    if not catalog:
+        return None
+    role = WORK_ROLE.get(work_type)
+    role_entry = (catalog["roles"].get(role) or {}) if role else {}
+    chain_ids = [str(item) for item in (role_entry.get("chain") or []) if item]
+    if not chain_ids:
+        return None
+    entries = []
+    for index, model_id in enumerate(chain_ids):
+        entry = catalog["models"].get(model_id) or {}
+        if not isinstance(entry, dict):
+            continue
+        item = dict(entry)
+        item["id"] = model_id
+        item["_order"] = index
+        item["_score"] = _entry_score(item, work_type)
+        entries.append(item)
+    if not entries:
+        return None
+    entries.sort(key=lambda item: (-item["_score"], item["_order"]))
+    family = lambda item: str(item.get("family") or FAMILY.get(item["id"]) or "?")
+    main = entries[0]
+    escalate = next((item for item in entries[1:] if family(item) != family(main)), None)
+    if escalate is None:
+        escalate = next((item for item in entries[1:] if item["id"] != main["id"]), None)
+    return {
+        "main": main["id"],
+        "escalate": escalate["id"] if escalate else None,
+        "why": f"catalog:{role}; " + (role_entry.get("why") or "local scout model"),
+        "source": "catalog",
+        "role": role,
+        "family": [family(main), family(escalate) if escalate else None],
+    }
+
+
 RISK_WORDS = (
     "auth", "token", "secret", "password", "credential", "migration", "migrate",
     "payment", "billing", "crypto", "encrypt", "decrypt", "permission", "role",
@@ -164,7 +257,8 @@ def _remaining_pct(entry: dict) -> float:
     return max(0.0, 100.0 - worst)
 
 
-def route(work_order, *, quota=None, allow_escalate: bool = False, **signals) -> dict:
+def route(work_order, *, quota=None, allow_escalate: bool = False,
+          root=None, use_catalog: bool = False, **signals) -> dict:
     """Tra ke hoach dinh tuyen: work_type, mode, chain, ly do, quota.
 
     Chinh sach khi co quota:
@@ -175,7 +269,8 @@ def route(work_order, *, quota=None, allow_escalate: bool = False, **signals) ->
       4. het ca -> exhausted=True (recipe chan, tru --force).
     """
     work_type, detected = classify_work(work_order, **signals)
-    entry = ROUTES[work_type]
+    entry = (select_from_catalog(work_type, root=root) if use_catalog else None)
+    entry = entry or ROUTES[work_type]
     main, escalate = entry["main"], entry.get("escalate")
     chain = [model for model in (main, escalate) if model]
     quota_info: dict = {}
@@ -219,10 +314,12 @@ def route(work_order, *, quota=None, allow_escalate: bool = False, **signals) ->
         "degraded": mode == "fallback",
         "why": entry["why"],
         "signals": detected,
-        "family": [FAMILY.get(model, "?") for model in chain],
+        "family": (entry.get("family") if entry.get("family")
+                   else [FAMILY.get(model, "?") for model in chain]),
         "quota": quota_info,
         "quota_available": bool(getattr(quota, "available", False)) if quota else False,
         "exhausted": exhausted,
+        "catalog_source": entry.get("source", "static") if isinstance(entry, dict) else "static",
     }
 
 
@@ -257,6 +354,7 @@ def _cli(argv=None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--check", action="store_true", help="chi validate bang dinh tuyen")
     parser.add_argument("--quota", action="store_true", help="doc quota that tu opencode stats")
+    parser.add_argument("--static", action="store_true", help="bo qua catalog, dung ROUTES tinh")
     parser.add_argument("--root", default=".")
     args = parser.parse_args(argv)
 
@@ -281,7 +379,7 @@ def _cli(argv=None) -> int:
     if args.quota:
         import quota as quota_module
         tracker = quota_module.QuotaTracker(root=args.root).refresh()
-    plan = route(order, quota=tracker)
+    plan = route(order, quota=tracker, root=args.root, use_catalog=not args.static)
     if args.json:
         print(json.dumps(plan, ensure_ascii=False, indent=2))
     else:

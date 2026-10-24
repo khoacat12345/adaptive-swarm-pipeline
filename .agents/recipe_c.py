@@ -1234,7 +1234,8 @@ def main(argv: list[str] | None = None) -> int:
         import quota as quota_module
         tracker = quota_module.QuotaTracker(root=args.root).refresh()
         route_plan = router.route(order, quota=tracker,
-                                  allow_escalate=args.allow_escalate)
+                                  allow_escalate=args.allow_escalate,
+                                  root=args.root, use_catalog=True)
         problems = router.validate_roles()
         if problems:
             raise SystemExit("router khong hop le: " + "; ".join(problems[:5]))

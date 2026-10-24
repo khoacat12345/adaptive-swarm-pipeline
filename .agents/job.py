@@ -610,7 +610,8 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             order.input_context = (f"USER DIRECTION (must follow): {opinion}\n"
                                    f"{order.input_context}")
             write_control(root, {**control, "opinion": ""})
-        route_plan = (router.route(order, quota=tracker, allow_escalate=allow_escalate)
+        route_plan = (router.route(order, quota=tracker, allow_escalate=allow_escalate,
+                                  root=root, use_catalog=True)
                       if use_router else None)
         if route_plan and route_plan.get("exhausted") and not force:
             records.append({"id": item["id"], "status": "blocked",

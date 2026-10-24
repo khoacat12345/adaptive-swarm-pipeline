@@ -24,6 +24,8 @@ Most coding agents trust themselves. This one does not.
   the coder, so it cannot rubber-stamp its own work.
 - **Hard budget** — soft 8 / hard 16 requests / 300 seconds per run; fallback switches models inside
   the same call on 429/5xx/timeout.
+- **Catalog-aware routing** �?" `scout` discovers local models; `router` selects from
+  the local catalog and no longer assumes OpenCode Go is available.
 - **Quota-aware routing** — reads real spend from `opencode stats`, tracks the shared
   plan budget *and* per-model caps, then picks main -> abundant escalate -> cheap/free.
 - **Append-only ledger** — every event is evidence; replay, dashboard and memory read
