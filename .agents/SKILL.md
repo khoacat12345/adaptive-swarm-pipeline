@@ -136,3 +136,17 @@ python .agents/tests/test_telegram.py       # 15/15 (bot 2 chieu)
 | `.agents/safe_writer.py` | nguoi ghi file duy nhat (backup/atomic/rollback) |
 | `.agents/draft/` | ban nhap cua Coder (de xem diff) |
 | `.agents/backups/` | ban truoc khi ghi (de rollback/diff) |
+
+## OpenCode Meeting v1.0
+
+- `--mode panel` la mac dinh (giu nguyen 352 test legacy).
+- `--mode meeting` la phong hop tranh bien moi: Round 1 doc lap, toi da 1 vong
+  rebuttal co muc tieu, toi da 2 reviewer + Coder, khong Round 3.
+- Meeting bat buoc `--reviewer wave`; transcript that nam trong ledger event
+  `meeting.message`; dashboard co Chat/War Room/Report.
+- Budget: soft 8 / hard 16 / 300s; cham 16 -> hard abort; Coder initial <=8,
+  rebuttal <=2.
+- Core `.agents/core/` khong import OpenCode CLI; adapter nam o `.agents/providers/`.
+- Provider mac dinh: `OpenCodeAdapter`; test nhanh: `MockAdapter` qua DI.
+- Known limitations: chua co MCP/API production, chua co OS sandbox, dashboard local
+  single-user, plan <=6 node/<=2 nhanh.

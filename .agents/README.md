@@ -1277,3 +1277,57 @@ Nghiem thu **32/32 PASS** (gom Phase 5 hoi quy).
 backoff luy tien cho cooldown, 5 sub-agent song song (QA/security/perf/doc), bridge
 Telegram/Discord, va do model tra phi tren task that (benchmark hien chi la smoke vi
 chi phi agentic cao).
+
+---
+
+## OpenCode Meeting v1.0 (official release)
+
+Ban 1.0 bo sung **meeting mode** ben canh panel mode cu.
+
+### Hai che do
+
+```powershell
+# Mac dinh: panel, 4 reviewer doc lap, khong hop
+python .agents/job.py --plan plan.json --mode panel --reviewer wave
+
+# Meeting: Round 1 doc lap + toi da 1 vong rebuttal co muc tieu
+python .agents/job.py --plan plan.json --mode meeting --reviewer wave
+```
+
+- `--mode panel` la mac dinh; 352 test legacy khong doi hanh vi.
+- `--mode meeting` bat buoc `--reviewer wave` (du 4 vai Security, QA, Perf, Docs).
+- Meeting chi mo Round 2 khi Round 1 co conflict.
+- Round 2 toi da 2 reviewer + Coder; patch moi bat buoc Security + QA re-check.
+- Khong co Round 3. Sau Round 2 van reject/escalate -> khong apply.
+- Transcript thuc duoc ghi vao ledger qua `meeting.message` va hien thi tren Chat/War Room/Report.
+
+### Invariants
+
+1. **Single Writer**: chi Lead ghi file that qua `safe_writer`.
+2. **Machine Verify**: `verify_command` exit 0 la trong tai cuoi; khong reviewer nao override.
+3. **Khong chat tu do**: Round 1 doc lap; Round 2 toi da 1 vong, toi da 2 reviewer + Coder.
+4. **Budget**: soft cap 8 / hard cap 16 request, 300 giay; cham 16 -> hard abort.
+5. **Panel compatibility**: `--mode panel` mac dinh; khong hoi quy test cu.
+6. **Decoupling**: `.agents/core/` khong import CLI/OpenCode; provider adapter nam trong `.agents/providers/`.
+
+### Provider adapters
+
+```text
+providers/base_adapter.py       AgentReply + LLMAdapter
+providers/opencode_adapter.py   OpenCode CLI adapter (default)
+providers/mock_adapter.py       deterministic adapter cho test
+providers/registry.py           build adapter theo config/env
+```
+
+`workers.py` nhan `adapter=` qua dependency injection. Mac dinh van dung OpenCode CLI;
+test meeting co the dung `MockAdapter` ma khong spawn process.
+
+### Known limitations
+
+- Chua co MCP server/API adapter production; moi co interface + mock + OpenCode adapter.
+- Chua ho tro moi closed model; can them provider adapter.
+- Chua co sandbox cap OS/container; verify van chay tren may that.
+- Dashboard la local, single-user, bind loopback.
+- Plan validator gioi han <=6 node, <=2 nhanh.
+- Meeting mode khong phu hop task khong co verify may hoac chat tu do khong gioi han.
+- Reviewer LLM khong thay the con nguoi; ket qua van can review/approval cho task rui ro cao.
