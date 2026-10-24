@@ -32,8 +32,16 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-DEFAULT_BIN = (shutil.which("opencode")
-               or os.path.join(os.environ.get("APPDATA") or "", "npm", "opencode.cmd"))
+def _default_bin() -> str:
+    found = shutil.which("opencode")
+    if found:
+        return found
+    if os.name == "nt":
+        return os.path.join(os.environ.get("APPDATA") or "", "npm", "opencode.cmd")
+    return "opencode"
+
+
+DEFAULT_BIN = _default_bin()
 
 # Han muc $/thang cua tung model tren OpenCode Go (tai lieu Go, 2026-10).
 CAPS = {

@@ -33,8 +33,12 @@ from pathlib import Path
 
 import secret_scan
 
-_NPM_BIN = os.path.join(os.environ.get("APPDATA") or "", "npm")
-_SHIM = os.path.join(_NPM_BIN, "opencode.cmd")
+if os.name == "nt":
+    _NPM_BIN = os.path.join(os.environ.get("APPDATA") or "", "npm")
+    _SHIM = os.path.join(_NPM_BIN, "opencode.cmd")
+else:
+    _NPM_BIN = ""
+    _SHIM = shutil.which("opencode") or "opencode"
 
 
 def unwrap_cmd_shim(binary: str) -> str:

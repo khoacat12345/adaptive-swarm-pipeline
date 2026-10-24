@@ -150,3 +150,10 @@ python .agents/tests/test_telegram.py       # 15/15 (bot 2 chieu)
 - Provider mac dinh: `OpenCodeAdapter`; test nhanh: `MockAdapter` qua DI.
 - Known limitations: chua co MCP/API production, chua co OS sandbox, dashboard local
   single-user, plan <=6 node/<=2 nhanh.
+
+## Platforms
+
+Works on Windows, Linux and macOS with Python 3.11+. Use `python3` on POSIX and
+`python` on Windows. `dashboard.sh` opens the dashboard on POSIX; `dashboard.cmd`
+on Windows. OpenCode binary is resolved from `PATH`, `OPENCODE_BIN`, then the
+npm shim (Windows).

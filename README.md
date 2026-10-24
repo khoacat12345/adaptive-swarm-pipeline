@@ -6,7 +6,8 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **experimental**. Built and tested on Windows (Python 3.12 + OpenCode Go).
+> Status: **v1.0.3** (stable core). Original acceptance on Windows; Linux/macOS
+> paths are supported and covered by the cross-platform CI workflow.
 >
 > Built with AI assistance; every change is machine-verified.
 
@@ -21,7 +22,7 @@ Most coding agents trust themselves. This one does not.
   interrupted transaction.
 - **Cross-family review** — the reviewer must come from a different model family than
   the coder, so it cannot rubber-stamp its own work.
-- **Hard budget** — 8 requests / 300 seconds per run; fallback switches models inside
+- **Hard budget** — soft 8 / hard 16 requests / 300 seconds per run; fallback switches models inside
   the same call on 429/5xx/timeout.
 - **Quota-aware routing** — reads real spend from `opencode stats`, tracks the shared
   plan budget *and* per-model caps, then picks main -> abundant escalate -> cheap/free.
@@ -29,26 +30,53 @@ Most coding agents trust themselves. This one does not.
   the same source.
 - **Single writer** — only the Lead writes project files, always through `safe_writer`.
 
-## Quick start (Windows)
+## Install (Windows / Linux / macOS)
 
-Requirements: Python 3.12+, OpenCode CLI (and optionally Node for JS tasks).
+Requirements: Python 3.11+ (3.12 recommended), Git, and the OpenCode CLI in `PATH`.
 
 ```bash
 git clone https://github.com/khoacat12345/adaptive-swarm-pipeline.git
 cd adaptive-swarm-pipeline
-
-# 1) discover models / auth and preview the config
-python .agents/scout.py
-
-# 2) write .agents/config.json
-python .agents/scout.py --write
-
-# 3) run a task
-python .agents/recipe_c.py --order scratch/swarm_demo/order.json --route --json
 ```
 
-`--route` uses the W0-W8 work-type router and the real quota tracker.
-Without `--route`, the coder chain comes from `.agents/config.json`.
+### Per machine
+
+```bash
+# Linux/macOS
+python3 .agents/scout.py          # preview
+python3 .agents/scout.py --write  # write .agents/config.json
+
+# Windows PowerShell
+python .agents\scout.py
+python .agents\scout.py --write
+```
+
+### Per project
+
+Copy the source `.agents/` and `.opencode/` folders into the project, then run
+`scout --write` and the acceptance smoke test.
+
+```bash
+python3 .agents/tests/test_phase4.py --fast
+```
+
+Full cross-platform setup, optional skill discovery, dashboard and MCP notes:
+**[docs/INSTALL.md](docs/INSTALL.md)**.
+
+### First task
+
+```bash
+python3 .agents/recipe_c.py --order scratch/swarm_demo/order.json --route --json
+```
+
+Panel mode is the default. Meeting mode is opt-in:
+
+```bash
+python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --decision approve
+```
+
+`--mode meeting` requires `--reviewer wave`; it adds independent Round 1 plus at
+most one targeted rebuttal and a machine re-verify before Lead applies.
 
 ## What a Work Order looks like
 
@@ -73,9 +101,10 @@ Level 3 takes two or more and runs as one atomic transaction.
 
 ## Dashboard (mission control)
 
-Open it with `dashboard.cmd` (view-only) or `job.py --wait --open` (full control with a token).
+Open it with `dashboard.cmd` on Windows or `./dashboard.sh` on Linux/macOS, or
+`job.py --wait --open` for full control with a token.
 
-Left sidebar: **Overview, Plan, Chat, History, Quota, Drafts, Settings**.
+Left sidebar: **Overview, Plan, Chat, Workspaces, Usage, Drafts, Settings**.
 
 - **Chat** is a chronological timeline (oldest first) with `HH:MM:SS` on every event;
   logs are not shown on the overview.
@@ -112,8 +141,8 @@ python .agents/job.py --plan plan.json --root . --reviewer wave --wait --open
 
 Four read-only reviewers run **in parallel** (security, QA, perf, docs) and their
 verdicts are aggregated: any reject blocks the apply. The wave is **budget-aware**:
-it runs only as many reviewers as the 8-request cap allows and records the rest as
-`skipped`. Default remains the 0-request heuristic reviewer.
+it uses the wave reservation/burst rules (soft 8 / hard 16) and records any
+unused roles as `skipped`. Default remains the 0-request heuristic reviewer.
 
 Free dry-run (same free model for all four roles, $0):
 
@@ -180,13 +209,16 @@ Hard model-selection tasks live in `.agents/tests/hard_tasks.py`; see
 | `.agents/ledger.py`, `schema.py`, `replay.py`, `dashboard.py` | evidence + observability |
 | `.agents/tests/` | acceptance suites and hard tasks |
 
+Install guide: [`docs/INSTALL.md`](docs/INSTALL.md).
+
 Full runbook: [`.agents/README.md`](.agents/README.md) (Vietnamese, no diacritics)
 and [`.agents/SKILL.md`](.agents/SKILL.md).
 
 ## Limitations (honest)
 
-- Sequential execution; no parallel worktrees or merge gate yet.
-- Windows-first paths (a Linux/macOS port is straightforward but not done).
+- Sequential execution; parallel independent workstreams/merge gate are roadmap (v1.5).
+- Linux/macOS paths are supported; the original acceptance run was on Windows.
+- No OS/container sandbox: verify commands run on the real machine.
 - Verification is only as strong as your `verify_command`; a weak test gives false confidence.
 - No repo-scale indexing/RAG; context is limited to the files you list in the order.
 - Quota figures are read locally from `opencode stats`; the console remains the source of truth.

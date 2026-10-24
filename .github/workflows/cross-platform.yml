@@ -1,0 +1,33 @@
+﻿name: cross-platform
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile
+        run: python -m compileall -q .agents/core .agents/providers .agents/workers.py .agents/recipe_c.py .agents/job.py .agents/dashboard.py .agents/replay.py
+      - name: Core protocol
+        run: python .agents/tests/test_protocol.py
+      - name: Round 1
+        run: python .agents/tests/test_round1.py
+      - name: Policy and budget
+        run: python .agents/tests/test_rebuttal_policy.py
+      - name: Adapter boundary
+        run: python .agents/tests/test_adapter.py
+      - name: Meeting UI contract
+        run: python .agents/tests/test_meeting_ui.py
+      - name: SSE
+        run: python .agents/tests/test_sse.py
+      - name: Dashboard/replay smoke
+        run: python .agents/tests/test_phase4.py --fast

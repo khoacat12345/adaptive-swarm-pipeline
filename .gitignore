@@ -12,7 +12,9 @@
 !/README.md
 !/LICENSE
 !/dashboard.cmd
+!/dashboard.sh
 !/docs/
+!/.github/
 !/.gitignore
 
 # Rac he dieu hanh

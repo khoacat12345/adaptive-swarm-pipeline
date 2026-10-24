@@ -193,7 +193,7 @@ def build_markdown(plan: dict, decision: dict | None = None,
         lines.append("")
     lines.append("## Reproduce")
     lines.append("")
-    lines.append("```powershell")
+    lines.append("```bash")
     lines.append("python .agents/job.py --plan " + str(plan.get("_source") or ".agents/tmp/plan.json") +
                  " --root . --wait --open")
     lines.append("```")

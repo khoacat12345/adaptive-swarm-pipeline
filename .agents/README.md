@@ -1331,3 +1331,25 @@ test meeting co the dung `MockAdapter` ma khong spawn process.
 - Plan validator gioi han <=6 node, <=2 nhanh.
 - Meeting mode khong phu hop task khong co verify may hoac chat tu do khong gioi han.
 - Reviewer LLM khong thay the con nguoi; ket qua van can review/approval cho task rui ro cao.
+
+## Cross-platform (Windows / Linux / macOS)
+
+Pipeline source is pure Python and runs on Windows, Linux and macOS.
+
+```bash
+# Linux/macOS
+python3 .agents/scout.py --write
+python3 .agents/tests/test_phase4.py --fast
+./dashboard.sh
+```
+
+Windows:
+
+```powershell
+python .agents\scout.py --write
+python .agents\tests\test_phase4.py --fast
+.\dashboard.cmd
+```
+
+OpenCode binary lookup covers `PATH`, `OPENCODE_BIN`, and (on Windows) the npm shim.
+For project setup and MCP notes see `docs/INSTALL.md` at the repository root.
