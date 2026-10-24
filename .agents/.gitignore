@@ -27,6 +27,7 @@ __pycache__/
 *credential*
 *credentials*
 *secret*
+!secret_scan.py
 *password*
 .npmrc
 .pypirc
