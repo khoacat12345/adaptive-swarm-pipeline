@@ -24,6 +24,8 @@ Server chi bind 127.0.0.1 (khong mo ra mang).
 from __future__ import annotations
 
 import json
+import select
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -304,6 +306,15 @@ def make_handler(root: Path, ledger: Path):
                     while True:
                         line = handle.readline()
                         if not line:
+                            # Detect a closed client promptly instead of waiting
+                            # for the next heartbeat write to fail (macOS can
+                            # take seconds to surface the broken pipe).
+                            try:
+                                readable, _, _ = select.select([self.connection], [], [], 0)
+                                if readable and self.connection.recv(1, socket.MSG_PEEK) == b"":
+                                    return
+                            except OSError:
+                                return
                             if time.monotonic() - last_heartbeat >= 5:
                                 payload = json.dumps({"ts": time.time()}, ensure_ascii=False)
                                 self.wfile.write(

@@ -134,6 +134,7 @@ def test_sse(checks: Checks) -> None:
                          payload)
             checks.check("sse: event id", bool(event_id), event_id)
         finally:
+            response.close()
             conn.close()
 
         # Reconnect after the first byte offset: the first event must not repeat.
@@ -146,6 +147,7 @@ def test_sse(checks: Checks) -> None:
                          payload is not None and payload.get("event_type") == "recipe.coder",
                          payload)
         finally:
+            response.close()
             conn.close()
 
         # A filtered stream must not send another run's events.
@@ -163,12 +165,20 @@ def test_sse(checks: Checks) -> None:
             checks.check("sse: run filter", all(item == "r1" for item in seen) and seen,
                          seen)
         finally:
+            response.close()
             conn.close()
 
-        time.sleep(0.4)
-        alive = [item for item in threading.enumerate()
-                 if item is not thread and item.is_alive() and "Thread-" in item.name]
-        checks.check("sse: handler threads cleaned", len(alive) <= 1, alive)
+        # HTTP handler shutdown is asynchronous. Poll briefly instead of
+        # assuming macOS schedules the close within 400 ms.
+        deadline = time.time() + 3.0
+        alive = []
+        while time.time() < deadline:
+            alive = [item for item in threading.enumerate()
+                     if item is not thread and item.is_alive() and "Thread-" in item.name]
+            if not alive:
+                break
+            time.sleep(0.1)
+        checks.check("sse: handler threads cleaned", not alive, alive)
     finally:
         server.shutdown()
         server.server_close()
