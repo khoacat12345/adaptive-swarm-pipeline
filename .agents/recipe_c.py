@@ -310,6 +310,8 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
     run_id = run_id or ledger.new_run_id("rc")
     if reviewer is not None and hasattr(reviewer, "bind_run"):
         reviewer.bind_run(run_id, root_path, log)
+    if reviewer is not None and hasattr(reviewer, "bind_coder"):
+        reviewer.bind_coder(coder)
     wave_reviewer = (reviewer is not None
                      and getattr(reviewer, "kind", "") in
                      ("wave-reviewer", "meeting-reviewer"))
@@ -713,6 +715,17 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                       "fallback_attempts": len(getattr(coder, "attempts", []) or [])},
                 root=root_path,
             )
+        if getattr(reviewer, "kind", "") == "meeting-reviewer":
+            initial_calls = max(0, int(getattr(coder, "calls", 0) or 0)
+                                - base_coder_calls)
+            if initial_calls > 8:
+                report["budget"]["exceeded"] = "coder_initial"
+                report["error"] = "meeting coder initial cap 8 reached"
+                log_budget_event("meeting.aborted", {
+                    "task_id": work_order.task_id, "round": 1,
+                    "reason": report["error"], "used": initial_calls},
+                    status="fail")
+                break
         if not budget_check(starting=False):
             # Mot lan fallback co the dot nhieu request: dung ngay, chua apply gi.
             if log:
@@ -853,6 +866,76 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                 root=root_path,
             )
 
+        # Meeting Round 2 may ask Coder for one new patch.  This callback
+        # applies it to a draft and verifies it; it never writes the project.
+        if reviewer is not None and hasattr(reviewer, "bind_patch_preparer"):
+            def _prepare_meeting_patch(raw_patches, _budget=None):
+                patches = raw_patches if isinstance(raw_patches, dict) else {}
+                base = dict(new_contents)
+                prepared: dict[str, str] = dict(base)
+                ladders: dict[str, dict] = {}
+                failures: list[str] = []
+                for relative in targets:
+                    patch = patches.get(relative)
+                    if patch is None:
+                        continue
+                    try:
+                        ladder = format_ladder.apply_patch(base[relative], patch)
+                        ladders[relative] = ladder
+                        prepared[relative] = ladder["content"]
+                    except Exception as exc:  # noqa: BLE001
+                        failures.append(f"{relative}: {exc}")
+                if failures:
+                    return {"error": "; ".join(failures)[:400],
+                            "contents": prepared, "ladders": ladders}
+                draft_paths_new: dict[str, Path] = {}
+                draft_error = None
+                for relative in targets:
+                    draft_path = gate.draft_path(work_order.task_id or "task", relative)
+                    gate.assert_can_write(permissions.ROLE_CODER, draft_path)
+                    draft_path.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        draft_path.write_text(prepared[relative],
+                                              encoding=encodings[relative], newline="")
+                    except (OSError, UnicodeEncodeError) as exc:
+                        draft_error = f"{relative}: {exc}"
+                        break
+                    draft_paths_new[relative] = draft_path
+                if draft_error:
+                    return {"error": draft_error[:400], "contents": prepared,
+                            "ladders": ladders}
+                if multi_file:
+                    verify = _verify_draft_set(
+                        work_order, gate=gate, root=root_path, run_id=run_id,
+                        round_index=round_index + 1, contents=prepared,
+                        encodings=encodings, verify_timeout=verify_timeout, log=log,
+                    )
+                    diffs = {relative: _diff(originals[relative],
+                                             prepared[relative], relative)
+                             for relative in targets}
+                    old_contents = dict(current_contents)
+                    new_contents_map = prepared
+                    new_content = ""
+                    diff = "\n".join(diffs.values())
+                else:
+                    verify = _verify_draft(
+                        work_order, gate=gate, root=root_path, run_id=run_id,
+                        round_index=round_index + 1, target_rel=target_rel,
+                        content=prepared[target_rel],
+                        draft_path=draft_paths_new[target_rel],
+                        verify_timeout=verify_timeout, log=log,
+                        encoding=encodings[target_rel],
+                    )
+                    diffs = None
+                    old_contents = None
+                    new_contents_map = None
+                    new_content = prepared[target_rel]
+                    diff = _diff(originals[target_rel], prepared[target_rel], target_rel)
+                return {"contents": prepared, "verify": verify, "ladders": ladders,
+                        "diff": diff, "diffs": diffs, "new_content": new_content,
+                        "new_contents": new_contents_map, "old_contents": old_contents}
+            reviewer.bind_patch_preparer(_prepare_meeting_patch)
+
         # --- 5. Reviewer doc diff (Level 2, read-only) -------------------
         if work_order.level >= 2 and reviewer is not None:
             if multi_file:
@@ -878,6 +961,25 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                     level=work_order.level, sink=sink, **review_kwargs,
                 )
             report["review"] = dict(review)
+            # An approved Round 2 can carry a newly verified patch.  Only the
+            # recipe/Lead may make this content visible to the write stage.
+            rebuttal = review.get("rebuttal") or {}
+            if review.get("verdict") == "approve" and rebuttal.get("contents"):
+                verify_info = rebuttal.get("verify") or {}
+                if verify_info.get("exit_code") in (0, "0"):
+                    new_contents = dict(rebuttal["contents"])
+                    draft_verify = dict(verify_info)
+                    report["draft_verify"] = dict(verify_info)
+                    report["meeting_rebuttal"] = {
+                        "participants": rebuttal.get("participants") or [],
+                        "round2": rebuttal.get("round2") or [],
+                    }
+                else:
+                    review = dict(review)
+                    review["verdict"] = "reject"
+                    review.setdefault("reasons", []).append(
+                        "rebuttal patch verify failed before apply")
+                    report["review"] = dict(review)
             report["reviewer_fallback"] = bool(review.get("fallback_reason"))
             if report["reviewer_fallback"]:
                 report["budget"]["burst_used"] = True

@@ -1217,10 +1217,18 @@ class MeetingReviewer(Reviewer):
         self.run_id = "meeting"
         self.last_orchestrator = None
         self.last_result = None
+        self.coder = None
+        self._coder_base = 0
+        self.prepare_patch = None
+        self.rebuttal_used = False
+        self.breaker = None
 
     def bind_run(self, run_id: str, root, log: bool = True) -> None:
         """Recipe calls this before review so meeting events land in its run."""
         self.run_id = str(run_id or "meeting")
+        self.rebuttal_used = False
+        self.last_result = None
+        self.breaker = None
         if not log:
             # Keep a custom sink supplied by a test/embedding caller; without
             # one there is simply no ledger event.
@@ -1235,8 +1243,18 @@ class MeetingReviewer(Reviewer):
             )
         self.event_sink = sink
 
+    def bind_coder(self, coder) -> None:
+        self.coder = coder
+        self._coder_base = int(getattr(coder, "calls", 0) or 0)
+
+    def bind_patch_preparer(self, prepare) -> None:
+        """Recipe injects a callback that draft-verifies a new patch."""
+        self.prepare_patch = prepare
+
     def _run(self, work_order, *, context: dict, sink=None) -> dict:
+        from core.budget import BudgetExceeded, CircuitBreaker, MeetingBudget
         from core.meeting import MeetingContext, MeetingOrchestrator
+        from core.policy import VetoPolicy
         from core.protocol import Decision
 
         before = sum(int(getattr(item, "calls", 0) or 0)
@@ -1246,29 +1264,144 @@ class MeetingReviewer(Reviewer):
             max_workers=self.max_workers, name=self.name,
         )
         meeting_context = MeetingContext(work_order=work_order, **context)
+        policy = VetoPolicy()
+        self.breaker = CircuitBreaker()
+        decision = None
+        result = None
+        budget = None
+        prepared = None
         try:
             orchestrator.open(work_order, meeting_context)
             result = orchestrator.run_round1(
                 work_order, meeting_context, sink=sink)
-            conflicts = result.conflicts
+            coder_calls = 0
+            if self.coder is not None:
+                coder_calls = max(0, int(getattr(self.coder, "calls", 0) or 0)
+                                  - self._coder_base)
+            budget = MeetingBudget()
+            budget.seed(coder_initial=coder_calls, round1=len(result.findings))
+
             if result.all_approved:
-                decision = Decision(
-                    verdict="approve",
-                    reasons=["4/4 reviewer approve"], round=1,
-                )
+                decision = Decision(verdict="approve",
+                                    reasons=["4/4 reviewer approve"], round=1)
             else:
-                vetoes = [item.role for item in conflicts
-                          if item.role in ("security", "qa") and item.evidence_refs]
-                dissent = [item.role for item in conflicts
-                          if item.role not in vetoes]
-                decision = Decision(
-                    verdict="reject",
-                    reasons=[item.body for item in conflicts[:4]] or ["meeting reject"],
-                    vetoes=vetoes, dissent=dissent, round=1,
-                )
+                participants = orchestrator.participants_for_rebuttal(
+                    result.conflicts, new_patch=False)
+                prepared = None
+                if (self.coder is None or self.prepare_patch is None
+                        or self.rebuttal_used or not budget.can_open_round2()):
+                    if budget is not None and budget.reason:
+                        orchestrator.abort(budget.reason, work_order=work_order)
+                    decision = policy.evaluate(
+                        orchestrator.blackboard.votes, result.conflicts,
+                        verify_result=meeting_context.verify_result, round_no=1)
+                    if decision.verdict == "approve":
+                        decision = Decision("escalate",
+                                            ["cannot open rebuttal without coder/verifier"],
+                                            round=1)
+                else:
+                    self.rebuttal_used = True
+                    feedback = self._rebuttal_feedback(result)
+                    try:
+                        if not budget.can_spend("coder", "rebuttal"):
+                            raise BudgetExceeded(budget.reason or "coder rebuttal budget")
+                        budget.spend("coder", "rebuttal")
+                        if context.get("diffs") is not None:
+                            raw = self.coder.patch_set(
+                                work_order,
+                                current_files=context.get("new_contents") or {},
+                                feedback=feedback, round_index=2)
+                        else:
+                            one = self.coder.patch(
+                                work_order,
+                                current_content=context.get("new_content", ""),
+                                feedback=feedback, round_index=2)
+                            target = (context.get("target") or
+                                      (work_order.target_files[0]
+                                       if work_order.target_files else ""))
+                            raw = {target: one}
+                        prepared = self.prepare_patch(raw, budget)
+                    except BudgetExceeded as exc:
+                        orchestrator.abort(str(exc), work_order=work_order, round_no=2)
+                        decision = Decision("reject", [str(exc)[:300]], round=2)
+                    except Exception as exc:  # noqa: BLE001
+                        signature = f"coder:{type(exc).__name__}:{str(exc)[:120]}"
+                        if self.breaker is not None and self.breaker.observe(signature):
+                            orchestrator.abort("circuit breaker: repeated coder error",
+                                               work_order=work_order, round_no=2)
+                        decision = Decision(
+                            "reject", [f"rebuttal patch/verify failed: {type(exc).__name__}: {str(exc)[:240]}"],
+                            round=2)
+                    if prepared is not None and prepared.get("error"):
+                        signature = f"prepare:{prepared['error'][:160]}"
+                        if self.breaker is not None and self.breaker.observe(signature):
+                            orchestrator.abort("circuit breaker: repeated patch error",
+                                               work_order=work_order, round_no=2)
+                        decision = Decision(
+                            "reject", [str(prepared["error"])[:300]], round=2)
+                        prepared = None
+                    if prepared is not None and not decision:
+                        verify = prepared.get("verify") or {}
+                        if verify.get("exit_code") not in (0, "0"):
+                            decision = Decision(
+                                "reject", ["rebuttal patch verify failed"], round=2)
+                            prepared = None
+                    if prepared is not None and not decision:
+                        participants = orchestrator.participants_for_rebuttal(
+                            result.conflicts, new_patch=True)
+                        if len(participants) < 2 or "security" not in participants or "qa" not in participants:
+                            decision = Decision("reject",
+                                                ["new patch requires Security + QA re-check"],
+                                                round=2)
+                        else:
+                            # Record Coder's proposal before the second vote.
+                            orchestrator.record_rebuttal(
+                                work_order, sender="coder", recipients=participants,
+                                body="rebuttal patch prepared for re-check", sink=sink)
+                            if not budget.can_spend("reviewer", "round2", len(participants)):
+                                orchestrator.abort(budget.reason or "round2 budget",
+                                                   work_order=work_order, round_no=2)
+                                decision = Decision("reject", [budget.reason or "round2 budget"],
+                                                    round=2)
+                            else:
+                                budget.spend("reviewer", "round2", len(participants))
+                                new_context = MeetingContext(
+                                    work_order=work_order,
+                                    brief=meeting_context.brief,
+                                    diff=prepared.get("diff", ""),
+                                    new_content=prepared.get("new_content", ""),
+                                    old_content=meeting_context.old_content,
+                                    level=meeting_context.level,
+                                    verify_result=verify,
+                                    diffs=prepared.get("diffs"),
+                                    new_contents=prepared.get("new_contents"),
+                                    old_contents=prepared.get("old_contents"),
+                                )
+                                result2 = orchestrator.run_round2(
+                                    work_order, new_context, participants,
+                                    sink=sink, new_patch=True)
+                                decision = policy.evaluate(
+                                    orchestrator.blackboard.votes,
+                                    orchestrator.last_result.conflicts,
+                                    verify_result=verify, round_no=2)
+                                if decision.verdict == "approve":
+                                    prepared["participants"] = participants
+                                    prepared["round2"] = [dict(item)
+                                                          for item in result2.findings]
+                                else:
+                                    prepared = None
+            if decision is None:
+                decision = Decision("reject", ["meeting could not reach a decision"], round=2)
             orchestrator.close(decision, work_order=work_order)
             aggregate = orchestrator.aggregate(result)
             aggregate["decision"] = decision.to_dict()
+            aggregate["budget"] = budget.snapshot() if budget else None
+            if decision.verdict == "approve":
+                aggregate["verdict"] = "approve"
+            else:
+                aggregate["verdict"] = "reject"
+            if prepared:
+                aggregate["rebuttal"] = prepared
             aggregate["meeting"] = orchestrator.blackboard.snapshot()
         except Exception as exc:  # noqa: BLE001
             # A meeting infrastructure failure must never auto-approve.
@@ -1280,6 +1413,7 @@ class MeetingReviewer(Reviewer):
                 "reasons": [f"meeting error: {type(exc).__name__}: {str(exc)[:240]}"],
                 "reviewer": self.name, "per_role": [], "skipped": [],
                 "meeting": orchestrator.blackboard.snapshot(),
+                "budget": budget.snapshot() if budget else None,
             }
             result = None
         self.calls += max(0, sum(int(getattr(item, "calls", 0) or 0)
@@ -1289,6 +1423,13 @@ class MeetingReviewer(Reviewer):
         if sink is not None:
             sink.write(aggregate)
         return aggregate
+
+    @staticmethod
+    def _rebuttal_feedback(result) -> str:
+        lines = ["ROUND 1 OBJECTIONS - chi phan bien co muc tieu, toi da 1 vong:"]
+        for conflict in result.conflicts or []:
+            lines.append(f"- [{conflict.role}] {conflict.body}")
+        return "\n".join(lines)[:4000]
 
     def review(self, work_order, *, diff, new_content, old_content, level, sink,
                verify_result=None) -> dict:

@@ -186,7 +186,7 @@ class MeetingOrchestrator:
                 "reasons": [f"{type(exc).__name__}: {str(exc)[:300]}"],
             })
 
-    def _message_for_finding(self, work_order, finding: dict) -> AgentMessage | None:
+    def _message_for_finding(self, work_order, finding: dict, *, round_no: int = 1) -> AgentMessage | None:
         role = finding["role"]
         verdict = finding["verdict"]
         reasons = finding.get("reasons") or []
@@ -202,7 +202,7 @@ class MeetingOrchestrator:
                 kind=kind,
                 body=body,
                 evidence_refs=refs if kind == "objection" else [],
-                round=1,
+                round=round_no,
             )
         except Exception:
             return None
@@ -320,6 +320,128 @@ class MeetingOrchestrator:
             "conflicts": [item.to_dict() for item in result.conflicts],
             "meeting": self.blackboard.snapshot(),
         }
+
+
+    # ------------------------------------------------------------------
+    # Round 2
+    # ------------------------------------------------------------------
+    def participants_for_rebuttal(self, conflicts, *, new_patch: bool = False,
+                                  limit: int = 2) -> list[str]:
+        """Choose at most two reviewers; Security/QA are mandatory for a patch."""
+        priority = ("security", "qa", "perf", "docs")
+        selected: list[str] = []
+        if new_patch:
+            for role in ("security", "qa"):
+                if role in self.reviewers and role not in selected:
+                    selected.append(role)
+        for conflict in conflicts or []:
+            role = (conflict.get("role") if isinstance(conflict, dict)
+                    else getattr(conflict, "role", None))
+            role = str(role or "").lower()
+            if role in self.reviewers and role not in selected:
+                selected.append(role)
+        selected.sort(key=lambda item: (priority.index(item)
+                                        if item in priority else 99, item))
+        return selected[:max(0, int(limit))]
+
+    def record_rebuttal(self, work_order, *, sender: str, recipients: list[str],
+                        body: str, sink=None) -> AgentMessage:
+        """Persist Coder's rebuttal before the second vote."""
+        message = AgentMessage(
+            run_id=self._run_id,
+            task_id=str(getattr(work_order, "task_id", "") or ""),
+            sender=sender, recipients=list(recipients), kind="rebuttal",
+            body=str(body or ""), round=2,
+        )
+        self.blackboard.add_message(message)
+        self._emit("meeting.message", {
+            "task_id": getattr(work_order, "task_id", ""),
+            **message.to_dict(),
+        })
+        self._emit("meeting.rebuttal", {
+            "task_id": getattr(work_order, "task_id", ""),
+            "sender": sender, "recipients": list(recipients),
+            "round": 2, "body": body,
+        })
+        return message
+
+    def run_round2(self, work_order, context: MeetingContext,
+                   participants: list[str], *, sink=None,
+                   new_patch: bool = False) -> RoundResult:
+        if not self._opened:
+            raise ProtocolError("meeting chua mo")
+        roles = [str(role).lower() for role in participants]
+        roles = list(dict.fromkeys(roles))
+        if len(roles) > 2:
+            raise ProtocolError("Round 2 chi duoc toi da 2 reviewer")
+        if new_patch and any(role not in roles for role in ("security", "qa")):
+            raise ProtocolError("patch moi bat buoc Security + QA re-check")
+        by_role: dict[str, dict] = {}
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, max(1, len(roles)))) as pool:
+            futures = {
+                pool.submit(self._review_one, role, self.reviewers[role], context, sink): role
+                for role in roles if role in self.reviewers
+            }
+            for future in as_completed(futures):
+                role = futures[future]
+                try:
+                    by_role[role] = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    by_role[role] = _normalise_finding(role, {
+                        "verdict": "error",
+                        "reasons": [f"{type(exc).__name__}: {str(exc)[:300]}"],
+                    })
+        findings: list[dict] = []
+        round_messages: list[AgentMessage] = []
+        round_votes: list[Vote] = []
+        for role in roles:
+            if role not in self.reviewers:
+                continue
+            finding = by_role.get(role) or _normalise_finding(role, {
+                "verdict": "error", "reasons": ["reviewer khong tra ket qua"],
+            })
+            findings.append(finding)
+            vote_verdict = finding["verdict"] if finding["verdict"] in (
+                "approve", "reject", "abstain") else "reject"
+            vote = Vote(role=role, verdict=vote_verdict,
+                        reasons=finding.get("reasons") or [], round=2)
+            self.blackboard.record_vote(vote)
+            round_votes.append(vote)
+            message = self._message_for_finding(work_order, finding, round_no=2)
+            if message is not None:
+                try:
+                    self.blackboard.add_message(message)
+                except ProtocolError:
+                    message = AgentMessage(
+                        run_id=message.run_id, task_id=message.task_id,
+                        sender=role, recipients=["lead"], kind="vote",
+                        body=message.body, round=2,
+                    )
+                    self.blackboard.add_message(message)
+                round_messages.append(message)
+                self._emit("meeting.message", {
+                    "task_id": getattr(work_order, "task_id", ""),
+                    **message.to_dict(),
+                })
+            self._emit("meeting.vote", {
+                "task_id": getattr(work_order, "task_id", ""),
+                **vote.to_dict(),
+            })
+        conflicts = self.detect_conflicts(findings)
+        all_approved = bool(findings) and all(
+            item.get("verdict") == "approve" for item in findings)
+        result = RoundResult(findings=findings, conflicts=conflicts,
+                             messages=round_messages, votes=round_votes,
+                             all_approved=all_approved)
+        self.last_result = result
+        if conflicts:
+            self._emit("meeting.conflict", {
+                "task_id": getattr(work_order, "task_id", ""),
+                "round": 2,
+                "conflicts": [item.to_dict() for item in conflicts],
+                "all_approved": False,
+            })
+        return result
 
     def close(self, decision: Decision | dict, *, work_order=None) -> Decision:
         item = decision if isinstance(decision, Decision) else Decision.from_dict(decision)
