@@ -70,10 +70,10 @@ DEFAULT_OPENCODE_BIN = unwrap_cmd_shim(_SHIM)
 
 # 4 reviewer cho wave (Level 2/3, opt-in). Moi role 1 request.
 WAVE_ROLES = {
-    "security": "opencode-go/glm-5.3",
-    "qa": "opencode-go/claude-haiku-5-5",
+    "security": "opencode/nemotron-3.5-super-vl-free",
+    "qa": "opencode/minimax-m3.1-flash-free",
     "perf": "opencode/deepseek-v4.1-flash-free",
-    "docs": "opencode-go/gpt-6-luna",
+    "docs": "opencode/glm-5.3-flash-free",
 }
 
 

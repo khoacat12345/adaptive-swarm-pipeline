@@ -142,7 +142,8 @@ python .agents/job.py --plan plan.json --root . --reviewer wave --wait --open
 ```
 
 Four read-only reviewers run **in parallel** (security, QA, perf, docs) and their
-verdicts are aggregated: any reject blocks the apply. The wave is **budget-aware**:
+verdicts are aggregated: any reject blocks the apply. The default role models are
+free/local; override with `SWARM_WAVE_ROLES` when you intentionally want paid models. The wave is **budget-aware**:
 it uses the wave reservation/burst rules (soft 8 / hard 16) and records any
 unused roles as `skipped`. Default remains the 0-request heuristic reviewer.
 

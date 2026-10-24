@@ -11,10 +11,10 @@ from __future__ import annotations
 import os
 
 DEFAULT_ROLES = {
-    "security": "opencode-go/glm-5.3",
-    "qa": "opencode-go/claude-haiku-5-5",
+    "security": "opencode/nemotron-3.5-super-vl-free",
+    "qa": "opencode/minimax-m3.1-flash-free",
     "perf": "opencode/deepseek-v4.1-flash-free",
-    "docs": "opencode-go/gpt-6-luna",
+    "docs": "opencode/glm-5.3-flash-free",
 }
 ROLE_ORDER = ("security", "qa", "perf", "docs")
 
