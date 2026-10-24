@@ -128,7 +128,16 @@ def load_catalog(root=None) -> dict:
     roles = data.get("roles") or {}
     if not isinstance(models, dict) or not isinstance(roles, dict):
         return {}
-    return {"models": models, "roles": roles, "path": str(path)}
+    return {"models": models, "roles": roles,
+            "constraints": data.get("constraints") or {},
+            "path": str(path)}
+
+
+def _cost_rank(entry: dict) -> int:
+    if entry.get("is_free"):
+        return 0
+    tier = str(entry.get("cost_tier") or "").lower()
+    return {"free": 0, "low": 1, "medium": 2, "high": 3, "paid": 4}.get(tier, 2)
 
 
 def _entry_score(entry: dict, work_type: str) -> float:
@@ -136,12 +145,12 @@ def _entry_score(entry: dict, work_type: str) -> float:
     weights = CAP_WEIGHTS.get(work_type, {"code": .5, "reasoning": .5})
     score = sum(float(weights.get(key, 0.0)) * float(caps.get(key, 0.0) or 0.0)
                 for key in weights)
-    # Free/local models are preferred when capability is close.
+    # Cost is a real signal, not a cosmetic tie-breaker.  A paid model must
+    # earn a materially better capability score before it beats a free one.
     if entry.get("is_free"):
-        score += 0.01
-    tier = str(entry.get("cost_tier") or "").lower()
-    if tier in ("high", "paid"):
-        score -= 0.05
+        score += 0.02
+    else:
+        score -= 0.04 * _cost_rank(entry)
     return round(score, 4)
 
 
@@ -155,6 +164,10 @@ def select_from_catalog(work_type: str, *, root=None) -> dict | None:
     chain_ids = [str(item) for item in (role_entry.get("chain") or []) if item]
     if not chain_ids:
         return None
+    # W0/W1 are small tasks: if a free/local model exists, never let a paid
+    # model jump in merely because its benchmark score is higher.  When the
+    # project config is explicitly free-only, apply that to every work type.
+    free_only = bool((catalog.get("constraints") or {}).get("free_only"))
     entries = []
     for index, model_id in enumerate(chain_ids):
         entry = catalog["models"].get(model_id) or {}
@@ -167,6 +180,23 @@ def select_from_catalog(work_type: str, *, root=None) -> dict | None:
         entries.append(item)
     if not entries:
         return None
+    if free_only:
+        free_entries = [item for item in entries if item.get("is_free")]
+        if free_entries:
+            entries = free_entries
+    elif work_type in ("W0", "W1"):
+        free_entries = [item for item in entries if item.get("is_free")]
+        if free_entries:
+            entries = free_entries
+        else:
+            entries.sort(key=lambda item: (_cost_rank(item), -item["_score"], item["_order"]))
+            main = entries[0]
+            escalate = next((item for item in entries[1:]
+                             if item["id"] != main["id"]), None)
+            return {"main": main["id"], "escalate": escalate["id"] if escalate else None,
+                    "why": f"catalog:{role}; cheapest available for {work_type}",
+                    "source": "catalog", "role": role,
+                    "family": [family(main), family(escalate) if escalate else None]}
     entries.sort(key=lambda item: (-item["_score"], item["_order"]))
     family = lambda item: str(item.get("family") or FAMILY.get(item["id"]) or "?")
     main = entries[0]
@@ -355,6 +385,7 @@ def _cli(argv=None) -> int:
     parser.add_argument("--check", action="store_true", help="chi validate bang dinh tuyen")
     parser.add_argument("--quota", action="store_true", help="doc quota that tu opencode stats")
     parser.add_argument("--static", action="store_true", help="bo qua catalog, dung ROUTES tinh")
+    parser.add_argument("--route", action="store_true", help="dung catalog model local (mac dinh CLI)")
     parser.add_argument("--root", default=".")
     args = parser.parse_args(argv)
 
