@@ -308,8 +308,11 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
 
     root_path = Path(root or Path.cwd()).resolve()
     run_id = run_id or ledger.new_run_id("rc")
+    if reviewer is not None and hasattr(reviewer, "bind_run"):
+        reviewer.bind_run(run_id, root_path, log)
     wave_reviewer = (reviewer is not None
-                     and getattr(reviewer, "kind", "") == "wave-reviewer")
+                     and getattr(reviewer, "kind", "") in
+                     ("wave-reviewer", "meeting-reviewer"))
     if max_requests is None:
         hard_cap = BUDGET_HARD_REQUESTS if wave_reviewer else BUDGET_SOFT_REQUESTS
     else:
@@ -580,7 +583,8 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
 
     # Wave can 4 reviewer: giu 4 request cuoi cho ho, coder toi da 12/16.
     reserved = 0
-    if reviewer is not None and getattr(reviewer, "kind", "") == "wave-reviewer":
+    if reviewer is not None and getattr(reviewer, "kind", "") in (
+            "wave-reviewer", "meeting-reviewer"):
         reserved = min(len(getattr(reviewer, "roles", {}) or {}), hard_cap - 1)
     coder_cap = max(1, hard_cap - reserved)
     report["budget"]["reserved_reviewer"] = reserved
@@ -855,16 +859,23 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                 diffs = {relative: _diff(originals[relative],
                                          new_contents[relative], relative)
                          for relative in targets}
+                review_kwargs = {}
+                if getattr(reviewer, "wants_verify", False):
+                    review_kwargs["verify_result"] = dict(draft_verify)
                 review = reviewer.review_set(
                     work_order, diffs=diffs, new_contents=new_contents,
                     old_contents=current_contents, level=work_order.level, sink=sink,
+                    **review_kwargs,
                 )
             else:
                 diff = _diff(originals[target_rel], new_contents[target_rel], target_rel)
+                review_kwargs = {}
+                if getattr(reviewer, "wants_verify", False):
+                    review_kwargs["verify_result"] = dict(draft_verify)
                 review = reviewer.review(
                     work_order, diff=diff, new_content=new_contents[target_rel],
                     old_content=current_contents[target_rel],
-                    level=work_order.level, sink=sink,
+                    level=work_order.level, sink=sink, **review_kwargs,
                 )
             report["review"] = dict(review)
             report["reviewer_fallback"] = bool(review.get("fallback_reason"))
@@ -1091,6 +1102,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None)
     parser.add_argument("--reviewer", default="heuristic",
                         choices=("heuristic", "llm", "wave", "none"))
+    parser.add_argument("--mode", default="panel", choices=("panel", "meeting"),
+                        help="panel = reviewer doc lap; meeting = Round 1 co blackboard")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-fallback", action="store_true",
@@ -1150,10 +1163,14 @@ def main(argv: list[str] | None = None) -> int:
             health = fallback.HealthRegistry(health_path)
             coder = fallback.FallbackCoder(
                 models, factory=lambda model: workers.AgenticCoder(model), health=health)
+    if args.mode == "meeting" and args.reviewer != "wave":
+        parser.error("--mode meeting bat buoc --reviewer wave")
     if args.reviewer_chain:
         reviewer_models = [item.strip() for item in args.reviewer_chain.split(",")
                           if item.strip()]
         reviewer = workers.FallbackReviewer(reviewer_models)
+    elif args.mode == "meeting":
+        reviewer = workers.MeetingReviewer()
     else:
         reviewer = workers.build_reviewer(args.reviewer, model=_model_from_config("reviewer")
                                           if args.reviewer == "llm" else None)

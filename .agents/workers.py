@@ -944,6 +944,8 @@ def build_reviewer(kind: str, *, model: str | None = None) -> Reviewer:
         if not model:
             raise ValueError("reviewer llm can --model")
         return OpenCodeReviewer(model)
+    if kind == "meeting":
+        return MeetingReviewer()
     if kind == "wave":
         roles = None
         raw = os.environ.get("SWARM_WAVE_ROLES")
@@ -1188,3 +1190,121 @@ class WaveReviewer(Reviewer):
         return self._run("review_set", work_order, diffs=diffs,
                          new_contents=new_contents, old_contents=old_contents,
                          level=level, sink=sink)
+
+class MeetingReviewer(Reviewer):
+    """Phase 2 adapter: review one diff through the meeting orchestrator.
+
+    It is intentionally still a Reviewer, so Recipe C's draft verify / apply
+    flow stays unchanged.  Round 2 is added in Phase 3; for now a conflict
+    produces a reject and the Lead never writes.
+    """
+
+    kind = "meeting-reviewer"
+    wants_verify = True
+
+    def __init__(self, panel: dict | None = None, *, factory=None,
+                 name: str = "meeting-reviewer", max_workers: int = 4) -> None:
+        super().__init__()
+        self.name = name
+        self.max_workers = max(1, int(max_workers))
+        if panel is None:
+            panel = {role: (factory or (lambda r, m: RoleReviewer(r, m)))(role, model)
+                     for role, model in WAVE_ROLES.items()}
+        self.panel = dict(panel)
+        self.roles = dict(self.panel)
+        self.budget_left = None
+        self.event_sink = None
+        self.run_id = "meeting"
+        self.last_orchestrator = None
+        self.last_result = None
+
+    def bind_run(self, run_id: str, root, log: bool = True) -> None:
+        """Recipe calls this before review so meeting events land in its run."""
+        self.run_id = str(run_id or "meeting")
+        if not log:
+            # Keep a custom sink supplied by a test/embedding caller; without
+            # one there is simply no ledger event.
+            return
+        import ledger
+        root_path = Path(root)
+
+        def sink(event_type: str, data: dict, status: str = "info") -> None:
+            ledger.append_event(
+                event_type, run_id=self.run_id,
+                result={"status": status}, data=data, root=root_path,
+            )
+        self.event_sink = sink
+
+    def _run(self, work_order, *, context: dict, sink=None) -> dict:
+        from core.meeting import MeetingContext, MeetingOrchestrator
+        from core.protocol import Decision
+
+        before = sum(int(getattr(item, "calls", 0) or 0)
+                     for item in self.panel.values())
+        orchestrator = MeetingOrchestrator(
+            self.panel, event_sink=self.event_sink,
+            max_workers=self.max_workers, name=self.name,
+        )
+        meeting_context = MeetingContext(work_order=work_order, **context)
+        try:
+            orchestrator.open(work_order, meeting_context)
+            result = orchestrator.run_round1(
+                work_order, meeting_context, sink=sink)
+            conflicts = result.conflicts
+            if result.all_approved:
+                decision = Decision(
+                    verdict="approve",
+                    reasons=["4/4 reviewer approve"], round=1,
+                )
+            else:
+                vetoes = [item.role for item in conflicts
+                          if item.role in ("security", "qa") and item.evidence_refs]
+                dissent = [item.role for item in conflicts
+                          if item.role not in vetoes]
+                decision = Decision(
+                    verdict="reject",
+                    reasons=[item.body for item in conflicts[:4]] or ["meeting reject"],
+                    vetoes=vetoes, dissent=dissent, round=1,
+                )
+            orchestrator.close(decision, work_order=work_order)
+            aggregate = orchestrator.aggregate(result)
+            aggregate["decision"] = decision.to_dict()
+            aggregate["meeting"] = orchestrator.blackboard.snapshot()
+        except Exception as exc:  # noqa: BLE001
+            # A meeting infrastructure failure must never auto-approve.
+            orchestrator.abort(f"{type(exc).__name__}: {str(exc)[:240]}",
+                               work_order=work_order)
+            aggregate = {
+                "verdict": "reject",
+                "level": getattr(work_order, "level", 2),
+                "reasons": [f"meeting error: {type(exc).__name__}: {str(exc)[:240]}"],
+                "reviewer": self.name, "per_role": [], "skipped": [],
+                "meeting": orchestrator.blackboard.snapshot(),
+            }
+            result = None
+        self.calls += max(0, sum(int(getattr(item, "calls", 0) or 0)
+                                 for item in self.panel.values()) - before)
+        self.last_orchestrator = orchestrator
+        self.last_result = result
+        if sink is not None:
+            sink.write(aggregate)
+        return aggregate
+
+    def review(self, work_order, *, diff, new_content, old_content, level, sink,
+               verify_result=None) -> dict:
+        return self._run(work_order, sink=sink, context={
+            "brief": getattr(work_order, "objective", ""),
+            "diff": diff, "new_content": new_content,
+            "old_content": old_content, "level": level,
+            "verify_result": verify_result or {},
+        })
+
+    def review_set(self, work_order, *, diffs, new_contents, old_contents, level, sink,
+                   verify_result=None) -> dict:
+        return self._run(work_order, sink=sink, context={
+            "brief": getattr(work_order, "objective", ""),
+            "diffs": diffs, "new_contents": new_contents,
+            "old_contents": old_contents, "level": level,
+            "verify_result": verify_result or {},
+        })
+

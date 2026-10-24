@@ -34,6 +34,25 @@ REQUIRED_FIELDS = ("run_id", "timestamp", "event_type")
 
 VALID_STATUS = ("info", "ok", "pass", "fail", "error", "blocked", "timeout", "skipped")
 
+# Meeting events are additive to schema v1.0.0.  No ledger rewrite is needed.
+MEETING_EVENTS = (
+    "meeting.opened",
+    "meeting.message",
+    "meeting.conflict",
+    "meeting.rebuttal",
+    "meeting.vote",
+    "meeting.decision",
+    "meeting.aborted",
+)
+MEETING_MESSAGE_KINDS = (
+    "proposal", "objection", "evidence", "question",
+    "rebuttal", "vote", "decision", "system",
+)
+MEETING_ROLES = (
+    "coder", "security", "qa", "perf", "docs",
+    "lead", "moderator", "systembot",
+)
+
 # Vai tro hien thi tren timeline / dashboard.
 NODE_BY_EVENT = {
     "recipe.start": "lead",
@@ -70,6 +89,13 @@ NODE_BY_EVENT = {
     "scout.catalog.read": "lead",
     "scout.plan": "lead",
     "scout.verify": "lead",
+    "meeting.opened": "meeting",
+    "meeting.message": "meeting",
+    "meeting.conflict": "meeting",
+    "meeting.rebuttal": "meeting",
+    "meeting.vote": "meeting",
+    "meeting.decision": "lead",
+    "meeting.aborted": "lead",
 }
 
 
@@ -79,7 +105,8 @@ def node_of(event_type: str) -> str:
     if event_type in NODE_BY_EVENT:
         return NODE_BY_EVENT[event_type]
     for prefix, node in (("recipe.", "lead"), ("safe_writer.", "lead"),
-                         ("scout.", "lead"), ("phase0", "qa"), ("phase05", "qa")):
+                         ("scout.", "lead"), ("phase0", "qa"), ("phase05", "qa"),
+                         ("meeting.", "meeting")):
         if event_type.startswith(prefix):
             return node
     return "system"
@@ -125,6 +152,57 @@ def details_of(event: dict) -> dict:
     return details
 
 
+def is_meeting_event(event_type: str) -> bool:
+    return str(event_type or "").startswith("meeting.")
+
+
+def validate_meeting_event(event: dict) -> list[str]:
+    """Validate meeting payloads additively; non-meeting events are untouched."""
+    event_type = str(event.get("event_type") or "")
+    if event_type not in MEETING_EVENTS:
+        return []
+    data = event.get("data") if isinstance(event.get("data"), dict) else event.get("details")
+    data = data if isinstance(data, dict) else {}
+    problems: list[str] = []
+    if not str(data.get("task_id") or "").strip():
+        problems.append("meeting event thieu task_id")
+    if event_type == "meeting.message":
+        if not str(data.get("sender") or "").strip():
+            problems.append("meeting.message thieu sender")
+        elif str(data.get("sender")).lower() not in MEETING_ROLES:
+            problems.append("meeting.message sender khong hop le")
+        recipients = data.get("recipients")
+        if not isinstance(recipients, list) or not recipients:
+            problems.append("meeting.message recipients phai la list khong rong")
+        try:
+            round_value = int(data.get("round", 0) or 0)
+        except (TypeError, ValueError):
+            round_value = -1
+        if round_value not in (1, 2):
+            problems.append("meeting.message round chi duoc 1 hoac 2")
+        if str(data.get("kind") or "").lower() not in MEETING_MESSAGE_KINDS:
+            problems.append("meeting.message kind khong hop le")
+        if not isinstance(data.get("body"), str):
+            problems.append("meeting.message body phai la string")
+        refs = data.get("evidence_refs")
+        if refs is not None and not isinstance(refs, list):
+            problems.append("meeting.message evidence_refs phai la list")
+        if str(data.get("kind") or "").lower() == "objection" and not refs:
+            problems.append("meeting.message objection thieu evidence_refs")
+    elif event_type == "meeting.vote":
+        if str(data.get("role") or "").lower() not in MEETING_ROLES:
+            problems.append("meeting.vote thieu role hop le")
+        if str(data.get("verdict") or "").lower() not in ("approve", "reject", "abstain"):
+            problems.append("meeting.vote verdict khong hop le")
+    elif event_type == "meeting.decision":
+        if str(data.get("verdict") or "").lower() not in ("approve", "reject", "escalate"):
+            problems.append("meeting.decision verdict khong hop le")
+    elif event_type == "meeting.aborted":
+        if not str(data.get("reason") or "").strip():
+            problems.append("meeting.aborted thieu reason")
+    return problems
+
+
 def normalize(event: dict) -> dict:
     """Chuyen 1 event (cu hoac moi) sang dang chuan 9 truong. Khong raise."""
     if not isinstance(event, dict):
@@ -161,6 +239,7 @@ def validate(event: dict) -> list[str]:
     duration = event.get("duration_ms", 0)
     if not isinstance(duration, int) or isinstance(duration, bool) or duration < 0:
         problems.append("'duration_ms' phai la int >= 0")
+    problems.extend(validate_meeting_event(event))
     return problems
 
 
@@ -196,6 +275,9 @@ def describe() -> dict:
         "required": list(REQUIRED_FIELDS),
         "status": list(VALID_STATUS),
         "node_map": dict(NODE_BY_EVENT),
+        "meeting_events": list(MEETING_EVENTS),
+        "meeting_message_kinds": list(MEETING_MESSAGE_KINDS),
+        "meeting_roles": list(MEETING_ROLES),
         "compatible_with": ["schema_version=1 (result/data)"],
     }
 

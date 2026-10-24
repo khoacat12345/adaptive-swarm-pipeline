@@ -447,13 +447,19 @@ _RUN_PROC: subprocess.Popen | None = None
 
 
 def start_run(root, *, token: str, reviewer: str = "heuristic",
-              model: str | None = None, coder: str = "agentic") -> dict:
+              model: str | None = None, coder: str = "agentic",
+              mode: str = "panel") -> dict:
     """Start the already-approved plan in a background process."""
     global _RUN_PROC
     _require_token(root, token)
+    mode = str(mode or "panel").lower()
+    if mode not in ("panel", "meeting"):
+        raise ValueError("mode phai la panel hoac meeting")
     reviewer = str(reviewer or "heuristic").lower()
     if reviewer not in ("heuristic", "wave", "none"):
         raise ValueError("reviewer phai la heuristic, wave hoac none")
+    if mode == "meeting" and reviewer != "wave":
+        raise ValueError("meeting mode bat buoc --reviewer wave")
     coder = str(coder or "agentic").lower()
     if coder not in ("agentic", "opencode"):
         raise ValueError("coder phai la agentic hoac opencode")
@@ -477,7 +483,7 @@ def start_run(root, *, token: str, reviewer: str = "heuristic",
         log_path = out_dir / ("run_" + time.strftime("%Y%m%d-%H%M%S") + ".log")
         cmd = [sys.executable, str(Path(__file__).resolve()), "--resume",
                "--root", str(Path(root).resolve()), "--reviewer", reviewer,
-               "--coder", coder]
+               "--coder", coder, "--mode", mode]
         if model:
             cmd += ["--model", str(model)]
         creationflags = 0x08000000 if os.name == "nt" else 0
@@ -532,7 +538,12 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             use_router: bool = True, allow_escalate: bool = False,
             force: bool = False, dry_run: bool = False,
             reviewer_kind: str = "heuristic", model: str | None = None,
-            coder_kind: str = "agentic") -> dict:
+            coder_kind: str = "agentic", mode: str = "panel") -> dict:
+    mode = str(mode or "panel").lower()
+    if mode not in ("panel", "meeting"):
+        raise ValueError("mode phai la panel hoac meeting")
+    if mode == "meeting" and reviewer is None and reviewer_kind != "wave":
+        raise ValueError("meeting mode bat buoc reviewer wave")
     problems = validate_plan(plan)
     if problems:
         raise ValueError("plan khong hop le: " + "; ".join(problems[:8]))
@@ -552,8 +563,10 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
         "current": None,
         "subtasks": [{"id": item["id"], "status": "pending",
                       "files": item.get("target_files") or []} for item in ordered],
+        "mode": mode,
         "team": {"reviewer": getattr(reviewer, "kind", None) or
-                 {"wave": "wave-reviewer", "none": "none"}.get(reviewer_kind, "heuristic")},
+                 {"wave": "wave-reviewer", "meeting": "meeting-reviewer",
+                  "none": "none"}.get(reviewer_kind, "heuristic")},
     })
 
     def update_state(**changes) -> dict:
@@ -566,8 +579,12 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
                             data={"job_id": plan.get("job_id"),
                                   "subtasks": len(plan["subtasks"])}, root=root)
 
-    review = (reviewer if reviewer is not None
-              else workers.build_reviewer(reviewer_kind))
+    if reviewer is not None:
+        review = reviewer
+    elif mode == "meeting":
+        review = workers.MeetingReviewer()
+    else:
+        review = workers.build_reviewer(reviewer_kind)
 
     for index, item in enumerate(ordered, start=1):
         control = read_control(root)
@@ -694,6 +711,8 @@ def main(argv=None) -> int:
     parser.add_argument("--coder", default="agentic",
                         choices=("agentic", "opencode"),
                         help="agentic = multi-turn tool loop; opencode = one-shot patch")
+    parser.add_argument("--mode", default="panel", choices=("panel", "meeting"),
+                        help="panel = existing review; meeting = Round 1 discussion")
     parser.add_argument("--model", default=None,
                         help="override the coder model (useful for free dry-runs)")
     parser.add_argument("--force", action="store_true")
@@ -759,7 +778,7 @@ def main(argv=None) -> int:
         report = run_job(plan, root=args.root, allow_escalate=args.allow_escalate,
                          force=args.force, dry_run=args.dry_run,
                          reviewer_kind=args.reviewer, model=args.model,
-                         coder_kind=args.coder)
+                         coder_kind=args.coder, mode=args.mode)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
