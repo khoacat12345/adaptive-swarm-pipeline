@@ -18,7 +18,7 @@ import re
 import uuid
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Iterable
 
 try:  # `.agents` is normally on sys.path for the pipeline scripts.
@@ -129,9 +129,10 @@ class EvidenceRef:
             problems.append("evidence.file khong duoc rong")
             return problems
         path = Path(self.file)
-        if path.is_absolute():
+        win_path = PureWindowsPath(self.file)
+        if path.is_absolute() or win_path.is_absolute():
             problems.append("evidence.file phai la duong dan relative")
-        if ".." in path.parts:
+        if ".." in path.parts or ".." in win_path.parts:
             problems.append("evidence.file khong duoc chua '..'")
         if len(self.file) > 500:
             problems.append("evidence.file qua dai")
