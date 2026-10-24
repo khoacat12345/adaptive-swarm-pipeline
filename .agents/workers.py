@@ -302,6 +302,13 @@ def run_opencode_cli(binary: str, model: str, prompt: str, *, agent: str | None 
 # Coder
 # --------------------------------------------------------------------------
 
+
+
+def _adapter_complete(adapter, prompt: str) -> tuple[str, dict]:
+    """Call a provider without knowing which provider it is."""
+    reply = adapter.complete([{"role": "user", "content": prompt}])
+    return str(getattr(reply, "text", "") or ""), dict(getattr(reply, "usage", {}) or {})
+
 class Coder:
     name = "coder"
     kind = "abstract"
@@ -409,7 +416,7 @@ class OpenCodeCoder(Coder):
 
     def __init__(self, model: str, *, binary: str | None = None, timeout: int = 300,
                  max_content_chars: int = 20_000, runner=None, cwd=None,
-                 agent: str | None = "plan", debug_dir=None) -> None:
+                 agent: str | None = "plan", debug_dir=None, adapter=None) -> None:
         super().__init__()
         self.name = f"opencode:{model}"
         self.model = model
@@ -419,6 +426,7 @@ class OpenCodeCoder(Coder):
         # 20k ky tu (~500 dong code) la nguong an toan; vuot qua thi cat bot va
         # ghi ro trong prompt de model biet.
         self.max_content_chars = max_content_chars
+        self.adapter = adapter
         self.runner = runner or self._run_cli
         self.cwd = str(cwd) if cwd else None
         # Agent `plan` la read-only (deny edit) -> model khong sua file duoc.
@@ -427,6 +435,8 @@ class OpenCodeCoder(Coder):
         self.debug_dir = Path(debug_dir) if debug_dir else None
 
     def _run_cli(self, prompt: str) -> tuple[str, dict]:
+        if self.adapter is not None:
+            return _adapter_complete(self.adapter, prompt)
         return run_opencode_cli(self.binary, self.model, prompt, agent=self.agent,
                                 cwd=self.cwd, timeout=self.timeout)
 
@@ -557,7 +567,7 @@ class AgenticCoder(Coder):
 
     def __init__(self, model: str, *, binary: str | None = None, timeout: int = 300,
                  agent: str = "build", debug_dir=None, runner=None,
-                 session_policy: SessionPolicy | None = None) -> None:
+                 session_policy: SessionPolicy | None = None, adapter=None) -> None:
         super().__init__()
         self.name = f"agentic:{model}"
         self.model = model
@@ -565,6 +575,7 @@ class AgenticCoder(Coder):
         self.timeout = timeout
         self.agent = agent
         self.debug_dir = Path(debug_dir) if debug_dir else None
+        self.adapter = adapter
         self.runner = runner or self._run_cli
         self._active_cwd: str | None = None
         self.session_policy = session_policy or SessionPolicy()
@@ -573,6 +584,10 @@ class AgenticCoder(Coder):
         self._last_attempt: str = ""
 
     def _run_cli(self, prompt: str) -> tuple[str, dict]:
+        if self.adapter is not None:
+            if hasattr(self.adapter, "cwd"):
+                self.adapter.cwd = self._active_cwd or self.cwd
+            return _adapter_complete(self.adapter, prompt)
         return run_opencode_cli(self.binary, self.model, prompt, agent=self.agent,
                                 cwd=self._active_cwd or self.cwd, timeout=self.timeout)
 
@@ -853,17 +868,20 @@ class OpenCodeReviewer(Reviewer):
     kind = "opencode-cli"
 
     def __init__(self, model: str, *, binary: str | None = None, timeout: int = 240,
-                 runner=None, raise_on_error: bool = False) -> None:
+                 runner=None, raise_on_error: bool = False, adapter=None) -> None:
         super().__init__()
         self.name = f"opencode-review:{model}"
         self.model = model
         self.binary = resolve_binary(binary)
         self.timeout = timeout
+        self.adapter = adapter
         self.runner = runner or self._run_cli
         # True: loi ha tang (429/timeout) -> raise de FallbackReviewer chuyen model.
         self.raise_on_error = raise_on_error
 
     def _run_cli(self, prompt: str) -> str:
+        if self.adapter is not None:
+            return _adapter_complete(self.adapter, prompt)[0]
         base = Path(tempfile.gettempdir()) / "opencode"
         base.mkdir(parents=True, exist_ok=True)
         workdir = tempfile.mkdtemp(prefix="reviewer_", dir=str(base))
@@ -937,14 +955,18 @@ class OpenCodeReviewer(Reviewer):
 
 
 # --------------------------------------------------------------------------
-def build_reviewer(kind: str, *, model: str | None = None) -> Reviewer:
+def build_reviewer(kind: str, *, model: str | None = None, adapter=None) -> Reviewer:
     if kind == "none":
         return None
     if kind == "llm":
         if not model:
             raise ValueError("reviewer llm can --model")
-        return OpenCodeReviewer(model)
+        return OpenCodeReviewer(model, adapter=adapter)
     if kind == "meeting":
+        if adapter is not None:
+            panel = {role: RoleReviewer(role, model, adapter=adapter)
+                     for role, model in WAVE_ROLES.items()}
+            return MeetingReviewer(panel)
         return MeetingReviewer()
     if kind == "wave":
         roles = None
@@ -955,11 +977,15 @@ def build_reviewer(kind: str, *, model: str | None = None) -> Reviewer:
                 role, _, model = item.partition("=")
                 if role.strip() and model.strip():
                     roles[role.strip()] = model.strip()
+        if adapter is not None:
+            return WaveReviewer(roles or None,
+                                factory=lambda role, model: RoleReviewer(role, model, adapter=adapter))
         return WaveReviewer(roles or None)
     return HeuristicReviewer()
 
 
-def build_coder(kind: str, *, model: str | None = None, script: dict | None = None) -> Coder:
+def build_coder(kind: str, *, model: str | None = None, script: dict | None = None,
+                adapter=None) -> Coder:
     if kind == "scripted":
         if not script:
             raise ValueError("coder scripted can ScriptedCoder(script)")
@@ -967,7 +993,12 @@ def build_coder(kind: str, *, model: str | None = None, script: dict | None = No
     if kind == "opencode":
         if not model:
             raise ValueError("coder opencode can model")
-        return OpenCodeCoder(model)
+        return OpenCodeCoder(model, adapter=adapter)
+    kwargs = {"adapter": adapter} if adapter is not None else {}
+    if kind == "agentic":
+        if not model:
+            raise ValueError("coder agentic can model")
+        return AgenticCoder(model, **kwargs)
     raise ValueError(f"coder khong ho tro: {kind}")
 
 class FallbackReviewer(Reviewer):
@@ -1043,16 +1074,19 @@ class RoleReviewer(Reviewer):
     kind = "role-reviewer"
 
     def __init__(self, role: str, model: str, *, binary=None, timeout: int = 180,
-                 runner=None) -> None:
+                 runner=None, adapter=None) -> None:
         super().__init__()
         self.role = str(role)
         self.model = str(model)
         self.name = f"{self.role}:{self.model}"
         self.binary = resolve_binary(binary)
         self.timeout = timeout
+        self.adapter = adapter
         self.runner = runner or self._run_cli
 
     def _run_cli(self, prompt: str) -> str:
+        if self.adapter is not None:
+            return _adapter_complete(self.adapter, prompt)[0]
         base = Path(tempfile.gettempdir()) / "opencode"
         base.mkdir(parents=True, exist_ok=True)
         workdir = tempfile.mkdtemp(prefix="review_", dir=str(base))
