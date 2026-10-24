@@ -2780,6 +2780,8 @@
       token: new URLSearchParams(location.search).get('token') || '', sessionToken: '',
       lastQuota: 0, sig: {}
     };
+    // Optional deep-link/test hook: ?follow=1 opens Chat at the newest event.
+    if (new URLSearchParams(location.search).get('follow') === '1') state.follow = true;
 
     /* ---------- data ---------- */
     async function api(url, options) {

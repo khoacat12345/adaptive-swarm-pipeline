@@ -132,8 +132,8 @@ Or type the goal in the dashboard's input and click **Plan**: the planner reads 
 project tree, proposes 1-5 subtasks with verification, validates that every target
 exists and that dependencies are acyclic, then submits the plan for approval.
 
-Planner chain: Qwen3.8 Max -> GLM-5.3 -> free fallbacks. If the first plan is
-invalid it retries once with the validation errors attached.
+Planner uses the model chain from `.agents/config.json` (scout) and retries once
+with validation errors if the first plan is invalid.
 
 ## Wave reviewers (parallel audit)
 
@@ -181,15 +181,22 @@ Only the configured `chat_id` is accepted. Commands: `/status`, `/approve`,
 ## Tests
 
 ```bash
-python .agents/tests/test_phase4.py      # observation layer
-python .agents/tests/test_level3.py      # multi-file transaction + regressions
-python .agents/tests/test_phase5.py      # router + fallback reviewer + regressions
-python .agents/tests/test_quota.py       # quota math + quota-aware routing
-python .agents/tests/test_phase6.py      # plan approval + job executor
-python .agents/tests/test_planner.py     # goal -> plan + webhook notifications
-python .agents/tests/test_wave.py        # 4 parallel reviewers + budget
-python .agents/tests/test_telegram.py    # telegram bot commands/auth
-python .agents/tests/smoke_suite.py      # engine + 10 real tasks
+python .agents/tests/test_phase4.py       # observation layer
+python .agents/tests/test_level3.py       # multi-file transaction + regressions
+python .agents/tests/test_phase5.py        # router + fallback reviewer + regressions
+python .agents/tests/test_quota.py         # quota math + quota-aware routing
+python .agents/tests/test_phase6.py        # plan approval + job executor
+python .agents/tests/test_planner.py       # goal -> plan + webhook notifications
+python .agents/tests/test_wave.py          # 4 parallel reviewers + budget
+python .agents/tests/test_telegram.py      # telegram bot commands/auth
+python .agents/tests/test_protocol.py      # meeting protocol + blackboard
+python .agents/tests/test_round1.py        # meeting round 1
+python .agents/tests/test_rebuttal_policy.py
+python .agents/tests/test_meeting_ui.py    # meeting transcript + graph contract
+python .agents/tests/test_sse.py           # SSE stream/reconnect/token
+python .agents/tests/test_adapter.py       # provider adapter + core AST gate
+python .agents/tests/test_model_selector.py # local catalog routing/cost guard
+python .agents/tests/smoke_suite.py        # engine + 10 real tasks
 ```
 
 Hard model-selection tasks live in `.agents/tests/hard_tasks.py`; see
