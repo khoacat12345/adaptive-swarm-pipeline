@@ -132,15 +132,16 @@ class MeetingOrchestrator:
     """Round 1 engine; Round 2 is added in Phase 3."""
 
     def __init__(self, reviewers: dict[str, Any], *, event_sink: EventSink | None = None,
-                 max_workers: int = 4, name: str = "meeting") -> None:
+                 max_workers: int = 4, name: str = "meeting",
+                 run_id: str = "meeting") -> None:
         self.reviewers = dict(reviewers)
         self.roles = list(self.reviewers)
         self.event_sink = event_sink
         self.max_workers = max(1, int(max_workers))
         self.name = name
+        self._run_id = str(run_id or "meeting")
         self.blackboard = Blackboard()
         self._opened = False
-        self._run_id = "meeting"
         self._level = 2
         self.last_result: RoundResult | None = None
 
@@ -173,6 +174,20 @@ class MeetingOrchestrator:
             "verify_exit": exit_code,
             "verify_mode": verify.get("mode"),
             "round": 1,
+        })
+        # Coder is a meeting participant too.  Persist the proposal after the
+        # machine verify has passed so the graph/chat can show Coder -> Lead;
+        # this is a local transcript record, not a model request.
+        proposal = AgentMessage(
+            run_id=self._run_id,
+            task_id=str(getattr(work_order, "task_id", "") or ""),
+            sender="coder", recipients=["lead"], kind="proposal",
+            body="initial patch prepared; machine verify passed", round=1,
+        )
+        self.blackboard.add_message(proposal)
+        self._emit("meeting.message", {
+            "task_id": getattr(work_order, "task_id", ""),
+            **proposal.to_dict(),
         })
 
     # ------------------------------------------------------------------

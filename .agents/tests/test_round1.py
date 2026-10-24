@@ -110,10 +110,14 @@ def test_all_approve(checks: Checks) -> None:
     result = orch.run_round1(order, context(order))
     checks.check("round1: 4/4 approve", result.all_approved, result.findings)
     checks.check("round1: no conflict", not result.conflicts, result.conflicts)
-    checks.check("round1: 4 persisted messages", len(result.messages) == 4, len(result.messages))
+    checks.check("round1: 5 persisted messages (coder + 4 reviewers)",
+                 len(result.messages) == 5, len(result.messages))
+    checks.check("round1: coder proposal is in transcript",
+                 any(m.sender == "coder" and m.kind == "proposal" for m in result.messages),
+                 result.messages)
     checks.check("round1: 4 votes", len(result.votes) == 4, len(result.votes))
     checks.check("round1: opened event", any(e[0] == "meeting.opened" for e in events), events)
-    checks.check("round1: message events", sum(e[0] == "meeting.message" for e in events) == 4, events)
+    checks.check("round1: message events", sum(e[0] == "meeting.message" for e in events) == 5, events)
     checks.check("round1: no conflict event", not any(e[0] == "meeting.conflict" for e in events), events)
     checks.check("round1: aggregate approve", orch.aggregate(result)["verdict"] == "approve",
                  orch.aggregate(result))

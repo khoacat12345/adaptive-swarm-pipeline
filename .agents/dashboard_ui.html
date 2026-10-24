@@ -3694,7 +3694,10 @@
       <span class="muted" style="font-size:10px;align-self:center">Edges are sender \u2192 recipients from meeting.message; no message = no edge.</span>
     </div>` : ''}
     <div class="war">
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        <defs><marker id="meeting-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3"
+          orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L7,3 z" fill="#fb923c"></path></marker></defs>
+        ${lines}</svg>
       <button type="button" class="anode leader ${centerState} ${meetingActive.includes('lead') ? 'hot' : ''}" style="left:50%;top:48%"
         onclick="focusAgent('lead')" title="Lead · ${esc(phase)}">
         <span class="av">LD</span><span><span class="nm">Lead</span>
@@ -4237,7 +4240,7 @@
         const hot = activeSet.has(edge.from) ? 'hot' : '';
         return `<line x1="${from[0]}" y1="${from[1]}" x2="${to[0]}" y2="${to[1]}"
           class="link meet ${hot}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}"
-          vector-effect="non-scaling-stroke"></line>`;
+          marker-end="url(#meeting-arrow)" vector-effect="non-scaling-stroke"></line>`;
       }).join('');
     }
 
