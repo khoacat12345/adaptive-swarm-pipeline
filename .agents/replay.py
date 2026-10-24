@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 import schema
+import secret_scan
 
 NODE_COLOR = {
     "lead": "\x1b[36m",        # cyan
@@ -121,6 +122,24 @@ def _message(event: dict, norm: dict) -> str:
     if kind == "recipe.draft_verify":
         code = data.get("exit_code")
         return f"verify ban nhap ({data.get('mode', '?')}) exit={code}"
+    if kind == "meeting.message":
+        recipients = ", ".join(str(item) for item in (data.get("recipients") or []))
+        body = _short(_redact(str(data.get("body") or "")), 90)
+        return (f"{data.get('sender') or '?'} -> {recipients or '?'} "
+                f"[{data.get('kind') or 'message'}] {body}")
+    if kind == "meeting.opened":
+        return f"mo phien hop round 1 ({len(data.get('roles') or [])} reviewer)"
+    if kind == "meeting.conflict":
+        return f"phat hien {len(data.get('conflicts') or [])} xung dot"
+    if kind == "meeting.rebuttal":
+        return (f"rebuttal round 2: {data.get('sender') or '?'} -> "
+                f"{', '.join(str(item) for item in (data.get('recipients') or []))}")
+    if kind == "meeting.vote":
+        return f"vote {data.get('role') or '?'} = {data.get('verdict') or '?'}"
+    if kind == "meeting.decision":
+        return f"quyet dinh meeting: {data.get('verdict') or '?'}"
+    if kind == "meeting.aborted":
+        return f"meeting abort: {_short(data.get('reason'), 80)}"
     if kind == "reviewer.findings":
         verdict = data.get("verdict") or norm["status"]
         if data.get("fallback_reason"):
@@ -247,7 +266,32 @@ _PUBLIC_DETAIL_KEYS = (
     "why", "model", "path", "bytes_written", "atomic", "sha256", "output_tail",
     "transaction", "history", "warnings", "nodes", "problems", "hints",
     "fallback_reason", "budget_skipped", "reviewer_fallback", "reviewer_skipped",
+    "sender", "recipients", "kind", "body", "evidence_refs", "reply_to",
+    "meeting", "decision", "conflicts", "budget", "participants", "vetoes",
+    "dissent", "rounds", "objections", "rebuttals", "id",
 )
+
+
+def _redact(value):
+    if isinstance(value, str):
+        try:
+            return secret_scan.scan_text(value)[0]
+        except Exception:
+            return value
+    return value
+
+
+def _redact_tree(value, *, depth: int = 0):
+    if depth > 5:
+        return "[truncated]"
+    if isinstance(value, str):
+        return _redact(value)[:2000]
+    if isinstance(value, list):
+        return [_redact_tree(item, depth=depth + 1) for item in value[:30]]
+    if isinstance(value, dict):
+        return {str(key): _redact_tree(item, depth=depth + 1)
+                for key, item in list(value.items())[:40]}
+    return value
 
 
 def _public_details(details: dict) -> dict:
@@ -266,7 +310,8 @@ def _public_details(details: dict) -> dict:
                     "role": item.get("role"),
                     "model": item.get("model"),
                     "verdict": item.get("verdict"),
-                    "reasons": [str(reason)[:900] for reason in (item.get("reasons") or [])[:6]],
+                    "reasons": [_redact(str(reason))[:900]
+                                for reason in (item.get("reasons") or [])[:6]],
                     "reviewer": item.get("reviewer"),
                 })
             result[key] = roles
@@ -276,9 +321,138 @@ def _public_details(details: dict) -> dict:
                  "status": item.get("status"), "latency_ms": item.get("latency_ms")}
                 for item in value[:8] if isinstance(item, dict)
             ]
+        elif key == "evidence_refs" and isinstance(value, list):
+            refs = []
+            for item in value[:20]:
+                if not isinstance(item, dict):
+                    continue
+                refs.append({
+                    "file": item.get("file"),
+                    "line_start": item.get("line_start"),
+                    "line_end": item.get("line_end"),
+                    "verify_event_id": item.get("verify_event_id"),
+                    "note": _redact(str(item.get("note") or ""))[:500],
+                })
+            result[key] = refs
+        elif key in ("body", "brief", "diff", "note"):
+            result[key] = _redact(str(value))[:4000]
+        elif key in ("meeting", "decision", "conflicts"):
+            result[key] = _redact_tree(value)
         elif isinstance(value, (str, int, float, bool, list, dict)):
-            result[key] = value
+            result[key] = _redact_tree(value) if isinstance(value, (list, dict)) else _redact(value)
     return result
+
+
+def public_event(event: dict) -> dict:
+    """Sanitized event for SSE / browser; no raw secrets."""
+    norm = schema.normalize(event)
+    return {
+        "run_id": norm["run_id"],
+        "timestamp": norm["timestamp"],
+        "event_type": norm["event_type"],
+        "node": norm["node"],
+        "model": norm["model"],
+        "status": norm["status"],
+        "duration_ms": norm["duration_ms"],
+        "message": _message(event, norm),
+        "details": _public_details(norm.get("details") or {}),
+    }
+
+
+def meeting_messages(events: list[dict], run_id: str | None = None,
+                     *, limit: int = 500) -> list[dict]:
+    """Parse meeting.message events into transcript rows for the UI/tests."""
+    out: list[dict] = []
+    for event in events:
+        if event.get("event_type") != "meeting.message":
+            continue
+        if run_id and str(event.get("run_id") or "") != str(run_id):
+            continue
+        norm = schema.normalize(event)
+        data = _public_details(norm.get("details") or {})
+        out.append({
+            "run_id": norm["run_id"],
+            "timestamp": norm["timestamp"],
+            "round": data.get("round"),
+            "sender": data.get("sender"),
+            "recipients": data.get("recipients") or [],
+            "kind": data.get("kind"),
+            "body": data.get("body") or "",
+            "evidence_refs": data.get("evidence_refs") or [],
+            "reply_to": data.get("reply_to"),
+            "message_id": data.get("id"),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def meeting_edges(messages: list[dict]) -> list[dict]:
+    """Unique sender->recipient edges; no message means no edge."""
+    edges: dict[tuple[str, str], dict] = {}
+    for message in messages or []:
+        sender = str(message.get("sender") or "").lower()
+        for recipient in message.get("recipients") or []:
+            receiver = str(recipient or "").lower()
+            if not sender or not receiver:
+                continue
+            key = (sender, receiver)
+            if key not in edges:
+                edges[key] = {"from": sender, "to": receiver,
+                              "kind": message.get("kind"),
+                              "round": message.get("round"),
+                              "count": 0}
+            edges[key]["count"] += 1
+    return list(edges.values())
+
+
+def meeting_stats(events: list[dict], run_id: str | None = None) -> dict:
+    messages = meeting_messages(events, run_id)
+    rounds = sorted({int(item["round"]) for item in messages
+                     if item.get("round") in (1, 2)})
+    objections = sum(1 for item in messages if item.get("kind") == "objection")
+    rebuttals = sum(1 for item in messages if item.get("kind") == "rebuttal")
+    vetoes: list[str] = []
+    dissent: list[str] = []
+    verdict = None
+    for event in events:
+        if event.get("event_type") != "meeting.decision":
+            continue
+        if run_id and str(event.get("run_id") or "") != str(run_id):
+            continue
+        data = _public_details(schema.normalize(event).get("details") or {})
+        verdict = data.get("verdict")
+        vetoes = [str(item) for item in (data.get("vetoes") or [])]
+        dissent = [str(item) for item in (data.get("dissent") or [])]
+    requests = 0
+    duration_ms = 0
+    for event in events:
+        if event.get("event_type") != "recipe.done":
+            continue
+        if run_id and str(event.get("run_id") or "") != str(run_id):
+            continue
+        data = _public_details(schema.normalize(event).get("details") or {})
+        requests = int(data.get("requests") or 0)
+        duration_ms = int(event.get("duration_ms", 0) or 0)
+    return {
+        "rounds": rounds,
+        "round_count": len(rounds),
+        "messages": len(messages),
+        "objections": objections,
+        "rebuttals": rebuttals,
+        "vetoes": vetoes,
+        "dissent": dissent,
+        "verdict": verdict,
+        "requests": requests,
+        "duration_ms": duration_ms,
+        "edges": meeting_edges(messages),
+    }
+
+
+def meeting_payload(events: list[dict], run_id: str | None = None) -> dict:
+    messages = meeting_messages(events, run_id)
+    return {"messages": messages, "edges": meeting_edges(messages),
+            "stats": meeting_stats(events, run_id)}
 
 
 def render_timeline(timeline: list[dict], *, color: bool = True) -> str:

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -90,6 +91,7 @@ def load_run(root: Path, ledger: Path, run_id: str) -> dict:
     run["verify_command"] = verify
     run["level"] = (start.get("details") or {}).get("level")
     return {"run": run, "timeline": timeline,
+            "meeting": replay.meeting_payload(events, run_id),
             "events": [{key: value for key, value in item.items() if key != "extra"}
                        for item in normalized]}
 
@@ -267,6 +269,73 @@ def make_handler(root: Path, ledger: Path):
             host = (self.headers.get("Host") or "").split(":")[0].strip().lower()
             return host in ("127.0.0.1", "localhost", "::1", "[::1]")
 
+        def _sse(self, query: dict) -> None:
+            """Server-Sent Events over the append-only ledger.
+
+            The browser passes the last byte offset it saw; this avoids both
+            duplicates and gaps on reconnect.  The handler thread exits when
+            the client disconnects (the write fails).
+            """
+            import job as job_module
+            token = (query.get("token") or [""])[0]
+            try:
+                job_module._require_token(root, token)
+            except (PermissionError, ValueError):
+                self._json({"error": "forbidden"}, 403)
+                return
+            run_id = (query.get("run_id") or [""])[0].strip()
+            raw_offset = (query.get("offset") or query.get("since") or ["0"])[0]
+            try:
+                offset = max(0, int(raw_offset or 0))
+            except (TypeError, ValueError):
+                self._json({"error": "offset phai la int"}, 400)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            last_heartbeat = time.monotonic()
+            try:
+                with ledger.open("rb") as handle:
+                    handle.seek(offset)
+                    pos = offset
+                    while True:
+                        line = handle.readline()
+                        if not line:
+                            if time.monotonic() - last_heartbeat >= 5:
+                                payload = json.dumps({"ts": time.time()}, ensure_ascii=False)
+                                self.wfile.write(
+                                    f"event: heartbeat\ndata: {payload}\n\n".encode("utf-8"))
+                                self.wfile.flush()
+                                last_heartbeat = time.monotonic()
+                            time.sleep(0.2)
+                            continue
+                        if not line.endswith(b"\n"):
+                            # A writer is in the middle of appending; retry this byte.
+                            handle.seek(pos)
+                            time.sleep(0.1)
+                            continue
+                        pos += len(line)
+                        try:
+                            event = json.loads(line.decode("utf-8", errors="replace"))
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(event, dict):
+                            continue
+                        if run_id and str(event.get("run_id") or "") != run_id:
+                            continue
+                        payload = json.dumps(replay.public_event(event), ensure_ascii=False)
+                        frame = (f"id: {pos}\nevent: ledger\ndata: {payload}\n\n")
+                        self.wfile.write(frame.encode("utf-8"))
+                        self.wfile.flush()
+                        last_heartbeat = time.monotonic()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+            finally:
+                self.close_connection = True
+
         def do_GET(self):                       # noqa: N802
             parsed = urlparse(self.path)
             route = parsed.path.rstrip("/") or "/"
@@ -276,6 +345,13 @@ def make_handler(root: Path, ledger: Path):
             try:
                 if route == "/":
                     self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
+                elif route == "/api/stream":
+                    self._sse(parse_qs(parsed.query))
+                elif route == "/api/meeting":
+                    query = parse_qs(parsed.query)
+                    run_id = (query.get("run_id") or [""])[0].strip() or None
+                    events = schema.read_events(ledger)
+                    self._json(replay.meeting_payload(events, run_id))
                 elif route == "/api/runs":
                     query = parse_qs(parsed.query)
                     mode = (query.get("filter") or ["recipe"])[0]

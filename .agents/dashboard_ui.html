@@ -1255,6 +1255,42 @@
       }
     }
 
+    .war .link.meet {
+      stroke: #fb923c;
+      stroke-width: 1.7;
+      opacity: .75;
+      stroke-dasharray: 6 4;
+      animation: dash 1.6s linear infinite;
+    }
+    .war .link.meet.hot {
+      stroke-width: 2.6;
+      opacity: 1;
+      filter: drop-shadow(0 0 5px #fb923c);
+    }
+    .anode.hot {
+      border-color: #fb923c !important;
+      box-shadow: 0 0 0 1px #fb923c66, 0 0 22px #fb923c88 !important;
+    }
+    .evidence-card {
+      margin-top: 5px;
+      border: 1px solid #35506a;
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: #0b1724;
+      font: 10.5px/1.45 Consolas, monospace;
+      color: #b7c9da;
+    }
+    .meeting-kind {
+      display: inline-block;
+      padding: 1px 6px;
+      margin-right: 5px;
+      border-radius: 4px;
+      font-size: 9.5px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      background: #1d3348;
+      color: #9fc6e8;
+    }
     .anode {
       position: absolute;
       transform: translate(-50%, -50%);
@@ -2731,6 +2767,7 @@
       view: 'overview', runs: [], selected: null, run: null, diff: null, job: null, planState: null,
       quota: null, health: null, drafts: null, workspaces: [], chatTab: 'timeline', follow: false,
       chatFilter: 'all', overviewTab: 'warroom', hourlyMode: 'cost', teamData: null, replayIndex: null, replayTimer: null, pageSig: {},
+      meetingRound: 'all', stream: null, streamRun: null, streamHealthy: false, streamRefreshTimer: null,
       token: new URLSearchParams(location.search).get('token') || '', sessionToken: '',
       lastQuota: 0, sig: {}
     };
@@ -2793,7 +2830,52 @@
       if (sig === state.sig.run && silent) return;
       state.sig.run = sig;
       state.run = detail; state.diff = diff; state.selected = runId;
+      if (state.streamRun !== runId) { state.streamRun = runId; connectStream(); }
       if (!silent) { state.chatTab = 'timeline'; renderChat(); }
+    }
+
+    function closeStream() {
+      if (state.stream) {
+        try { state.stream.close(); } catch (_) { /* ignore */ }
+      }
+      state.stream = null;
+      state.streamHealthy = false;
+    }
+
+    function scheduleStreamRefresh() {
+      if (state.streamRefreshTimer) return;
+      state.streamRefreshTimer = setTimeout(async () => {
+        state.streamRefreshTimer = null;
+        await refreshAll();
+      }, 250);
+    }
+
+    function connectStream() {
+      closeStream();
+      // `stream=0` / `streamOnce=1` are browser-test/debug hooks; normal dashboard uses SSE.
+      const params = new URLSearchParams(location.search);
+      if (params.get('stream') === '0') return;
+      const streamOnce = params.get('streamOnce') === '1';
+      const token = authToken();
+      if (!token || !state.selected || typeof EventSource === 'undefined') return;
+      const url = '/api/stream?token=' + encodeURIComponent(token)
+        + '&run_id=' + encodeURIComponent(state.selected) + '&offset=0';
+      const stream = new EventSource(url);
+      state.stream = stream;
+      stream.addEventListener('open', () => { state.streamHealthy = true; });
+      stream.addEventListener('ledger', () => {
+        state.streamHealthy = true;
+        scheduleStreamRefresh();
+        if (streamOnce) closeStream();
+      });
+      stream.addEventListener('heartbeat', () => { state.streamHealthy = true; });
+      stream.onerror = () => {
+        closeStream();
+        // The existing 3s poll remains the fallback; reconnect quietly.
+        setTimeout(() => {
+          if (!document.hidden && state.selected && !state.stream) connectStream();
+        }, 5000);
+      };
     }
 
     /* ---------- navigation ---------- */
@@ -3493,7 +3575,14 @@
       const centerState = idx != null && activeEvent ? 'run'
         : phase === 'done' ? 'done' : ['running', 'paused'].includes(phase)
           ? 'run' : ['awaiting_approval', 'approved'].includes(phase) ? 'next' : '';
-      const pos = { coder: [50, 14], security: [15, 31], qa: [85, 31], perf: [28, 77], docs: [72, 77] };
+      const pos = { coder: [50, 14], security: [15, 31], qa: [85, 31], perf: [28, 77], docs: [72, 77], systembot: [50, 90] };
+      const allMeeting = meetingMessages(timeline);
+      const meetingFilter = state.meetingRound || 'all';
+      const visibleMeeting = allMeeting.filter((item) =>
+        meetingFilter === 'all' || String(item.round) === String(meetingFilter));
+      const meetingEdgesData = meetingEdges(visibleMeeting);
+      const meetingActive = meetingActiveNodes(visibleMeeting);
+      const meetingMode = allMeeting.length > 0;
       const short = (model) => shortModel(model);
       const roleNode = (role) => {
         const item = roles.find((row) => row.role === role) || { role, label: role };
@@ -3503,19 +3592,22 @@
         const label = item.standby ? 'standby' : item.skipped ? 'skipped'
           : st === 'running' ? 'running' : st === 'next' ? 'next'
             : st === 'done' ? (role === 'coder' ? 'done' : 'approved') : 'idle';
-        return `<button type="button" class="anode ${nodeClass} role-${esc(role)}" style="left:${x}%;top:${y}%"
+        const hot = meetingActive.includes(role) ? 'hot' : '';
+        return `<button type="button" class="anode ${nodeClass} role-${esc(role)} ${hot}" style="left:${x}%;top:${y}%"
       onclick="focusAgent('${role}')" title="${esc(item.label)} · ${esc(item.model || 'not assigned')}">
       <span class="av">${esc((NODE[role] && NODE[role].a) || (item.label || role).slice(0, 2).toUpperCase())}</span>
       <span><span class="nm">${esc(item.label)}</span>
         <span class="md">${esc(item.model ? short(item.model) : 'not assigned')}</span>
         <span class="st">${label}</span></span></button>`;
       };
-      const lines = roles.map((item) => {
-        const [x, y] = pos[item.role] || [50, 50];
-        const cls = status[item.role] === 'running' ? 'run' : status[item.role] === 'next' ? 'next' : '';
-        return `<line x1="50" y1="48" x2="${x}" y2="${y}" class="link ${cls}"
+      const lines = meetingMode
+        ? renderMeetingGraph(meetingEdgesData, meetingActive)
+        : roles.map((item) => {
+          const [x, y] = pos[item.role] || [50, 50];
+          const cls = status[item.role] === 'running' ? 'run' : status[item.role] === 'next' ? 'next' : '';
+          return `<line x1="50" y1="48" x2="${x}" y2="${y}" class="link ${cls}"
       vector-effect="non-scaling-stroke"/>`;
-      }).join('');
+        }).join('');
       const agentCards = roles.map((item) => {
         const st = status[item.role] || 'idle';
         const quota = quotaFor(item.model);
@@ -3595,9 +3687,15 @@
         <span class="chip">gray idle</span>
       </div>
     </div>
+    ${meetingMode ? `<div class="chips" style="padding:0 4px 8px;gap:5px">
+      <button class="btn ${meetingFilter === 'all' ? 'primary' : 'ghost'}" onclick="setMeetingRound('all')">All messages</button>
+      <button class="btn ${meetingFilter === '1' ? 'primary' : 'ghost'}" onclick="setMeetingRound('1')">Round 1</button>
+      <button class="btn ${meetingFilter === '2' ? 'primary' : 'ghost'}" onclick="setMeetingRound('2')">Round 2</button>
+      <span class="muted" style="font-size:10px;align-self:center">Edges are sender \u2192 recipients from meeting.message; no message = no edge.</span>
+    </div>` : ''}
     <div class="war">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>
-      <button type="button" class="anode leader ${centerState}" style="left:50%;top:48%"
+      <button type="button" class="anode leader ${centerState} ${meetingActive.includes('lead') ? 'hot' : ''}" style="left:50%;top:48%"
         onclick="focusAgent('lead')" title="Lead · ${esc(phase)}">
         <span class="av">LD</span><span><span class="nm">Lead</span>
           <span class="md">${esc(jobState.job_id || plan.job_id || 'orchestrator')}</span>
@@ -3820,6 +3918,8 @@
       ].filter(Boolean);
       const source = plan._source || '.agents/tmp/plan.json';
       const command = 'python .agents/job.py --plan ' + source + ' --wait --open';
+      const isMeeting = (jobState.mode || (state.teamData && state.teamData.mode)) === 'meeting'
+        || meetingMessages(timeline).length > 0;
       box.innerHTML = `<div class="hero">
     <div><div class="eyebrow">Report · ${esc(plan.job_id || '')}</div>
       <h2>${done ? 'Applied and verified' : 'Not finished yet'}</h2>
@@ -3838,10 +3938,11 @@
     ${statCard('Applied', applied.length + '/' + subs.length, 'subtasks')}
     ${statCard('Files', changedCount + '/' + files.length, 'changed bytes')}
     ${statCard('Duration', run.duration_ms ? fmtDuration(run.duration_ms) : '-', 'whole run')}
-    ${statCard('Requests', run.requests != null ? run.requests : '-', 'of 8 max')}
+    ${statCard('Requests', run.requests != null ? run.requests : '-', isMeeting ? 'of 16 max' : 'of 8 max')}
     ${statCard('Tokens', tokens ? num(tokens) : '-', 'in + out')}
     ${statCard('Verify', run.verify_command ? 'set' : 'missing', 'machine gate')}
   </div>
+  ${meetingStatsCard(meetingStats(timeline, run), isMeeting)}
   <div class="grid g2">
     <div class="card"><h2>Applied files</h2>
       ${files.length ? files.map((file) => {
@@ -4040,6 +4141,149 @@
     <tbody>${rows}</tbody></table>`;
     }
 
+    const MEETING_POS = {
+      lead: [50, 48], coder: [50, 14], security: [15, 31], qa: [85, 31],
+      perf: [28, 77], docs: [72, 77], systembot: [50, 90]
+    };
+
+    function meetingRoundLabel(round) {
+      return Number(round) === 2 ? 'Round 2' : 'Round 1';
+    }
+
+    function meetingEvidence(evidenceRefs) {
+      const refs = Array.isArray(evidenceRefs) ? evidenceRefs : [];
+      if (!refs.length) return '';
+      return refs.map((ref) => {
+        const file = ref.file || '?';
+        const start = ref.line_start != null ? ref.line_start : '';
+        const end = ref.line_end != null ? ref.line_end : '';
+        const lines = start ? (end && end !== start ? `:${start}-${end}` : `:${start}`) : '';
+        const verify = ref.verify_event_id ? ` \u00b7 verify ${ref.verify_event_id}` : '';
+        return `<div class="evidence-card"><b>${esc(file)}${esc(lines)}</b>${esc(verify)}`
+          + (ref.note ? `<br>${esc(ref.note)}` : '') + '</div>';
+      }).join('');
+    }
+
+    function meetingMessages(timeline) {
+      return (timeline || []).filter((item) => item.event_type === 'meeting.message').map((item) => {
+        const d = item.details || {};
+        const sender = String(d.sender || item.node || 'system').toLowerCase();
+        const recipients = Array.isArray(d.recipients) ? d.recipients.map((x) => String(x).toLowerCase()) : [];
+        return {
+          kind: 'meeting', role: AGENT_META[sender] ? sender : 'reviewer',
+          sender, recipients, msgKind: String(d.kind || 'message').toLowerCase(),
+          round: Number(d.round || 1), body: d.body || item.message || '',
+          evidence: Array.isArray(d.evidence_refs) ? d.evidence_refs : [],
+          replyTo: d.reply_to || null, messageId: d.id || null,
+          timestamp: item.timestamp, model: item.model, status: item.status,
+          event: item
+        };
+      });
+    }
+
+    function meetingBubble(message) {
+      const meta = AGENT_META[message.role] || AGENT_META.system;
+      const side = meta.side === 'right' ? 'right' : 'left';
+      const recipients = (message.recipients || []).map((role) =>
+        (AGENT_META[role] && AGENT_META[role].label) || role).join(', ');
+      const anchor = message.messageId ? `meeting-${esc(message.messageId)}` : '';
+      const reply = message.replyTo
+        ? `<button class="linkbtn" onclick="focusMeetingMessage('${esc(message.replyTo)}')">\u21b3 reply to ${esc(message.replyTo)}</button>`
+        : '';
+      const kind = `<span class="meeting-kind">${esc(message.msgKind)}</span>`;
+      const round = `<span class="chip">${esc(meetingRoundLabel(message.round))}</span>`;
+      return `<div class="msg ${side}" ${anchor ? `id="${anchor}"` : ''} style="--ac:${meta.color}">
+        ${side === 'left' ? agentAvatar(message.role, 15, 'tiny') : ''}
+        <div class="bubblewrap">
+          <div class="msghead"><b style="color:${meta.color}">${esc(meta.label)}</b>
+            <span>${esc(message.sender)} \u2192 ${esc(recipients || 'lead')}</span>
+            ${round}${kind}<span>${clock(message.timestamp)}</span></div>
+          <div class="bubble">${esc(message.body)}${meetingEvidence(message.evidence)}${reply}</div>
+        </div>
+        ${side === 'right' ? agentAvatar(message.role, 15, 'tiny') : ''}
+      </div>`;
+    }
+
+    function focusMeetingMessage(id) {
+      const node = document.getElementById('meeting-' + id);
+      if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function meetingEdges(messages) {
+      const edges = {};
+      (messages || []).forEach((message) => {
+        const sender = String(message.sender || '').toLowerCase();
+        (message.recipients || []).forEach((recipient) => {
+          const to = String(recipient || '').toLowerCase();
+          if (!sender || !to) return;
+          const key = sender + '>' + to;
+          if (!edges[key]) edges[key] = { from: sender, to, kind: message.msgKind, round: message.round, count: 0 };
+          edges[key].count += 1;
+        });
+      });
+      return Object.values(edges);
+    }
+
+    function meetingActiveNodes(messages) {
+      if (!messages || !messages.length) return [];
+      return [messages[messages.length - 1].sender].filter(Boolean);
+    }
+
+    function renderMeetingGraph(edges, active) {
+      const activeSet = new Set(active || []);
+      return (edges || []).map((edge) => {
+        const from = MEETING_POS[edge.from] || [50, 50];
+        const to = MEETING_POS[edge.to] || [50, 50];
+        const hot = activeSet.has(edge.from) ? 'hot' : '';
+        return `<line x1="${from[0]}" y1="${from[1]}" x2="${to[0]}" y2="${to[1]}"
+          class="link meet ${hot}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}"
+          vector-effect="non-scaling-stroke"></line>`;
+      }).join('');
+    }
+
+    function setMeetingRound(round) {
+      state.meetingRound = String(round || 'all');
+      state.pageSig.warroom = null;
+      render();
+    }
+
+    function meetingStats(timeline, run) {
+      const messages = meetingMessages(timeline);
+      const rounds = [...new Set(messages.map((item) => item.round).filter((x) => x === 1 || x === 2))].sort();
+      const objections = messages.filter((item) => item.msgKind === 'objection').length;
+      const rebuttals = messages.filter((item) => item.msgKind === 'rebuttal').length;
+      let decision = null;
+      for (let i = timeline.length - 1; i >= 0; i -= 1) {
+        if (timeline[i].event_type === 'meeting.decision') {
+          decision = timeline[i].details || {}; break;
+        }
+      }
+      const vetoes = (decision && Array.isArray(decision.vetoes)) ? decision.vetoes : [];
+      const dissent = (decision && Array.isArray(decision.dissent)) ? decision.dissent : [];
+      return {
+        messages: messages.length, rounds, roundCount: rounds.length, objections, rebuttals,
+        vetoes, dissent, verdict: decision ? decision.verdict : null,
+        requests: Number(run && run.requests || 0),
+        duration_ms: Number(run && run.duration_ms || 0)
+      };
+    }
+
+    function meetingStatsCard(stats, meetingMode) {
+      if (!meetingMode && !stats.messages) return '';
+      const list = (items) => items && items.length ? items.join(', ') : '-';
+      return `<div class="card" style="margin-top:14px"><h2>Meeting statistics</h2>
+        <div class="statgrid">
+          ${statCard('Rounds', stats.roundCount || 0, stats.rounds.join(' / ') || 'no round')}
+          ${statCard('Objections', stats.objections || 0, 'evidence-backed review')}
+          ${statCard('Rebuttals', stats.rebuttals || 0, 'targeted round 2')}
+          ${statCard('Verdict', stats.verdict || '-', 'consensus / veto / escalate')}
+          ${statCard('Vetoes', list(stats.vetoes), 'security / qa')}
+          ${statCard('Dissent', list(stats.dissent), 'recorded minority')}
+          ${statCard('Requests', stats.requests || 0, 'meeting budget')}
+          ${statCard('Duration', stats.duration_ms ? fmtDuration(stats.duration_ms) : '-', 'whole run')}
+        </div></div>`;
+    }
+
     function chatRoleFromNode(node) {
       const key = String(node || '').toLowerCase();
       return AGENT_META[key] ? key : (key === 'systembot' ? 'systembot' : 'system');
@@ -4054,6 +4298,11 @@
           if (day !== lastDay) { out.push({ kind: 'day', text: day, timestamp: item.timestamp }); lastDay = day; }
         }
         const details = item.details || {};
+        if (item.event_type === 'meeting.message') {
+          const meeting = meetingMessages([item]);
+          if (meeting.length) out.push(meeting[0]);
+          return;
+        }
         const perRole = Array.isArray(details.per_role) ? details.per_role : [];
         if (item.event_type === 'reviewer.findings' && perRole.length) {
           perRole.forEach((role) => {
@@ -4109,6 +4358,7 @@
     }
 
     function chatBubble(message) {
+      if (message.kind === 'meeting') return meetingBubble(message);
       if (message.kind === 'day') {
         return `<div class="chat-day">${esc(message.text)}</div>`;
       }
@@ -4136,8 +4386,8 @@
       if (message.kind === 'day') return true;
       if (filter === 'all') return true;
       if (filter === 'system') return message.kind === 'system';
-      if (filter === 'lead') return message.kind === 'msg' && message.role === 'lead';
-      return message.kind === 'msg' && message.role !== 'lead';
+      if (filter === 'lead') return (message.kind === 'msg' || message.kind === 'meeting') && message.role === 'lead';
+      return (message.kind === 'msg' || message.kind === 'meeting') && message.role !== 'lead';
     }
 
     function setChatFilter(filter) {

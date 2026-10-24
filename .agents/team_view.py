@@ -103,7 +103,7 @@ def build(root, ledger) -> dict:
 
     reviewer_mode = str(team.get("reviewer") or "heuristic")
     wave_active = reviewer_mode.lower() in (
-        "wave", "wave-reviewer", "role-reviewer")
+        "wave", "wave-reviewer", "role-reviewer", "meeting-reviewer")
     roles = [{
         "role": "coder",
         "label": "Coder",
@@ -131,6 +131,11 @@ def build(root, ledger) -> dict:
 
     done_event = _last_done(events)
     done_data = (done_event or {}).get("data") or {}
+    try:
+        import replay
+        meeting_stats = replay.meeting_stats(events)
+    except Exception:  # noqa: BLE001
+        meeting_stats = {}
 
     return {
         "team": team,
@@ -167,6 +172,9 @@ def build(root, ledger) -> dict:
             "reviewer_fallback": bool(done_data.get("reviewer_fallback")),
             "reviewer_skipped": done_data.get("reviewer_skipped") or [],
         } if done_event else None,
+        "mode": state.get("mode") or "panel",
+        "meeting_active": reviewer_mode.lower() == "meeting-reviewer",
+        "meeting": meeting_stats,
         "plan_job": plan.get("job_id"),
         "plan_file": (plan_state.get("plan") or {}).get("_source"),
         "phase": state.get("phase") or "idle",
