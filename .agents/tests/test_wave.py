@@ -123,6 +123,9 @@ def test_aggregate(checks: Checks) -> None:
     result = wave.review(make_order(), diff="+x", new_content="x", old_content="",
                          level=2, sink=None)
     checks.check("wave: 1 loi -> reject", result["verdict"] == "reject", result)
+    checks.check("wave: 1 loi -> unavailable, not a fake reject vote",
+                 result.get("unavailable") is True
+                 and result.get("unavailable_roles") == ["perf"], result)
     checks.check("wave: role loi duoc ghi",
                  any(item.get("verdict") == "error" for item in result["per_role"]),
                  result["per_role"])
@@ -135,8 +138,10 @@ def test_budget(checks: Checks) -> None:
     wave.budget_left = lambda: 2
     result = wave.review(make_order(), diff="+x", new_content="x", old_content="",
                          level=2, sink=None)
-    checks.check("wave: budget 2 -> heuristic fallback",
-                 result["verdict"] == "approve" and result.get("fallback_reason"), result)
+    checks.check("wave: budget 2 -> fail closed, never auto-approve",
+                 result["verdict"] == "reject" and result.get("unavailable"), result)
+    checks.check("wave: budget 2 -> no heuristic fallback",
+                 "heuristic" not in str(result.get("reviewer")), result)
     checks.check("wave: budget 2 -> skip ca 4", len(result["skipped"]) == 4, result)
     checks.check("wave: calls = 0", wave.calls == 0, wave.calls)
 
@@ -144,8 +149,8 @@ def test_budget(checks: Checks) -> None:
     wave.budget_left = lambda: 0
     result = wave.review(make_order(), diff="+x", new_content="x", old_content="",
                          level=2, sink=None)
-    checks.check("wave: budget 0 -> heuristic fallback",
-                 result["verdict"] == "approve" and result.get("fallback_reason"),
+    checks.check("wave: budget 0 -> fail closed, never auto-approve",
+                 result["verdict"] == "reject" and result.get("unavailable"),
                  result)
     checks.check("wave: budget 0 -> skip 4", len(result["skipped"]) == 4, result)
     checks.check("wave: budget 0 -> khong goi", wave.calls == 0, wave.calls)
@@ -210,12 +215,16 @@ def test_recipe_budget_fallback(checks: Checks) -> None:
     report = recipe_c.run(make_order(), coder=workers.ScriptedCoder(script),
                           reviewer=make_wave(roles), root=root,
                           run_id="wave-budget-1", log=False, max_requests=1)
-    checks.check("wave-budget: verify van apply", report["status"] == "applied",
-                 report["status"])
-    checks.check("wave-budget: heuristic fallback",
-                 bool((report.get("review") or {}).get("fallback_reason")), report.get("review"))
+    checks.check("wave-budget: unavailable -> no apply",
+                 report["status"] != "applied", report["status"])
+    checks.check("wave-budget: reviewer unavailable, not heuristic approve",
+                 bool((report.get("review") or {}).get("unavailable")),
+                 report.get("review"))
     checks.check("wave-budget: reviewer 0 request", report["reviewer_calls"] == 0,
                  report["reviewer_calls"])
+    checks.check("wave-budget: file unchanged",
+                 (root / "calc.py").read_text(encoding="utf-8").endswith("return a - b\n"),
+                 (root / "calc.py").read_text(encoding="utf-8"))
 
 
 def test_burst(checks: Checks) -> None:

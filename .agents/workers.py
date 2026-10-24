@@ -71,9 +71,9 @@ DEFAULT_OPENCODE_BIN = unwrap_cmd_shim(_SHIM)
 # 4 reviewer cho wave (Level 2/3, opt-in). Moi role 1 request.
 WAVE_ROLES = {
     "security": "opencode/nemotron-3.5-super-vl-free",
-    "qa": "opencode/minimax-m3.1-flash-free",
-    "perf": "opencode/deepseek-v4.1-flash-free",
-    "docs": "opencode/glm-5.3-flash-free",
+    "qa": "opencode/deepseek-v4.1-flash-free",
+    "perf": "opencode/nemotron-3-ultra-free",
+    "docs": "opencode/nemotron-3.5-lightning-free",
 }
 
 
@@ -1152,8 +1152,8 @@ class WaveReviewer(Reviewer):
     """4 reviewer chay SONG SONG, chi doc; tong hop thanh 1 ket luan.
 
     `budget_left()` (tuy chon) tra so request con lai; wave chi chay toi da
-    so do. Neu khong du ca 4 role, wave fallback heuristic 0 request thay vi
-    reject oan; hard cap cua recipe la 16.
+    so do. Neu khong du ca 4 role, wave fails closed: no heuristic fallback,
+    no auto-approve; hard cap cua recipe la 16.
     """
 
     kind = "wave-reviewer"
@@ -1181,17 +1181,26 @@ class WaveReviewer(Reviewer):
         skipped = all_roles[len(reviewers):]
 
         if len(reviewers) < len(all_roles):
-            # Graceful degradation: khong du ca 4 reviewer -> dung heuristic 0
-            # request de khong reject oan mot ban da verify exit 0.
-            fallback = HeuristicReviewer()
-            findings = getattr(fallback, method)(work_order, **kwargs)
-            findings.update({
-                "reviewer": self.name + ":heuristic-fallback",
-                "fallback_reason": "wave budget exhausted",
+            # Fail closed.  A partial panel (or no panel at all) must never
+            # become an approve through a heuristic fallback.  This is an
+            # infrastructure/availability condition, not a reviewer reject.
+            missing = all_roles[len(reviewers):]
+            findings = {
+                "verdict": "reject",
+                "level": getattr(work_order, "level", 2),
+                "task_id": getattr(work_order, "task_id", ""),
+                "reasons": [
+                    "reviewer unavailable: "
+                    f"{len(reviewers)}/{len(all_roles)} roles available"
+                    + (f"; skipped: {', '.join(missing)}" if missing else "")
+                ],
+                "reviewer": self.name + ":unavailable",
+                "fallback_reason": "reviewer unavailable (no heuristic fallback)",
                 "skipped": all_roles,
                 "per_role": [],
                 "budget_skipped": True,
-            })
+                "unavailable": True,
+            }
             sink = kwargs.get("sink")
             if sink is not None:
                 sink.write(findings)
@@ -1215,10 +1224,20 @@ class WaveReviewer(Reviewer):
         for item in results:
             for reason in item.get("reasons") or []:
                 reasons.append(f"[{item.get('role', '?')}] {reason}")
+        unavailable = [str(item.get("role") or "?") for item in results
+                       if item.get("verdict") == "error"]
         verdict = "approve" if all(item.get("verdict") == "approve" for item in results) else "reject"
         findings = {"verdict": verdict, "level": work_order.level,
                     "task_id": work_order.task_id, "reasons": reasons[:10],
                     "reviewer": self.name, "per_role": results, "skipped": skipped}
+        if unavailable:
+            findings["reviewer"] = self.name + ":unavailable"
+            findings["unavailable"] = True
+            findings["unavailable_roles"] = unavailable
+            findings["fallback_reason"] = "reviewer unavailable (no auto-approve)"
+            findings["reasons"] = [
+                "reviewer unavailable: " + ", ".join(unavailable)
+            ] + reasons[:9]
         sink = kwargs.get("sink")
         if sink is not None:
             sink.write(findings)
@@ -1250,8 +1269,12 @@ class MeetingReviewer(Reviewer):
         self.name = name
         self.max_workers = max(1, int(max_workers))
         if panel is None:
+            # Use the same SWARM_WAVE_ROLES override as WaveReviewer and the
+            # preflight gate.  Falling back to WAVE_ROLES here would silently
+            # review with different models than the ones preflighted.
+            import wave as wave_module
             panel = {role: (factory or (lambda r, m: RoleReviewer(r, m)))(role, model)
-                     for role, model in WAVE_ROLES.items()}
+                     for role, model in wave_module.normalize_roles().items()}
         self.panel = dict(panel)
         self.roles = dict(self.panel)
         self.budget_left = None
@@ -1324,7 +1347,13 @@ class MeetingReviewer(Reviewer):
             budget = MeetingBudget()
             budget.seed(coder_initial=coder_calls, round1=len(result.findings))
 
-            if result.all_approved:
+            if result.unavailable:
+                reason = ("reviewer unavailable: "
+                          + ", ".join(result.unavailable)
+                          + "; meeting aborted without applying")
+                orchestrator.abort(reason, work_order=work_order, round_no=1)
+                decision = Decision("reject", [reason], round=1)
+            elif result.all_approved:
                 decision = Decision(verdict="approve",
                                     reasons=["4/4 reviewer approve"], round=1)
             else:
@@ -1423,20 +1452,37 @@ class MeetingReviewer(Reviewer):
                                 result2 = orchestrator.run_round2(
                                     work_order, new_context, participants,
                                     sink=sink, new_patch=True)
-                                decision = policy.evaluate(
-                                    orchestrator.blackboard.votes,
-                                    orchestrator.last_result.conflicts,
-                                    verify_result=verify, round_no=2)
-                                if decision.verdict == "approve":
-                                    prepared["participants"] = participants
-                                    prepared["round2"] = [dict(item)
-                                                          for item in result2.findings]
-                                else:
+                                if result2.unavailable:
+                                    reason = ("reviewer unavailable in round 2: "
+                                              + ", ".join(result2.unavailable)
+                                              + "; meeting aborted without applying")
+                                    orchestrator.abort(reason, work_order=work_order,
+                                                       round_no=2)
+                                    decision = Decision("reject", [reason], round=2)
                                     prepared = None
+                                else:
+                                    decision = policy.evaluate(
+                                        orchestrator.blackboard.votes,
+                                        orchestrator.last_result.conflicts,
+                                        verify_result=verify, round_no=2)
+                                    if decision.verdict == "approve":
+                                        prepared["participants"] = participants
+                                        prepared["round2"] = [dict(item)
+                                                              for item in result2.findings]
+                                    else:
+                                        prepared = None
             if decision is None:
                 decision = Decision("reject", ["meeting could not reach a decision"], round=2)
             orchestrator.close(decision, work_order=work_order)
             aggregate = orchestrator.aggregate(result)
+            unavailable = list(getattr(result, "unavailable", []) or [])
+            aggregate["unavailable"] = unavailable
+            if unavailable:
+                # Keep the infrastructure reason visible even though the
+                # per-role reasons only show the reviewer error text.
+                aggregate["reasons"] = [
+                    "reviewer unavailable: " + ", ".join(unavailable)
+                ] + list(aggregate.get("reasons") or [])[:11]
             aggregate["decision"] = decision.to_dict()
             aggregate["budget"] = budget.snapshot() if budget else None
             if decision.verdict == "approve":
@@ -1455,7 +1501,7 @@ class MeetingReviewer(Reviewer):
                 "level": getattr(work_order, "level", 2),
                 "reasons": [f"meeting error: {type(exc).__name__}: {str(exc)[:240]}"],
                 "reviewer": self.name, "per_role": [], "skipped": [],
-                "meeting": orchestrator.blackboard.snapshot(),
+                "unavailable": [], "meeting": orchestrator.blackboard.snapshot(),
                 "budget": budget.snapshot() if budget else None,
             }
             result = None

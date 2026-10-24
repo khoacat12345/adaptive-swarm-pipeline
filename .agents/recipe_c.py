@@ -982,12 +982,21 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
                     report["review"] = dict(review)
             report["reviewer_fallback"] = bool(review.get("fallback_reason"))
             if report["reviewer_fallback"]:
-                report["budget"]["burst_used"] = True
-                log_budget_event("budget.fallback_heuristic", {
-                    "task_id": work_order.task_id,
-                    "used": requests_used(),
-                    "reason": review.get("fallback_reason"),
-                    "skipped": review.get("skipped") or []}, status="info")
+                if review.get("unavailable"):
+                    log_budget_event("reviewer.unavailable", {
+                        "task_id": work_order.task_id,
+                        "used": requests_used(),
+                        "reason": review.get("fallback_reason"),
+                        "skipped": review.get("skipped") or []},
+                        status="fail")
+                else:
+                    report["budget"]["burst_used"] = True
+                    log_budget_event("budget.fallback_heuristic", {
+                        "task_id": work_order.task_id,
+                        "used": requests_used(),
+                        "reason": review.get("fallback_reason"),
+                        "skipped": review.get("skipped") or []},
+                        status="info")
             if review.get("verdict") != "approve":
                 feedback = _feedback(
                     "reviewer", "rejected", "; ".join(review.get("reasons") or [])[:400],
@@ -1228,6 +1237,25 @@ def main(argv: list[str] | None = None) -> int:
     order = work_order_module.WorkOrder.from_dict(order_data)
     order.validate()
 
+    # Read-only preflight: never start a wave/meeting with unavailable models.
+    if args.mode == "meeting" or args.reviewer == "wave":
+        import preflight
+        import wave as wave_module
+        role_models = wave_module.normalize_roles()
+        missing = preflight.missing_roles(role_models, wave_module.ROLE_ORDER)
+        if missing:
+            print(f"Preflight failed: missing required reviewer roles: {', '.join(missing)}",
+                  file=sys.stderr)
+            print("Meeting/wave needs all four: security, qa, perf, docs.", file=sys.stderr)
+            return 3
+        gate = preflight.check_models(args.root, list(role_models.values()),
+                                      strict=True, require_all=True)
+        if not gate.get("ok"):
+            print(preflight.render(gate))
+            print("Preflight failed: no model was called. Fix model routes or run scout.py --write.",
+                  file=sys.stderr)
+            return 3
+
     route_plan = None
     if args.route:
         import router
@@ -1244,6 +1272,15 @@ def main(argv: list[str] | None = None) -> int:
                 f"het quota cho moi model trong chain {route_plan.get('work_type')}: "
                 f"{' -> '.join(route_plan.get('chain') or [])}. "
                 "Doi sang model free, cho reset, hoac dung --force.")
+        import preflight
+        chain_gate = preflight.check_chain(args.root, route_plan.get("chain") or [])
+        if not chain_gate.get("ok"):
+            print(preflight.render(chain_gate))
+            print("Preflight failed: no model in the routed coder chain is available.",
+                  file=sys.stderr)
+            return 3
+        for warning in chain_gate.get("warnings") or []:
+            print(f"[preflight] {warning}", file=sys.stderr)
 
     import workers
     if args.coder == "scripted":

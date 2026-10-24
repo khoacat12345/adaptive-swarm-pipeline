@@ -12,9 +12,9 @@ import os
 
 DEFAULT_ROLES = {
     "security": "opencode/nemotron-3.5-super-vl-free",
-    "qa": "opencode/minimax-m3.1-flash-free",
-    "perf": "opencode/deepseek-v4.1-flash-free",
-    "docs": "opencode/glm-5.3-flash-free",
+    "qa": "opencode/deepseek-v4.1-flash-free",
+    "perf": "opencode/nemotron-3-ultra-free",
+    "docs": "opencode/nemotron-3.5-lightning-free",
 }
 ROLE_ORDER = ("security", "qa", "perf", "docs")
 

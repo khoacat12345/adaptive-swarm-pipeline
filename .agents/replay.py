@@ -142,6 +142,10 @@ def _message(event: dict, norm: dict) -> str:
         return f"meeting aborted: {_short(data.get('reason'), 80)}"
     if kind == "reviewer.findings":
         verdict = data.get("verdict") or norm["status"]
+        if data.get("unavailable"):
+            roles = ", ".join(str(item) for item in (data.get("unavailable_roles") or []))
+            suffix = f" ({roles})" if roles else ""
+            return f"reviewer unavailable ({verdict}){suffix} - fail closed, no apply"
         if data.get("fallback_reason"):
             return f"wave fallback heuristic ({verdict}) - review budget exhausted"
         per_role = data.get("per_role") or []

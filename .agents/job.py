@@ -548,6 +548,23 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
     if problems:
         raise ValueError("plan khong hop le: " + "; ".join(problems[:8]))
 
+    # Health gate: meeting/wave requires all four reviewer routes to exist.
+    if mode == "meeting" or reviewer_kind == "wave":
+        import preflight
+        import wave as wave_module
+        role_models = wave_module.normalize_roles()
+        missing = preflight.missing_roles(role_models, wave_module.ROLE_ORDER)
+        if missing:
+            raise ValueError(
+                "Preflight failed: missing required reviewer roles: "
+                + ", ".join(missing)
+                + "\nMeeting/wave needs all four: security, qa, perf, docs.")
+        gate = preflight.check_models(root, list(role_models.values()),
+                                      strict=True, require_all=True)
+        if not gate.get("ok"):
+            raise ValueError(preflight.render(gate) +
+                             "\nPreflight failed: no model was called.")
+
     import quota
     tracker = quota.QuotaTracker(root=root).refresh() if use_router else None
     started = time.perf_counter()
@@ -619,6 +636,22 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             status = "blocked"
             update_state(phase="stopped", current=None)
             break
+        if route_plan:
+            import preflight
+            chain_gate = preflight.check_chain(root, route_plan.get("chain") or [])
+            route_plan["preflight"] = {
+                "ok": chain_gate.get("ok"),
+                "available_models": chain_gate.get("available_models") or [],
+                "errors": chain_gate.get("errors") or [],
+                "warnings": chain_gate.get("warnings") or [],
+            }
+            if not chain_gate.get("ok"):
+                records.append({"id": item["id"], "status": "blocked",
+                                "error": "no available model in routed chain",
+                                "route": route_plan})
+                status = "blocked"
+                update_state(phase="stopped", current=None)
+                break
 
         chain = [model] if model else (route_plan["chain"] if route_plan else [])
         coder = (coder_factory(order, chain) if coder_factory
@@ -649,7 +682,9 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
         if chain:
             review_info = report.get("review") or {}
             reviewer_name = review_info.get("reviewer") or getattr(review, "kind", "reviewer")
-            if review_info.get("fallback_reason"):
+            if review_info.get("unavailable"):
+                reviewer_name = "reviewer-unavailable"
+            elif review_info.get("fallback_reason"):
                 reviewer_name = "heuristic-fallback"
             team = {"coder": chain[0],
                     "fallback": chain[1] if len(chain) > 1 else None,

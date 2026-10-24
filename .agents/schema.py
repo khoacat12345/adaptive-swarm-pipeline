@@ -39,6 +39,7 @@ MEETING_EVENTS = (
     "meeting.opened",
     "meeting.message",
     "meeting.conflict",
+    "meeting.unavailable",
     "meeting.rebuttal",
     "meeting.vote",
     "meeting.decision",
@@ -92,6 +93,7 @@ NODE_BY_EVENT = {
     "meeting.opened": "meeting",
     "meeting.message": "meeting",
     "meeting.conflict": "meeting",
+    "meeting.unavailable": "meeting",
     "meeting.rebuttal": "meeting",
     "meeting.vote": "meeting",
     "meeting.decision": "lead",
@@ -197,6 +199,11 @@ def validate_meeting_event(event: dict) -> list[str]:
     elif event_type == "meeting.decision":
         if str(data.get("verdict") or "").lower() not in ("approve", "reject", "escalate"):
             problems.append("meeting.decision verdict khong hop le")
+    elif event_type == "meeting.unavailable":
+        if not isinstance(data.get("roles"), list) or not data.get("roles"):
+            problems.append("meeting.unavailable thieu roles")
+        if not str(data.get("reason") or "").strip():
+            problems.append("meeting.unavailable thieu reason")
     elif event_type == "meeting.aborted":
         if not str(data.get("reason") or "").strip():
             problems.append("meeting.aborted thieu reason")

@@ -127,8 +127,12 @@ def run_checks() -> Checks:
     checks.check("DoD-2 co version + schema_version",
                  bool(config.get("version")) and config.get("schema_version") == scout.SCHEMA_VERSION)
     checks.check("DoD-2 co catalog source", bool(config["catalog"]["source"]), config["catalog"]["source"])
-    checks.check("DoD-2 registry model >= 10", len(config.get("models") or {}) >= 10,
+    checks.check("DoD-2 registry model >= 5", len(config.get("models") or {}) >= 5,
                  f"{len(config.get('models') or {})} model")
+    checks.check("DoD-2 default is free-only",
+                 (config.get("constraints") or {}).get("free_only") is True
+                 and all(m.get("is_free") for m in (config.get("models") or {}).values()),
+                 str((config.get("constraints") or {}).get("free_only")))
     checks.check("DoD-2 moi model co field bat buoc",
                  all(all(k in m for k in ("provider", "auth_status", "context_window",
                                           "pricing", "is_free", "supports_cache"))

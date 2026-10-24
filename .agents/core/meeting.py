@@ -89,6 +89,7 @@ class RoundResult:
     messages: list[AgentMessage]
     votes: list[Vote]
     all_approved: bool
+    unavailable: list[str] = field(default_factory=list)
 
     @property
     def per_role(self) -> list[dict]:
@@ -105,6 +106,18 @@ def _normalise_refs(raw) -> list[EvidenceRef]:
         if not ref.validate():
             refs.append(ref)
     return refs
+
+
+def _classify_error(text: str) -> str:
+    value = str(text or "").lower()
+    if any(word in value for word in ("no-route", "no route", "model not found",
+                                      "unknown model", "unavailable model")):
+        return "unavailable"
+    if "timeout" in value or "timed out" in value:
+        return "timeout"
+    if any(word in value for word in ("quota", "rate limit", "429", "insufficient")):
+        return "quota"
+    return "error"
 
 
 def _normalise_finding(role: str, data: dict) -> dict:
@@ -125,6 +138,9 @@ def _normalise_finding(role: str, data: dict) -> dict:
         "reasons": reasons,
         "evidence_refs": [ref.to_dict() for ref in evidence],
     })
+    if verdict == "error":
+        data["error_type"] = _classify_error(" ".join(reasons))
+        data["unavailable"] = True
     return data
 
 
@@ -283,11 +299,21 @@ class MeetingOrchestrator:
         conflicts = self.detect_conflicts(findings)
         all_approved = bool(findings) and all(
             item.get("verdict") == "approve" for item in findings)
+        unavailable = [item["role"] for item in findings
+                       if item.get("verdict") == "error"]
         result = RoundResult(findings=findings, conflicts=conflicts,
                              messages=list(self.blackboard.messages),
                              votes=list(self.blackboard.vote_history),
-                             all_approved=all_approved)
+                             all_approved=all_approved,
+                             unavailable=unavailable)
         self.last_result = result
+        if unavailable:
+            self._emit("meeting.unavailable", {
+                "task_id": getattr(work_order, "task_id", ""),
+                "round": 1,
+                "roles": unavailable,
+                "reason": "reviewer unavailable; meeting cannot apply",
+            }, "fail")
         if conflicts:
             self._emit("meeting.conflict", {
                 "task_id": getattr(work_order, "task_id", ""),
@@ -331,6 +357,7 @@ class MeetingOrchestrator:
             "reviewer": self.name,
             "per_role": result.findings,
             "skipped": [],
+            "unavailable": list(result.unavailable),
             "round": 1,
             "conflicts": [item.to_dict() for item in result.conflicts],
             "meeting": self.blackboard.snapshot(),
@@ -445,10 +472,20 @@ class MeetingOrchestrator:
         conflicts = self.detect_conflicts(findings)
         all_approved = bool(findings) and all(
             item.get("verdict") == "approve" for item in findings)
+        unavailable = [item["role"] for item in findings
+                       if item.get("verdict") == "error"]
         result = RoundResult(findings=findings, conflicts=conflicts,
                              messages=round_messages, votes=round_votes,
-                             all_approved=all_approved)
+                             all_approved=all_approved,
+                             unavailable=unavailable)
         self.last_result = result
+        if unavailable:
+            self._emit("meeting.unavailable", {
+                "task_id": getattr(work_order, "task_id", ""),
+                "round": 2,
+                "roles": unavailable,
+                "reason": "reviewer unavailable; meeting cannot apply",
+            }, "fail")
         if conflicts:
             self._emit("meeting.conflict", {
                 "task_id": getattr(work_order, "task_id", ""),

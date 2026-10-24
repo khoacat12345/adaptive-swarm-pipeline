@@ -18,7 +18,8 @@ KHONG phai bang do thuc nghiem. Phase 4 (eval harness) se thay bang so do that.
 
 CLI:
   python .agents/scout.py                 # preview, khong ghi
-  python .agents/scout.py --write         # ghi .agents/config.json (tu dong backup file cu)
+  python .agents/scout.py --write         # ghi config, mac dinh CHI model mien phi
+  python .agents/scout.py --write --allow-paid           # opt-in ro rang cho model tra phi
   python .agents/scout.py --write --verify              # + micro-ping moi vai tro (1 request/vai tro)
   python .agents/scout.py --verify --verify-roles coder
   python .agents/scout.py --json
@@ -802,6 +803,32 @@ def render_preview(new: dict, existing: dict | None, path: Path, age_days: float
 # 0.5.4 — Micro-ping (mac dinh TAT)
 # --------------------------------------------------------------------------
 
+def _verify_one(role: str, model_id: str, template: str, timeout: int,
+                run_id: str, root: Path) -> dict:
+    """Send exactly one micro-ping for one role/model."""
+    command = template.format(model=model_id, prompt=MICRO_PING_PROMPT)
+    started = time.perf_counter()
+    outcome = _run_cli(command, timeout=timeout)
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    ok = outcome["ok"] and bool((outcome["stdout"] or "").strip())
+    payload = {
+        "role": role,
+        "model": model_id,
+        "ok": ok,
+        "exit_code": outcome["exit_code"],
+        "duration_ms": duration_ms,
+        "output_head": (outcome["stdout"] or "").strip()[:160],
+        "error": None if ok else ((outcome["stderr"] or "").strip()[:200] or "khong co output"),
+    }
+    ledger.append_event(
+        "scout.verify", run_id=run_id, duration_ms=duration_ms,
+        result={"status": "pass" if ok else "fail", "error": payload["error"]},
+        data={"role": role, "model": model_id, "exit_code": outcome["exit_code"]},
+        root=root,
+    )
+    return payload
+
+
 def verify_roles(roles: dict, roles_to_verify: list[str], template: str,
                  timeout: int, run_id: str, root: Path) -> dict:
     """Gui dung 1 request moi vai tro. Tra ve {role: result}."""
@@ -810,29 +837,17 @@ def verify_roles(roles: dict, roles_to_verify: list[str], template: str,
         entry = roles.get(role)
         if not entry:
             continue
-        model_id = entry["primary"]
-        command = template.format(model=model_id, prompt=MICRO_PING_PROMPT)
-        started = time.perf_counter()
-        outcome = _run_cli(command, timeout=timeout)
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        ok = outcome["ok"] and bool((outcome["stdout"] or "").strip())
-        payload = {
-            "role": role,
-            "model": model_id,
-            "ok": ok,
-            "exit_code": outcome["exit_code"],
-            "duration_ms": duration_ms,
-            "output_head": (outcome["stdout"] or "").strip()[:160],
-            "error": None if ok else ((outcome["stderr"] or "").strip()[:200] or "khong co output"),
-        }
-        results[role] = payload
-        ledger.append_event(
-            "scout.verify", run_id=run_id, duration_ms=duration_ms,
-            result={"status": "pass" if ok else "fail", "error": payload["error"]},
-            data={"role": role, "model": model_id, "exit_code": outcome["exit_code"]},
-            root=root,
-        )
+        results[role] = _verify_one(role, entry["primary"], template,
+                                    timeout, run_id, root)
     return results
+
+
+def verify_models(models: dict, template: str, timeout: int,
+                  run_id: str, root: Path) -> dict:
+    """Verify the four meeting/wave reviewer models as well as main roles."""
+    return {f"wave:{role}": _verify_one(f"wave:{role}", model, template,
+                                        timeout, run_id, root)
+            for role, model in (models or {}).items()}
 
 
 # --------------------------------------------------------------------------
@@ -888,7 +903,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Scout: doc catalog model + sinh .agents/config.json (chay 1 lan khi setup)")
     parser.add_argument("--root", default=None, help="project root (mac dinh: thu muc cha cua .agents/)")
     parser.add_argument("--write", action="store_true", help="ghi that vao config.json (mac dinh chi preview)")
-    parser.add_argument("--verify", action="store_true", help="bat micro-ping (mac dinh TAT)")
+    parser.add_argument("--verify", action="store_true",
+                        help="bat micro-ping: 5 main roles + 4 meeting/wave reviewers")
     parser.add_argument("--verify-roles", default=None, help="chi verify vai tro cu the, vd: coder,reviewer")
     parser.add_argument("--verify-timeout", type=int, default=CLI_TIMEOUT)
     parser.add_argument("--verify-template", default=DEFAULT_VERIFY_TEMPLATE,
@@ -901,7 +917,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-unconfigured", action="store_true",
                         help="giu ca model cua provider chua co API key")
     parser.add_argument("--free-only", action="store_true",
-                        help="rang buoc cung: chi dung model mien phi (is_free=True)")
+                        help="rang buoc cung: chi dung model mien phi (mac dinh)")
+    parser.add_argument("--allow-paid", action="store_true",
+                        help="opt-in: cho phep ca model tra phi (mac dinh khong)")
     parser.add_argument("--json", action="store_true", help="in config day du ra stdout")
     parser.add_argument("--quiet", action="store_true", help="chi in ket qua cuoi")
     return parser
@@ -917,8 +935,11 @@ def main(argv=None) -> int:
     existing = read_existing_config(config_path)
     age_days = config_age_days(existing)
 
+    # New installs are free-only by default.  Paid models require an explicit
+    # --allow-paid opt-in; this prevents a fresh clone from silently spending.
+    free_only = bool(args.free_only or not args.allow_paid)
     catalog = collect_catalog(root, args.catalog_file, not args.no_cli,
-                              args.include_unconfigured, args.free_only)
+                              args.include_unconfigured, free_only)
     ledger.append_event(
         "scout.catalog.read", run_id=run_id,
         duration_ms=int((time.perf_counter() - started) * 1000),
@@ -941,11 +962,23 @@ def main(argv=None) -> int:
         else:
             requested = list(ROLES)
         requested = [r for r in requested if r in roles][:5]   # toi da 5 request
+        wave_models = {}
+        if not args.verify_roles:
+            try:
+                import wave as wave_module
+                wave_models = wave_module.normalize_roles()
+            except Exception:                       # noqa: BLE001
+                wave_models = {}
         if not args.quiet:
-            print(f"[scout] --verify: se gui {len(requested)} request micro-ping "
-                  f"({', '.join(requested)}) ...", file=sys.stderr)
+            total = len(requested) + len(wave_models)
+            extra = (f" + {len(wave_models)} wave roles" if wave_models else "")
+            print(f"[scout] --verify: se gui {total} request micro-ping "
+                  f"({', '.join(requested)}{extra}) ...", file=sys.stderr)
         verify_results = verify_roles(roles, requested, args.verify_template,
                                       args.verify_timeout, run_id, root)
+        if wave_models:
+            verify_results.update(verify_models(
+                wave_models, args.verify_template, args.verify_timeout, run_id, root))
         # Ket qua do duoc phai quay nguoc thanh canh bao: khong de nguoi dung tin
         # vao mot ke hoach ma may that khong goi duoc.
         for role, result in verify_results.items():

@@ -26,7 +26,7 @@ On Windows use `python` instead of `python3` if that is how Python is installed.
 git clone https://github.com/khoacat12345/adaptive-swarm-pipeline.git
 cd adaptive-swarm-pipeline
 python3 .agents/scout.py          # preview model mapping
-python3 .agents/scout.py --write  # write .agents/config.json
+python3 .agents/scout.py --write --verify  # free-only by default
 python3 .agents/tests/test_phase4.py --fast
 ```
 
@@ -102,8 +102,11 @@ Meeting mode adds independent Round 1 plus at most one targeted rebuttal:
 python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --decision approve
 ```
 
-`--mode meeting` requires `--reviewer wave`. Use it for risky or conflicting
-tasks; use panel/heuristic for small tasks.
+`--mode meeting` requires `--reviewer wave` and all four reviewer roles
+(`security`, `qa`, `perf`, `docs`). The preflight gate checks routes/auth and
+provider health before any model is called; if a required reviewer is
+unavailable, the meeting aborts and nothing is applied. Paid models are opt-in
+with `scout --write --allow-paid`.
 
 ## Dashboard
 
@@ -134,6 +137,7 @@ python3 .agents/tests/test_protocol.py
 python3 .agents/tests/test_round1.py
 python3 .agents/tests/test_rebuttal_policy.py
 python3 .agents/tests/test_adapter.py
+python3 .agents/tests/test_preflight.py
 python3 .agents/tests/test_meeting_ui.py
 python3 .agents/tests/test_sse.py
 python3 .agents/tests/test_phase4.py --fast

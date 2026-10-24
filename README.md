@@ -6,8 +6,8 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **v1.0.0** (stable core). Original acceptance on Windows; Linux/macOS
-> paths are supported and covered by the cross-platform CI workflow.
+> Status: **v1.0.1** (health preflight gate). Original acceptance on Windows;
+> Linux/macOS paths are supported and covered by the cross-platform CI workflow.
 >
 > Built with AI assistance; every change is machine-verified.
 
@@ -45,13 +45,17 @@ cd adaptive-swarm-pipeline
 
 ```bash
 # Linux/macOS
-python3 .agents/scout.py          # preview
-python3 .agents/scout.py --write  # write .agents/config.json
+python3 .agents/scout.py --write --verify   # free-only; pings main + 4 reviewers
+python3 .agents/scout.py --write --allow-paid --verify  # paid opt-in
 
 # Windows PowerShell
-python .agents\scout.py
-python .agents\scout.py --write
+python .agents\scout.py --write --verify
+python .agents\scout.py --write --allow-paid --verify
 ```
+
+New installs are **free-only** by default. Paid models are never selected unless
+you explicitly pass `--allow-paid`. `config.json` stays machine-local and is not
+committed.
 
 ### Per project
 
@@ -79,6 +83,21 @@ python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --decisio
 
 `--mode meeting` requires `--reviewer wave`; it adds independent Round 1 plus at
 most one targeted rebuttal and a machine re-verify before Lead applies.
+
+### Health & cost preflight
+
+Before a wave or meeting starts, the pipeline checks every required reviewer
+model against the local catalog: provider availability, auth status, provider
+health and cooldown. Meeting/wave requires all four roles
+(`security`, `qa`, `perf`, `docs`). If any role or route is unavailable, the run
+**aborts before calling a model**; it never falls back to an automatic heuristic
+approval. Health results are cached for 15 minutes and invalidated when
+`config.json` or the model list changes. A cache older than 24 hours is
+re-checked with a visible warning.
+
+Preflight is also applied to the routed coder chain: a chain with at least one
+available model proceeds; a chain with none is blocked. Use
+`python .agents/tests/test_preflight.py` to verify the gate.
 
 ## What a Work Order looks like
 
@@ -144,8 +163,10 @@ python .agents/job.py --plan plan.json --root . --reviewer wave --wait --open
 Four read-only reviewers run **in parallel** (security, QA, perf, docs) and their
 verdicts are aggregated: any reject blocks the apply. The default role models are
 free/local; override with `SWARM_WAVE_ROLES` when you intentionally want paid models. The wave is **budget-aware**:
-it uses the wave reservation/burst rules (soft 8 / hard 16) and records any
-unused roles as `skipped`. Default remains the 0-request heuristic reviewer.
+it uses the wave reservation/burst rules (soft 8 / hard 16). If fewer than four
+roles can run, the wave **fails closed**: it returns reject/unavailable and never
+auto-approves through the heuristic reviewer. `skipped` lists the roles that did
+not run. Default remains the 0-request heuristic reviewer for panel mode.
 
 Free dry-run (same free model for all four roles, $0):
 
@@ -188,7 +209,8 @@ python .agents/tests/test_phase5.py        # router + fallback reviewer + regres
 python .agents/tests/test_quota.py         # quota math + quota-aware routing
 python .agents/tests/test_phase6.py        # plan approval + job executor
 python .agents/tests/test_planner.py       # goal -> plan + webhook notifications
-python .agents/tests/test_wave.py          # 4 parallel reviewers + budget
+python .agents/tests/test_wave.py          # 4 parallel reviewers + fail-closed budget
+python .agents/tests/test_preflight.py     # health/cost preflight gate
 python .agents/tests/test_telegram.py      # telegram bot commands/auth
 python .agents/tests/test_protocol.py      # meeting protocol + blackboard
 python .agents/tests/test_round1.py        # meeting round 1

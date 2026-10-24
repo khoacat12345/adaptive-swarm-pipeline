@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import tempfile
@@ -173,6 +174,8 @@ def test_independent_and_error(checks: Checks) -> None:
     checks.check("round1: error/abstain are conflicts",
                  len(result.conflicts) == 2, result.findings)
     checks.check("round1: no auto approve", not result.all_approved, result.findings)
+    checks.check("round1: error role is unavailable, not a reject vote",
+                 result.unavailable == ["qa"], result.unavailable)
     checks.check("round1: reviewers did not receive peer messages",
                  all("messages" not in item.seen_kwargs for item in roles.values()),
                  [item.seen_kwargs for item in roles.values()])
@@ -186,6 +189,37 @@ def test_independent_and_error(checks: Checks) -> None:
     checks.check("round1: verify fail cannot open meeting", blocked, "opened")
 
 
+def test_meeting_unavailable_aborts(checks: Checks) -> None:
+    """3 approve + 1 unavailable must abort, not apply and not become a reject vote."""
+    fixed = "def add(a, b):\n    return a + b\n"
+    script = {"MEETU": [{"format": "whole", "content": fixed}]}
+    root = _prepare_project("recipe-unavailable")
+    events: list[tuple] = []
+    meeting = workers.MeetingReviewer(panel({
+        "security": "approve", "qa": "error",
+        "perf": "approve", "docs": "approve",
+    }))
+    meeting.bind_run("meeting-unavailable", root, log=False)
+    meeting.event_sink = lambda kind, data, status="info": events.append((kind, data, status))
+    report = recipe_c.run(make_order("MEETU"),
+                          coder=workers.ScriptedCoder(script),
+                          reviewer=meeting, root=root,
+                          run_id="meeting-unavailable", log=False)
+    review = report.get("review") or {}
+    checks.check("meeting unavailable: no apply", report["status"] == "aborted",
+                 report["status"])
+    checks.check("meeting unavailable: verdict reject", review.get("verdict") == "reject",
+                 review)
+    checks.check("meeting unavailable: reason names reviewer",
+                 "reviewer unavailable" in " ".join(review.get("reasons") or []).lower(),
+                 review.get("reasons"))
+    checks.check("meeting unavailable: aborted event",
+                 any(item[0] == "meeting.aborted" for item in events), events)
+    checks.check("meeting unavailable: file unchanged",
+                 (root / "calc.py").read_text(encoding="utf-8").endswith("return a - b\n"),
+                 (root / "calc.py").read_text(encoding="utf-8"))
+
+
 def test_wave_helpers(checks: Checks) -> None:
     conflicts = [{"role": "docs"}, {"role": "perf"}, {"role": "qa"}, {"role": "security"}]
     checks.check("wave: select security first",
@@ -194,6 +228,24 @@ def test_wave_helpers(checks: Checks) -> None:
     checks.check("wave: limit zero", wave.select_participants(conflicts, limit=0) == [], "not empty")
     roles = wave.normalize_roles("security=m1,qa=m2")
     checks.check("wave: parse roles", roles == {"security": "m1", "qa": "m2"}, roles)
+
+
+def test_meeting_uses_wave_env(checks: Checks) -> None:
+    old = os.environ.get("SWARM_WAVE_ROLES")
+    os.environ["SWARM_WAVE_ROLES"] = (
+        "security=test/s,qa=test/q,perf=test/p,docs=test/d"
+    )
+    try:
+        meeting = workers.MeetingReviewer()
+        roles = {role: getattr(item, "model", None) for role, item in meeting.panel.items()}
+    finally:
+        if old is None:
+            os.environ.pop("SWARM_WAVE_ROLES", None)
+        else:
+            os.environ["SWARM_WAVE_ROLES"] = old
+    checks.check("meeting: uses SWARM_WAVE_ROLES, not stale defaults",
+                 roles.get("qa") == "test/q" and roles.get("docs") == "test/d",
+                 roles)
 
 
 def _prepare_project(name: str):
@@ -254,6 +306,8 @@ def main() -> int:
         ("reject evidence", test_reject_with_evidence),
         ("reject no evidence", test_reject_without_evidence),
         ("independent/error", test_independent_and_error),
+        ("meeting unavailable", test_meeting_unavailable_aborts),
+        ("meeting env roles", test_meeting_uses_wave_env),
         ("wave helpers", test_wave_helpers),
         ("recipe integration", test_recipe_meeting_integration),
     ):

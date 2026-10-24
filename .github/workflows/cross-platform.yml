@@ -16,11 +16,15 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile
-        run: python -m compileall -q .agents/core .agents/providers .agents/workers.py .agents/recipe_c.py .agents/job.py .agents/dashboard.py .agents/replay.py
+        run: python -m compileall -q .agents/core .agents/providers .agents/workers.py .agents/preflight.py .agents/recipe_c.py .agents/job.py .agents/dashboard.py .agents/replay.py
       - name: Core protocol
         run: python .agents/tests/test_protocol.py
       - name: Round 1
         run: python .agents/tests/test_round1.py
+      - name: Health preflight
+        run: python .agents/tests/test_preflight.py
+      - name: Wave reviewer / fail-closed
+        run: python .agents/tests/test_wave.py --fast
       - name: Policy and budget
         run: python .agents/tests/test_rebuttal_policy.py
       - name: Adapter boundary

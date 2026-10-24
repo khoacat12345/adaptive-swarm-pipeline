@@ -21,7 +21,7 @@ command can declare success.
 ## Setup
 
 ```bash
-python3 .agents/scout.py --write
+python3 .agents/scout.py --write --verify   # free-only by default
 python3 .agents/tests/test_phase4.py --fast
 ```
 
@@ -29,7 +29,17 @@ Windows uses `python` instead of `python3`.
 
 `scout.py` reads the local OpenCode model catalog and writes
 `.agents/config.json`. The router uses that catalog; OpenCode Go is optional.
-`config.json` is machine-local and is intentionally not committed.
+`config.json` is machine-local and is intentionally not committed. New installs
+are free-only; use `--allow-paid` only when you explicitly want paid models.
+`scout --verify` micro-pings the five main roles plus the four meeting/wave
+reviewer roles, so the preflight has fresh evidence.
+
+Before wave/meeting runs, `preflight.py` checks all required reviewer models and
+the routed coder chain. Missing routes/auth, provider unavailability or cooldown
+abort the run before any model call. Meeting/wave requires all four reviewers;
+it never auto-approves through a heuristic fallback. Health results cache for
+15 minutes; config/model changes invalidate the cache; a >24h cache is rechecked
+with a warning.
 
 ## Run a task
 
@@ -43,7 +53,9 @@ Panel mode is the default. To use the governed meeting mode:
 python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --decision approve
 ```
 
-`--mode meeting` requires `--reviewer wave`.
+`--mode meeting` requires `--reviewer wave` and all four reviewer roles
+(`security`, `qa`, `perf`, `docs`). If any reviewer is unavailable, the meeting
+aborts with `meeting.aborted`; nothing is applied.
 
 ## Observe
 
@@ -61,7 +73,9 @@ Dashboard: `http://127.0.0.1:8080/`. It binds loopback only.
 
 ```bash
 python3 .agents/tests/test_protocol.py
+python3 .agents/tests/test_preflight.py
 python3 .agents/tests/test_round1.py
+python3 .agents/tests/test_wave.py --fast
 python3 .agents/tests/test_rebuttal_policy.py
 python3 .agents/tests/test_meeting_ui.py
 python3 .agents/tests/test_sse.py
@@ -82,6 +96,7 @@ Run the full suite listed in the root README before a release.
 | `quota.py` | OpenCode quota and cost accounting |
 | `job.py` | plan approval and sequential executor |
 | `planner.py` | goal -> plan |
+| `preflight.py` | health/cost gate: model route, auth, cooldown, chain |
 | `workers.py` | coders/reviewers and provider injection |
 | `core/` | meeting protocol, blackboard, policy, budget |
 | `providers/` | OpenCode, Mock and adapter contract |
