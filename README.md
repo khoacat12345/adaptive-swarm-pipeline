@@ -6,8 +6,9 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **v1.0.1** (health preflight gate). Original acceptance on Windows;
-> Linux/macOS paths are supported and covered by the cross-platform CI workflow.
+> Status: **v1.0.2** (health preflight + meeting time budget). Original
+> acceptance on Windows; Linux/macOS paths are supported and covered by the
+> cross-platform CI workflow.
 >
 > Built with AI assistance; every change is machine-verified.
 
@@ -22,7 +23,7 @@ Most coding agents trust themselves. This one does not.
   interrupted transaction.
 - **Cross-family review** — the reviewer must come from a different model family than
   the coder, so it cannot rubber-stamp its own work.
-- **Hard budget** — soft 8 / hard 16 requests / 300 seconds per run; fallback switches models inside
+- **Hard budget** - soft 8 / hard 16 requests / 600 seconds per run; fallback switches models inside
   the same call on 429/5xx/timeout.
 - **Catalog-aware routing** �?" `scout` discovers local models; `router` selects from
   the local catalog and no longer assumes OpenCode Go is available.
@@ -54,7 +55,9 @@ python .agents\scout.py --write --allow-paid --verify
 ```
 
 New installs are **free-only** by default. Paid models are never selected unless
-you explicitly pass `--allow-paid`. `config.json` stays machine-local and is not
+you explicitly pass `--allow-paid`. This includes the `opencode-go/*`
+subscription; `scout` reads `opencode auth list` so a stored Go credential is
+not misreported as unconfigured. `config.json` stays machine-local and is not
 committed.
 
 ### Per project
@@ -96,8 +99,10 @@ approval. Health results are cached for 15 minutes and invalidated when
 re-checked with a visible warning.
 
 Preflight is also applied to the routed coder chain: a chain with at least one
-available model proceeds; a chain with none is blocked. Use
-`python .agents/tests/test_preflight.py` to verify the gate.
+available model proceeds; a chain with none is blocked. Meeting runs allow up to
+600 seconds total; each role reviewer gets 240 seconds (override with
+`SWARM_REVIEWER_TIMEOUT`). Use `python .agents/tests/test_preflight.py` to verify
+the gate.
 
 ## What a Work Order looks like
 

@@ -84,6 +84,17 @@ def _provider_ok(provider: str, config: dict, *, timeout: float = 0.4) -> tuple[
     provider = str(provider or "").lower()
     catalog = config.get("catalog") or {}
     status = str((catalog.get("providers") or {}).get(provider) or "").lower()
+    # A stale catalog can say "unconfigured" while `opencode auth list` proves
+    # the subscription is stored.  Do not let a stale derived field lock the
+    # whole system; auth_raw is the source of truth for these two providers.
+    auth_raw = str(config.get("auth_raw") or "").lower()
+    stored = "stored" in auth_raw
+    if status == "unconfigured" and provider == "opencode-go":
+        if stored and "opencode go" in auth_raw:
+            status = "available"
+    if status == "unconfigured" and provider == "opencode":
+        if stored and ("opencode console" in auth_raw or "personal" in auth_raw):
+            status = "available"
     if status in ("unconfigured", "unavailable", "disabled", "missing"):
         return False, f"provider {provider} is {status}"
 

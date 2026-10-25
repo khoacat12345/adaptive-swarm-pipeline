@@ -13,7 +13,7 @@ command can declare success.
 1. **Single writer**: only Lead writes project files, through `safe_writer`.
 2. **Machine verify**: no apply unless `verify_command` exits `0`.
 3. **Byte-exact rollback**: backup first; failed verify restores exact bytes.
-4. **Budget**: soft 8 / hard 16 requests, 300 seconds; hard abort at 16.
+4. **Budget**: soft 8 / hard 16 requests, 600 seconds; hard abort at 16.
 5. **Secret safety**: secrets are blocked or redacted before leaving the machine.
 6. **Append-only ledger**: replay, dashboard and memory read the same evidence.
 7. **No silent config or roadmap changes**.
@@ -31,6 +31,8 @@ Windows uses `python` instead of `python3`.
 `.agents/config.json`. The router uses that catalog; OpenCode Go is optional.
 `config.json` is machine-local and is intentionally not committed. New installs
 are free-only; use `--allow-paid` only when you explicitly want paid models.
+`scout` treats `opencode auth list` as authoritative, so `opencode-go/*` is not
+mistaken for unconfigured.
 `scout --verify` micro-pings the five main roles plus the four meeting/wave
 reviewer roles, so the preflight has fresh evidence.
 
@@ -39,7 +41,8 @@ the routed coder chain. Missing routes/auth, provider unavailability or cooldown
 abort the run before any model call. Meeting/wave requires all four reviewers;
 it never auto-approves through a heuristic fallback. Health results cache for
 15 minutes; config/model changes invalidate the cache; a >24h cache is rechecked
-with a warning.
+with a warning. Meeting runs have a 600s wall-clock cap; role reviewers get
+240s each (`SWARM_REVIEWER_TIMEOUT`).
 
 ## Run a task
 

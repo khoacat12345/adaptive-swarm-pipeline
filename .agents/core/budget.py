@@ -9,7 +9,7 @@ The budget is intentionally small and explicit:
     round 1 reviewers    == 4
     round 2 reviewers    <= 2
     total                <= 16
-    wall clock           <= 300s
+    wall clock           <= 600s
 
 No `safe_writer` and no OpenCode import belongs here.
 """
@@ -28,7 +28,7 @@ class BudgetExceeded(RuntimeError):
 class MeetingBudget:
     soft: int = 8
     hard: int = 16
-    seconds: int = 300
+    seconds: int = 600
     coder_initial_cap: int = 8
     coder_rebuttal_cap: int = 2
     round1_cap: int = 4

@@ -107,6 +107,8 @@ def conflict(role: str, *, evidence=True) -> dict:
 
 
 def test_budget(checks: Checks) -> None:
+    checks.check("budget: meeting wall clock is 600s", MeetingBudget().seconds == 600,
+                 MeetingBudget().seconds)
     b = MeetingBudget()
     b.seed(coder_initial=8, round1=4)
     checks.check("budget: 8+4=12", b.spent == 12, b.snapshot())

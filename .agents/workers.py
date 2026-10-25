@@ -1080,14 +1080,16 @@ class RoleReviewer(Reviewer):
 
     kind = "role-reviewer"
 
-    def __init__(self, role: str, model: str, *, binary=None, timeout: int = 180,
+    def __init__(self, role: str, model: str, *, binary=None, timeout: int | None = None,
                  runner=None, adapter=None) -> None:
         super().__init__()
         self.role = str(role)
         self.model = str(model)
         self.name = f"{self.role}:{self.model}"
         self.binary = resolve_binary(binary)
-        self.timeout = timeout
+        # A slow reviewer should not be killed at 180s while the meeting cap
+        # still has room.  Override with SWARM_REVIEWER_TIMEOUT when needed.
+        self.timeout = int(timeout or os.environ.get("SWARM_REVIEWER_TIMEOUT", "240"))
         self.adapter = adapter
         self.runner = runner or self._run_cli
 

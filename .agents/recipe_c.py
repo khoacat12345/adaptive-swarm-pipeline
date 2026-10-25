@@ -49,10 +49,12 @@ STATUS_DRY_RUN = "dry-run"
 VERIFY_TAIL_LINES = 8
 
 # Tran mem 8 / tran cung 16. Wave co the burst 9-12 de du 4 reviewer.
+# Meeting can spend 60-130s on coder + up to 180s on parallel reviewers + a
+# possible rebuttal, so 300s was a guaranteed false abort; 600s is the cap.
 BUDGET_SOFT_REQUESTS = 8
 BUDGET_HARD_REQUESTS = 16
 BUDGET_MAX_REQUESTS = BUDGET_HARD_REQUESTS
-BUDGET_MAX_SECONDS = 300
+BUDGET_MAX_SECONDS = 600
 
 
 # --------------------------------------------------------------------------

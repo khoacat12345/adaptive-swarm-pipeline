@@ -292,17 +292,30 @@ def read_opencode_configs(root: Path) -> dict:
     return {"providers": providers, "files": files}
 
 
+def parse_auth_flags(raw: str) -> dict:
+    """Identify the two OpenCode subscription families in `auth list`."""
+    text = str(raw or "").lower()
+    stored = "stored" in text
+    return {
+        "has_console_auth": stored and (
+            "opencode console" in text or "personal" in text),
+        "has_go_auth": stored and "opencode go" in text,
+    }
+
+
 def read_auth_status() -> dict:
-    """`opencode auth list` -> text. Tra ve raw + co bao nhieu credential duoc luu."""
+    """`opencode auth list` -> text. Tra ve raw + credential flags."""
     cli = find_opencode_cli()
     if not cli:
-        return {"available": False, "raw": "", "has_console_auth": False}
+        return {"available": False, "raw": "",
+                "has_console_auth": False, "has_go_auth": False}
     result = _run_cli(f'"{cli}" auth list', timeout=30)
     raw = (result["stdout"] or "") + (result["stderr"] or "")
+    flags = parse_auth_flags(raw)
     return {
         "available": result["ok"],
         "raw": raw.strip(),
-        "has_console_auth": "stored" in raw.lower() or "console" in raw.lower(),
+        **flags,
     }
 
 
@@ -444,6 +457,10 @@ def collect_catalog(root: Path, catalog_file: str | None, use_cli: bool,
         provider_auth.setdefault(model_id.split("/")[0], "unconfigured")
     if auth.get("has_console_auth"):
         provider_auth["opencode"] = "available"
+    if auth.get("has_go_auth"):
+        # `opencode auth list` is authoritative: OpenCode Go may be stored even
+        # when no local provider entry exists in opencode.json.
+        provider_auth["opencode-go"] = "available"
     for provider_id, spec in local["providers"].items():
         if spec.get("has_api_key"):
             provider_auth[provider_id] = "available"

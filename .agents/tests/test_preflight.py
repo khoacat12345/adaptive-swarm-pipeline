@@ -22,6 +22,7 @@ for _path in (AGENTS_DIR,):
 
 import job  # noqa: E402
 import preflight  # noqa: E402
+import scout  # noqa: E402
 import wave  # noqa: E402
 
 TEMP_ROOT = Path(tempfile.gettempdir()) / "opencode" / "preflight_tests"
@@ -45,7 +46,8 @@ class Checks:
 
 
 def write_config(root: Path, *, provider_status="available",
-                 auth_status="available", extra_models=None) -> None:
+                 auth_status="available", extra_models=None,
+                 auth_raw="") -> None:
     agents = root / ".agents"
     agents.mkdir(parents=True, exist_ok=True)
     models = {
@@ -62,6 +64,7 @@ def write_config(root: Path, *, provider_status="available",
     config = {
         "models": models,
         "catalog": {"providers": {"opencode": provider_status}},
+        "auth_raw": auth_raw,
     }
     (agents / "config.json").write_text(json.dumps(config), encoding="utf-8")
 
@@ -142,6 +145,26 @@ def test_stale_cache(checks: Checks) -> None:
                  "stale" in " ".join(stale.get("warnings") or []).lower(), stale)
 
 
+def test_auth_status_from_opencode_auth_list(checks: Checks) -> None:
+    raw = ("OpenCode Go       OpenCode Go                 stored\n"
+           "OpenCode Console  Personal                    stored")
+    flags = scout.parse_auth_flags(raw)
+    checks.check("auth: OpenCode Go stored -> available", flags["has_go_auth"], flags)
+    checks.check("auth: console stored -> available", flags["has_console_auth"], flags)
+    only_go = scout.parse_auth_flags("OpenCode Go  OpenCode Go  stored")
+    checks.check("auth: Go only does not imply Personal",
+                 only_go["has_go_auth"] and not only_go["has_console_auth"], only_go)
+
+    root = TEMP_ROOT / "auth-raw"
+    shutil.rmtree(root, ignore_errors=True)
+    write_config(root, provider_status="unconfigured",
+                 auth_raw=("OpenCode Go  OpenCode Go  stored\n"
+                           "OpenCode Console  Personal  stored"))
+    result = preflight.check_models(root, ["opencode/free-a"])
+    checks.check("preflight: stale catalog unconfigured is overridden by auth_raw",
+                 result["ok"], result)
+
+
 def test_chain(checks: Checks) -> None:
     root = TEMP_ROOT / "chain"
     shutil.rmtree(root, ignore_errors=True)
@@ -220,6 +243,7 @@ def main() -> int:
         ("auth/missing model", test_model_auth_and_missing_model),
         ("stale cache", test_stale_cache),
         ("chain", test_chain),
+        ("auth list", test_auth_status_from_opencode_auth_list),
         ("job preflight", test_job_preflight_aborts),
         ("roles/classification", test_roles_and_classification),
     ):
