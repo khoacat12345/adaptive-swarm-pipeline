@@ -6,9 +6,9 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **v1.0.2** (health preflight + meeting time budget). Original
-> acceptance on Windows; Linux/macOS paths are supported and covered by the
-> cross-platform CI workflow.
+> Status: **v1.0.3** (skill sync + health preflight + meeting time budget).
+> Original acceptance on Windows; Linux/macOS paths are supported and covered
+> by the cross-platform CI workflow.
 >
 > Built with AI assistance; every change is machine-verified.
 
@@ -216,6 +216,7 @@ python .agents/tests/test_phase6.py        # plan approval + job executor
 python .agents/tests/test_planner.py       # goal -> plan + webhook notifications
 python .agents/tests/test_wave.py          # 4 parallel reviewers + fail-closed budget
 python .agents/tests/test_preflight.py     # health/cost preflight gate
+python .agents/tests/test_skill_consistency.py # installed skill vs repo docs
 python .agents/tests/test_telegram.py      # telegram bot commands/auth
 python .agents/tests/test_protocol.py      # meeting protocol + blackboard
 python .agents/tests/test_round1.py        # meeting round 1
@@ -243,6 +244,7 @@ Hard model-selection tasks live in `.agents/tests/hard_tasks.py`; see
 | `.agents/notify.py` | one-way Discord/Telegram/generic webhooks |
 | `.agents/telegram_bot.py` | two-way Telegram control (/approve, /pause, /say) |
 | `.agents/workers.py` | coders/reviewers (agentic CLI, scripted, fallback) |
+| `.agents/sync_skill.py` | sync `.agents/SKILL.md` into the installed skill |
 | `.agents/ledger.py`, `schema.py`, `replay.py`, `dashboard.py` | evidence + observability |
 | `.agents/tests/` | acceptance suites and hard tasks |
 

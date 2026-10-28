@@ -25,7 +25,12 @@ python3 .agents/scout.py --write --verify   # free-only by default
 python3 .agents/tests/test_phase4.py --fast
 ```
 
-Windows uses `python` instead of `python3`.
+Windows uses `python` instead of `python3`. After editing the skill entrypoint,
+sync the installed copy so OpenCode does not load a stale frontmatter file:
+
+```bash
+python3 .agents/sync_skill.py --write
+```
 
 `scout.py` reads the local OpenCode model catalog and writes
 `.agents/config.json`. The router uses that catalog; OpenCode Go is optional.
@@ -77,6 +82,7 @@ Dashboard: `http://127.0.0.1:8080/`. It binds loopback only.
 ```bash
 python3 .agents/tests/test_protocol.py
 python3 .agents/tests/test_preflight.py
+python3 .agents/tests/test_skill_consistency.py
 python3 .agents/tests/test_round1.py
 python3 .agents/tests/test_wave.py --fast
 python3 .agents/tests/test_rebuttal_policy.py
@@ -100,6 +106,7 @@ Run the full suite listed in the root README before a release.
 | `job.py` | plan approval and sequential executor |
 | `planner.py` | goal -> plan |
 | `preflight.py` | health/cost gate: model route, auth, cooldown, chain |
+| `sync_skill.py` | sync `.agents/SKILL.md` into installed OpenCode skill |
 | `workers.py` | coders/reviewers and provider injection |
 | `core/` | meeting protocol, blackboard, policy, budget |
 | `providers/` | OpenCode, Mock and adapter contract |
