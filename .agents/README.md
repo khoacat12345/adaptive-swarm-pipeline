@@ -106,7 +106,7 @@ Run the full suite listed in the root README before a release.
 | `recipe_c.py` | verification pipeline, budget, apply/rollback |
 | `safe_writer.py` | backup, atomic write, transaction, rollback |
 | `router.py` | work-type router and local catalog selector |
-| `quota.py` | OpenCode quota and cost accounting |
+| `quota.py` | OpenCode quota and cost accounting (`SWARM_PLAN_MONTHLY_USD` override) |
 | `job.py` | plan approval and sequential executor |
 | `planner.py` | goal -> plan |
 | `preflight.py` | health/cost gate: model route, auth, cooldown, chain |

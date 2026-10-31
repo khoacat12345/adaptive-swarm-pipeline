@@ -62,8 +62,18 @@ WINDOW_RATIO = {"today": 0.20, "week": 0.50, "month": 1.00}
 WINDOW_DAYS = {"today": 1, "week": 7, "month": 30}
 
 # Ngan sach CHUNG cua plan (console hien Rolling/Weekly/Monthly dung chung).
-# Uoc tu console Go ($10 plan, Monthly 8% ~ $1.11 -> ~$14). Co the override.
-PLAN_MONTHLY_USD = 14.0
+# The console is authoritative.  Current Go usage is ~52% at $15.62, i.e. a
+# ~$30 monthly cap; the old $14 estimate falsely marked a healthy plan as
+# exhausted.  Override with SWARM_PLAN_MONTHLY_USD when the plan changes.
+def _plan_cap_default() -> float:
+    raw = os.environ.get("SWARM_PLAN_MONTHLY_USD", "30")
+    try:
+        return float(raw)
+    except ValueError:
+        return 30.0
+
+
+PLAN_MONTHLY_USD = _plan_cap_default()
 
 
 def _bin(binary: str | None = None) -> str:
@@ -266,11 +276,11 @@ class QuotaTracker:
 
     def __init__(self, *, root=None, binary: str | None = None,
                  caps: dict | None = None, cache_ttl: int = 60,
-                 plan_cap: float = PLAN_MONTHLY_USD) -> None:
+                 plan_cap: float | None = None) -> None:
         self.root = Path(root).resolve() if root else Path.cwd()
         self.binary = binary
         self.caps = dict(caps or CAPS)
-        self.plan_cap = float(plan_cap)
+        self.plan_cap = float(plan_cap if plan_cap is not None else PLAN_MONTHLY_USD)
         self.cache_ttl = cache_ttl
         self.usage: dict[str, dict[str, float]] = {name: {} for name in WINDOW_DAYS}
         self.spend: dict[str, dict] = {}
