@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Quota tracker: doc usage THAT tu `opencode stats` va cat theo tran.
+"""Quota tracker: doc usage THAT tu Go usage API, fallback `opencode stats`.
 
-Nguon du lieu: `opencode.db` (session_message: cost/token tung request) - chinh xac
-theo rolling 5h/7d/30d. Fallback: `opencode stats` neu DB khong doc duoc.
+Nguon uu tien: GET https://opencode.ai/zen/go/v1/usage voi API key trong
+credential `opencode-go`. Tra ve rolling/weekly/monthly percent truc tiep.
+Fallback: `opencode.db` (session_message cost/token) va console cookie cho
+cac cai dat cu.
 
 Tran (theo tai lieu OpenCode Go):
   - 5 gio  = 20% han muc thang
@@ -130,6 +132,27 @@ def _connect() -> sqlite3.Connection:
 
 
 CONSOLE_STATUS_URL = "https://opencode.ai/console/api/go/status"
+GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
+
+
+def _go_api_key() -> str | None:
+    """Read the OpenCode Go API key from the local credential table."""
+    con = _connect()
+    try:
+        row = con.execute(
+            "select value from credential where integration_id like 'opencode%' "
+            "and active=1 order by integration_id='opencode-go' desc limit 1"
+        ).fetchone()
+    finally:
+        con.close()
+    if not row:
+        return None
+    try:
+        credential = json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    token = credential.get("key") or credential.get("access") or credential.get("token")
+    return str(token) if token else None
 
 
 def _console_token() -> str:
@@ -156,10 +179,54 @@ def _iso_ms(value) -> int:
         return 0
 
 
+def _read_go_usage_api(key: str, timeout: int) -> dict | None:
+    """Authoritative Go usage: GET /zen/go/v1/usage (API-key auth).
+
+    Response shape:
+      {"usage": {"rolling": {"percent": 2, "resetsAt": ...},
+                 "weekly":  {"percent": 40, ...},
+                 "monthly": {"percent": 51, ...}}}
+    """
+    request = urllib.request.Request(
+        GO_USAGE_URL,
+        headers={"Authorization": f"Bearer {key}", "Accept": "application/json",
+                 "User-Agent": "adaptive-swarm/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        return None
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    result: dict[str, dict] = {}
+    for source, target in (("rolling", "today"), ("weekly", "week"),
+                           ("monthly", "month")):
+        item = usage.get(source) or {}
+        if not isinstance(item, dict) or item.get("percent") is None:
+            continue
+        pct = max(0.0, min(100.0, float(item.get("percent") or 0.0)))
+        reset = item.get("resetsAt")
+        result[target] = {
+            "used": round(pct, 1), "limit": 100.0,
+            "remaining": round(100.0 - pct, 1), "pct": round(pct, 1),
+            "resets_at": reset, "resets_at_ms": _iso_ms(reset),
+            "source": "go-api",
+        }
+    return result or None
+
+
 def read_go_status(timeout: int = 6) -> dict | None:
-    """Doc meters CHINH XAC tu console (used/limit/resetsAt)."""
+    """Doc meters CHINH XAC tu OpenCode Go usage API, fallback console."""
     if os.environ.get("SWARM_CONSOLE", "1") == "0":
         return None
+    key = _go_api_key()
+    if key:
+        meters = _read_go_usage_api(key, timeout)
+        if meters:
+            return meters
+    # Console fallback requires a browser session cookie; keep it for older
+    # installations where the API key endpoint is unavailable.
     token = _console_token()
     request = urllib.request.Request(
         CONSOLE_STATUS_URL,
@@ -184,6 +251,7 @@ def read_go_status(timeout: int = 6) -> dict | None:
             "pct": round(used / limit * 100.0, 1),
             "resets_at": item.get("resetsAt"),
             "resets_at_ms": _iso_ms(item.get("resetsAt")),
+            "source": "console",
         }
     return result or None
 
@@ -437,9 +505,11 @@ class QuotaTracker:
                 if item["pct"] >= 100:
                     ok = False
             month = self.meters.get("month") or {}
+            source = next((item.get("source") for item in self.meters.values()
+                           if item.get("source")), "console")
             return {"ok": ok, "cap": month.get("limit", 0), "windows": windows,
                     "worst_pct": max((item["pct"] for item in windows.values()), default=0),
-                    "source": "console"}
+                    "source": source}
         windows = {}
         ok = True
         worst = 0.0
@@ -540,11 +610,16 @@ def _cli(argv=None) -> int:
                   f"{spend.get('tokens_in', 0):>9} / {spend.get('tokens_out', 0):<8} tok")
         if tracker.console:
             parts = []
+            source = "console"
             for key, label in (("today", "5h"), ("week", "7d"), ("month", "30d")):
                 item = tracker.meters.get(key) or {}
-                parts.append(f"{label} {item.get('pct', 0):.1f}% "
-                             f"(${item.get('used', 0):.2f}/${item.get('limit', 0):.0f})")
-            print("console: " + "  ".join(parts))
+                source = item.get("source") or source
+                if item.get("source") == "go-api":
+                    parts.append(f"{label} {item.get('pct', 0):.1f}%")
+                else:
+                    parts.append(f"{label} {item.get('pct', 0):.1f}% "
+                                 f"(${item.get('used', 0):.2f}/${item.get('limit', 0):.0f})")
+            print(f"{source}: " + "  ".join(parts))
         else:
             print("console: khong lay duoc meters that (dang dung uoc luong)")
         print("")
