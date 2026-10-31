@@ -37,7 +37,9 @@ python3 .agents/sync_skill.py --write
 `config.json` is machine-local and is intentionally not committed. New installs
 are free-only; use `--allow-paid` only when you explicitly want paid models.
 `scout` treats `opencode auth list` as authoritative, so `opencode-go/*` is not
-mistaken for unconfigured.
+mistaken for unconfigured. Free `*-free` models survive a provider without an
+API key, and a dead local `9router` proxy is probed and excluded from role maps.
+Router quota fallbacks are read from `config.json`, not hardcoded model IDs.
 `scout --verify` micro-pings the five main roles plus the four meeting/wave
 reviewer roles, so the preflight has fresh evidence.
 

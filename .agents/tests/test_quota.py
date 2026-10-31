@@ -16,8 +16,11 @@ DoD:
 from __future__ import annotations
 
 import argparse
+import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 AGENTS_DIR = Path(__file__).resolve().parents[1]
@@ -124,44 +127,60 @@ def test_router_quota(checks: Checks) -> None:
     order = make_order(level=2)          # W2: deepseek-v4-pro -> kimi-k2.7-code
     main = router.ROUTES["W2"]["main"]
     escalate = router.ROUTES["W2"]["escalate"]
-    free = router.FALLBACKS[0]
+    root = Path(tempfile.gettempdir()) / "opencode" / "router_quota_test"
+    shutil.rmtree(root, ignore_errors=True)
+    (root / ".agents").mkdir(parents=True)
+    free = "opencode/deepseek-v4.1-flash-free"
+    (root / ".agents" / "config.json").write_text(json.dumps({
+        "models": {free: {"is_free": True, "auth_status": "available",
+                          "provider": "opencode"}},
+        "roles": {"coder": {"chain": [main, free]}},
+    }), encoding="utf-8")
+    checks.check("router-quota: fallback from config",
+                 router.fallback_models(root) == [free],
+                 router.fallback_models(root))
+    empty = root / "empty"
+    empty.mkdir()
+    checks.check("router-quota: no config -> no fallback",
+                 router.fallback_models(empty) == [], router.fallback_models(empty))
 
-    plan = router.route(order, quota=FakeQuota())
+    plan = router.route(order, quota=FakeQuota(), root=root)
     checks.check("router-quota: du dia -> giu main", plan["chain"][0] == main, plan)
     checks.check("router-quota: mode main", plan["mode"] == "main", plan["mode"])
 
-    plan = router.route(order, quota=FakeQuota({main: 5}))
+    plan = router.route(order, quota=FakeQuota({main: 5}), root=root)
     checks.check("router-quota: main can + escalate doi dao -> escalate",
                  plan["chain"][0] == escalate and plan["mode"] == "escalate", plan)
 
-    plan = router.route(order, quota=FakeQuota({main: 5, escalate: 20}))
+    plan = router.route(order, quota=FakeQuota({main: 5, escalate: 20}), root=root)
     checks.check("router-quota: main can + escalate khong doi dao -> fallback",
                  plan["chain"][0] == free and plan["mode"] == "fallback", plan)
     checks.check("router-quota: bao degraded", plan["degraded"] is True, plan)
 
     plan = router.route(order, quota=FakeQuota({main: 5, escalate: 20}),
-                        allow_escalate=True)
+                        allow_escalate=True, root=root)
     checks.check("router-quota: allow_escalate -> nang len",
                  plan["chain"][0] == escalate and plan["mode"] == "escalate", plan)
 
-    plan = router.route(order, quota=FakeQuota({main: 11}))
+    plan = router.route(order, quota=FakeQuota({main: 11}), root=root)
     checks.check("router-quota: main 11% van dung duoc", plan["mode"] == "main", plan)
-    plan = router.route(order, quota=FakeQuota({main: 9}))
+    plan = router.route(order, quota=FakeQuota({main: 9}), root=root)
     checks.check("router-quota: main 9% bi coi la can", plan["mode"] != "main", plan)
 
-    all_off = {main: 0, escalate: 0, free: 0, router.FALLBACKS[1]: 0}
-    plan = router.route(order, quota=FakeQuota(ok=all_off))
+    all_off = {main: 0, escalate: 0, free: 0}
+    plan = router.route(order, quota=FakeQuota(ok=all_off), root=root)
     checks.check("router-quota: het ca main/escalate/free -> exhausted",
                  plan["exhausted"] is True and plan["mode"] == "exhausted", plan)
 
     plan = router.route(order, quota=FakeQuota(ok={main: True, escalate: False,
-                                                   free: True}))
+                                                   free: True}), root=root)
     checks.check("router-quota: escalate tat nhung free con -> van chay main",
                  plan["chain"][0] == main, plan)
 
-    plan = router.route(order)
+    plan = router.route(order, root=root)
     checks.check("router-quota: khong truyen quota -> khong loc",
                  plan["chain"] == [main, escalate] and plan["quota"] == {}, plan)
+    shutil.rmtree(root, ignore_errors=True)
 
 
 def test_shared_budget(checks: Checks) -> None:

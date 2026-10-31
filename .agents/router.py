@@ -63,8 +63,31 @@ WORK_TYPES = {
     "W8": "trong-tai/bat-dong",
 }
 
-# Fallback RE (khong bao gio tu nang cap): dung khi main/escalate khong du quota.
-FALLBACKS = [MODELS["deepseek-flash-free"], MODELS["glm-flash-free"]]
+# Fallback RE (khong bao gio tu nang cap): doc tu config/catalog, khong hardcode.
+def fallback_models(root=None) -> list[str]:
+    """Return configured coder fallbacks that are not known-dead.
+
+    The old static list referenced a model that is live but absent from the
+    current config (and, in another release, a model removed from live).  A
+    fallback must come from the same catalog that preflight will check.
+    """
+    catalog = load_catalog(root)
+    if not catalog:
+        return []
+    role = (catalog.get("roles") or {}).get("coder") or {}
+    chain = [str(item) for item in (role.get("chain") or []) if item]
+    models = catalog.get("models") or {}
+    candidates: list[str] = []
+    for model in chain[1:]:
+        entry = models.get(model)
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("auth_status") or "").lower() in (
+                "unconfigured", "unavailable", "missing"):
+            continue
+        candidates.append(model)
+    free = [model for model in candidates if (models.get(model) or {}).get("is_free")]
+    return free or candidates
 
 # Nguong con lai toi thieu (% cua cua so chat nhat) de duoc dung.
 MAIN_MIN_REMAINING = 10.0
@@ -295,7 +318,7 @@ def route(work_order, *, quota=None, allow_escalate: bool = False,
       1. main neu con >= MAIN_MIN_REMAINING% cua cua so hep nhat.
       2. escalate CHI khi con >= ESCALATE_MIN_REMAINING% (do dao) hoac
          `allow_escalate=True`. Escalate khong bao gio la mac dinh khi main can.
-      3. khong du -> ha xuong FALLBACKS (re/free), mode="fallback".
+      3. khong du -> ha xuong fallback_models(root) (re/free), mode="fallback".
       4. het ca -> exhausted=True (recipe chan, tru --force).
     """
     work_type, detected = classify_work(work_order, **signals)
@@ -308,14 +331,15 @@ def route(work_order, *, quota=None, allow_escalate: bool = False,
     exhausted = False
 
     if quota is not None:
-        for model in chain + FALLBACKS:
+        fallbacks = fallback_models(root)
+        for model in chain + fallbacks:
             quota_info.setdefault(model, quota.remaining(model))
         main_ok = (quota_info[main]["ok"]
                    and _remaining_pct(quota_info[main]) >= MAIN_MIN_REMAINING)
         esc_ok = bool(escalate) and (quota_info[escalate]["ok"]
                                      and _remaining_pct(quota_info[escalate])
                                      >= ESCALATE_MIN_REMAINING)
-        fallback_ok = [model for model in FALLBACKS if quota_info[model]["ok"]]
+        fallback_ok = [model for model in fallbacks if quota_info[model]["ok"]]
 
         if main_ok:
             chosen, mode = main, "main"

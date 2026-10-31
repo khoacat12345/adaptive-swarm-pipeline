@@ -190,6 +190,15 @@ def check_models(root, models, *, use_cache: bool = True, strict: bool = True,
         provider_ready, provider_reason = _provider_ok(provider, config)
         auth_status = str(entry.get("auth_status") or "").lower()
         auth_ok = auth_status not in ("missing", "unconfigured", "unavailable", "no-auth")
+        # Scout now keeps free models when the provider has no API key and
+        # marks their auth_status as available.  The provider catalog still says
+        # "unconfigured"; do not let that stale provider flag reject the only
+        # working free routes.  Never bypass a dead local proxy.
+        if (not provider_ready and entry.get("is_free") and auth_ok
+                and provider in ("opencode", "opencode-go")
+                and provider_reason.endswith("is unconfigured")):
+            provider_ready = True
+            provider_reason = "free model; provider key not required"
         health_ok, health_reason = _health_ok(model, root)
         ok = provider_ready and auth_ok and health_ok
         status = "available" if ok else "unavailable"

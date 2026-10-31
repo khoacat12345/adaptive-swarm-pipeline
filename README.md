@@ -6,7 +6,7 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **v1.0.4** (live catalog preflight + error-vote truth).
+> Status: **v1.0.5** (config-driven fallbacks + free-route recovery).
 > Original acceptance on Windows; Linux/macOS paths are supported and covered
 > by the cross-platform CI workflow.
 >

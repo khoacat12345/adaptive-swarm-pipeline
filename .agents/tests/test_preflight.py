@@ -102,8 +102,13 @@ def test_config_change_invalidates(checks: Checks) -> None:
     first = preflight.check_models(root, ["opencode/free-a"])
     checks.check("preflight: initial pass", first["ok"], first)
 
-    write_config(root, provider_status="unconfigured")
-    second = preflight.check_models(root, ["opencode/free-a"])
+    write_config(root, provider_status="unconfigured", extra_models={
+        "opencode/paid-a": {
+            "id": "opencode/paid-a", "provider": "opencode",
+            "auth_status": "available", "is_free": False,
+        },
+    })
+    second = preflight.check_models(root, ["opencode/paid-a"])
     checks.check("preflight: config change invalidates cache",
                  second.get("cached") is False, second)
     checks.check("preflight: unconfigured provider fails", not second["ok"], second)
@@ -126,6 +131,25 @@ def test_model_auth_and_missing_model(checks: Checks) -> None:
     checks.check("preflight: unknown model reason",
                  "not in config catalog" in " ".join(missing.get("errors") or []),
                  missing)
+
+
+def test_free_model_without_provider_key(checks: Checks) -> None:
+    root = TEMP_ROOT / "free-no-key"
+    shutil.rmtree(root, ignore_errors=True)
+    write_config(root, provider_status="unconfigured")
+    free = preflight.check_models(root, ["opencode/free-a"], use_cache=False)
+    checks.check("preflight: free model survives unconfigured provider", free["ok"],
+                 free)
+    paid_root = TEMP_ROOT / "paid-no-key"
+    shutil.rmtree(paid_root, ignore_errors=True)
+    write_config(paid_root, provider_status="unconfigured", extra_models={
+        "opencode/paid-a": {
+            "id": "opencode/paid-a", "provider": "opencode",
+            "auth_status": "available", "is_free": False,
+        },
+    })
+    paid = preflight.check_models(paid_root, ["opencode/paid-a"], use_cache=False)
+    checks.check("preflight: paid model still needs provider key", not paid["ok"], paid)
 
 
 def test_stale_cache(checks: Checks) -> None:
@@ -274,6 +298,7 @@ def main() -> int:
         ("pass/cache", test_pass_and_cache),
         ("config invalidation", test_config_change_invalidates),
         ("auth/missing model", test_model_auth_and_missing_model),
+        ("free/no key", test_free_model_without_provider_key),
         ("stale cache", test_stale_cache),
         ("chain", test_chain),
         ("auth list", test_auth_status_from_opencode_auth_list),
