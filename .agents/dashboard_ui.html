@@ -1262,6 +1262,23 @@
       stroke-dasharray: 6 4;
       animation: dash 1.6s linear infinite;
     }
+    .war .link.meet.base {
+      stroke: #27405a;
+      stroke-width: 1.2;
+      opacity: .55;
+      stroke-dasharray: 4 6;
+      animation: none;
+    }
+
+    .war .link.meet.base.hot {
+      stroke: #fb923c;
+      stroke-width: 2.6;
+      opacity: 1;
+      stroke-dasharray: 6 4;
+      animation: dash 1.6s linear infinite;
+      filter: drop-shadow(0 0 5px #fb923c);
+    }
+
     .war .link.meet.hot {
       stroke-width: 2.6;
       opacity: 1;
@@ -3592,8 +3609,10 @@
       const visibleMeeting = allMeeting.filter((item) =>
         meetingFilter === 'all' || String(item.round) === String(meetingFilter));
       const meetingEdgesData = meetingEdges(visibleMeeting);
-      const meetingActive = meetingActiveNodes(visibleMeeting);
       const meetingMode = allMeeting.length > 0;
+      // Only a running role may glow.  At replay/done the base graph stays
+      // visible but static.
+      const activeRoles = new Set(Object.keys(status).filter((role) => status[role] === 'running'));
       const short = (model) => shortModel(model);
       const roleNode = (role) => {
         const item = roles.find((row) => row.role === role) || { role, label: role };
@@ -3603,7 +3622,7 @@
         const label = item.standby ? 'standby' : item.skipped ? 'skipped'
           : st === 'running' ? 'running' : st === 'next' ? 'next'
             : st === 'done' ? (role === 'coder' ? 'done' : 'approved') : 'idle';
-        const hot = meetingActive.includes(role) ? 'hot' : '';
+        const hot = activeRoles.has(role) ? 'hot' : '';
         return `<button type="button" class="anode ${nodeClass} role-${esc(role)} ${hot}" style="left:${x}%;top:${y}%"
       onclick="focusAgent('${role}')" title="${esc(item.label)} · ${esc(item.model || 'not assigned')}">
       <span class="av">${esc((NODE[role] && NODE[role].a) || (item.label || role).slice(0, 2).toUpperCase())}</span>
@@ -3612,7 +3631,7 @@
         <span class="st">${label}</span></span></button>`;
       };
       const lines = meetingMode
-        ? renderMeetingGraph(meetingEdgesData, meetingActive)
+        ? renderMeetingGraph(meetingEdgesData, activeRoles)
         : roles.map((item) => {
           const [x, y] = pos[item.role] || [50, 50];
           const cls = status[item.role] === 'running' ? 'run' : status[item.role] === 'next' ? 'next' : '';
@@ -3702,14 +3721,14 @@
       <button class="btn ${meetingFilter === 'all' ? 'primary' : 'ghost'}" onclick="setMeetingRound('all')">All messages</button>
       <button class="btn ${meetingFilter === '1' ? 'primary' : 'ghost'}" onclick="setMeetingRound('1')">Round 1</button>
       <button class="btn ${meetingFilter === '2' ? 'primary' : 'ghost'}" onclick="setMeetingRound('2')">Round 2</button>
-      <span class="muted" style="font-size:10px;align-self:center">Edges are sender \u2192 recipients from meeting.message; no message = no edge.</span>
+      <span class="muted" style="font-size:10px;align-self:center">Base lines are Lead \u2192 reviewers; they stay visible and only glow when a role is running.</span>
     </div>` : ''}
     <div class="war">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none">
         <defs><marker id="meeting-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3"
           orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L7,3 z" fill="#fb923c"></path></marker></defs>
         ${lines}</svg>
-      <button type="button" class="anode leader ${centerState} ${meetingActive.includes('lead') ? 'hot' : ''}" style="left:50%;top:48%"
+      <button type="button" class="anode leader ${centerState} ${centerState === 'run' ? 'hot' : ''}" style="left:50%;top:48%"
         onclick="focusAgent('lead')" title="Lead · ${esc(phase)}">
         <span class="av">LD</span><span><span class="nm">Lead</span>
           <span class="md">${esc(jobState.job_id || plan.job_id || 'orchestrator')}</span>
@@ -4244,13 +4263,26 @@
     }
 
     function renderMeetingGraph(edges, active) {
-      const activeSet = new Set(active || []);
-      return (edges || []).map((edge) => {
+      const activeSet = active instanceof Set ? active : new Set(active || []);
+      // The five Lead spokes are structural, not message-derived.  Round 2
+      // must not lose the graph just because it has fewer messages.
+      const all = [
+        ...['coder', 'security', 'qa', 'perf', 'docs'].map((to) => ({ from: 'lead', to, base: true })),
+        ...(edges || []),
+      ];
+      const seen = new Set();
+      return all.filter((edge) => {
+        const key = `${edge.from}->${edge.to}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).map((edge) => {
         const from = MEETING_POS[edge.from] || [50, 50];
         const to = MEETING_POS[edge.to] || [50, 50];
-        const hot = activeSet.has(edge.from) ? 'hot' : '';
+        const hot = (activeSet.has(edge.from) || activeSet.has(edge.to)) ? 'hot' : '';
+        const base = edge.base ? 'base' : '';
         return `<line x1="${from[0]}" y1="${from[1]}" x2="${to[0]}" y2="${to[1]}"
-          class="link meet ${hot}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}"
+          class="link meet ${base} ${hot}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}"
           marker-end="url(#meeting-arrow)" vector-effect="non-scaling-stroke"></line>`;
       }).join('');
     }
