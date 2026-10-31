@@ -294,8 +294,13 @@ class MeetingOrchestrator:
                     "evidence_refs": [], "reply_to": None,
                 }),
             })
+            # Record which model answered.  Without it every vote looks the
+            # same apart from the role, so "4 independent reviewers" cannot be
+            # verified from the ledger -- four roles served by one model are
+            # indistinguishable from four different models.
             self._emit("meeting.vote", {
                 "task_id": getattr(work_order, "task_id", ""),
+                "model": finding.get("model"),
                 **vote.to_dict(),
             })
 
@@ -471,8 +476,13 @@ class MeetingOrchestrator:
                     "task_id": getattr(work_order, "task_id", ""),
                     **message.to_dict(),
                 })
+            # Record which model answered.  Without it every vote looks the
+            # same apart from the role, so "4 independent reviewers" cannot be
+            # verified from the ledger -- four roles served by one model are
+            # indistinguishable from four different models.
             self._emit("meeting.vote", {
                 "task_id": getattr(work_order, "task_id", ""),
+                "model": finding.get("model"),
                 **vote.to_dict(),
             })
         conflicts = self.detect_conflicts(findings)

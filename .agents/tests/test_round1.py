@@ -77,6 +77,19 @@ class FakeRole(workers.Reviewer):
         }
 
 
+class ModeledRole(FakeRole):
+    """FakeRole that reports a distinct model id, like a real reviewer does."""
+
+    def __init__(self, role: str, model: str) -> None:
+        super().__init__(role, "approve", evidence=False)
+        self.model_name = model
+
+    def _finding(self, work_order):
+        finding = super()._finding(work_order)
+        finding["model"] = self.model_name
+        return finding
+
+
 def make_order(task_id="MEET1"):
     return work_order_module.create(
         task_id=task_id, title="meeting", objective="Sua ham add trong calc.py",
@@ -303,6 +316,30 @@ def test_recipe_meeting_integration(checks: Checks) -> None:
                  (report.get("review") or {}).get("verdict") == "reject", report.get("review"))
 
 
+def test_vote_records_model(checks: Checks) -> None:
+    """The ledger must show which model answered each vote.
+
+    Without the model id, four roles served by one model are indistinguishable
+    from four independent models -- so "4/4 independent" could not be verified.
+    """
+    order = make_order("MEET-MODEL")
+    events: list[tuple] = []
+    reviewers = {role: ModeledRole(role, f"test/{role}-model")
+                 for role in wave.ROLE_ORDER}
+    orch = MeetingOrchestrator(
+        reviewers,
+        event_sink=lambda kind, data, status="info": events.append((kind, data, status)),
+        max_workers=4)
+    orch.open(order, context(order))
+    orch.run_round1(order, context(order))
+    votes = [data for kind, data, _status in events if kind == "meeting.vote"]
+    models = [vote.get("model") for vote in votes]
+    checks.check("round1: 4 vote events", len(votes) == 4, len(votes))
+    checks.check("round1: every vote carries a model", all(models), models)
+    checks.check("round1: 4 distinct models recorded",
+                 len(set(models)) == 4, models)
+
+
 def main() -> int:
     checks = Checks()
     for name, test in (
@@ -313,6 +350,7 @@ def main() -> int:
         ("meeting unavailable", test_meeting_unavailable_aborts),
         ("meeting env roles", test_meeting_uses_wave_env),
         ("wave helpers", test_wave_helpers),
+        ("vote model", test_vote_records_model),
         ("recipe integration", test_recipe_meeting_integration),
     ):
         print(f"[{name}] ...")
