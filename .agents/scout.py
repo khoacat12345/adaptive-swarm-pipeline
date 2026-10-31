@@ -33,6 +33,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -191,29 +192,26 @@ ENV_PROVIDER_KEYS = {
 }
 
 # Snapshot doc tu chinh may nay (nguon du phong khi khong goi duoc CLI)
-SNAPSHOT_DATE = "2026-10-19"
+# Regenerate bang `python .agents/scout.py --allow-paid` (preview) hoac
+# `python .agents/tests/test_scout_catalog.py` -- test se bao khi snapshot lech live.
+SNAPSHOT_DATE = "2026-10-31"
 SNAPSHOT_MODELS = [
-    "9router/ag/claude-opus-4-6-thinking", "9router/ag/claude-sonnet-4-6",
-    "9router/ag/gemini-3.8-flash", "9router/ag/gemini-3.8-flash-high",
-    "9router/apiai/gpt-5.6-sol", "9router/gemini/gemini-2.5-pro",
-    "9router/gemini/gemini-3.5-flash-lite", "9router/gemini/gemini-3.6-flash",
-    "9router/gemini/gemini-3.7-flash", "9router/gemini/gemini-3.8-flash",
-    "9router/gemini/gemma-4-31b-it",
-    "opencode/beam-free", "opencode/big-pickle", "opencode/claude-fable-5-1",
-    "opencode/claude-haiku-5-5", "opencode/claude-opus-5-5", "opencode/claude-sonnet-5-5",
-    "opencode/deepseek-v4-pro", "opencode/deepseek-v4.1-flash", "opencode/deepseek-v4.1-flash-free",
-    "opencode/gemini-3.1-pro", "opencode/gemini-3.5-flash-lite", "opencode/gemini-3.8-flash",
-    "opencode/gemini-4-argon", "opencode/glm-5.3", "opencode/glm-5.3-flash",
-    "opencode/glm-5.3-flash-free", "opencode/gpt-5.3-codex", "opencode/gpt-5.3-codex-spark",
-    "opencode/gpt-5.4-mini", "opencode/gpt-5.4-nano", "opencode/gpt-5.5",
-    "opencode/gpt-5.5-pro", "opencode/gpt-5.6-terra", "opencode/gpt-6-astra",
-    "opencode/gpt-6-luna", "opencode/gpt-6.1-sol", "opencode/grok-4.7",
-    "opencode/grok-build-0.1", "opencode/kimi-k2.7-code", "opencode/kimi-k3",
-    "opencode/longcat-2.5-preview-free", "opencode/mimo-v2.6-flash-free",
-    "opencode/minimax-m3", "opencode/minimax-m3.1-flash-free", "opencode/mistral-large-4",
-    "opencode/muse-spark-1.3", "opencode/nemotron-3-ultra-free",
-    "opencode/nemotron-3.5-lightning-free", "opencode/nemotron-3.5-super-vl-free",
-    "opencode/qwen3.6-plus", "opencode/qwen3.8-flash",
+    "9router/ag/claude-opus-4-6-thinking", "9router/ag/claude-sonnet-4-6", "9router/ag/gemini-3.8-flash",
+    "9router/ag/gemini-3.8-flash-high", "9router/apiai/gpt-5.6-sol", "9router/gemini/gemini-2.5-pro",
+    "9router/gemini/gemini-3.5-flash-lite", "9router/gemini/gemini-3.6-flash", "9router/gemini/gemini-3.7-flash",
+    "9router/gemini/gemini-3.8-flash", "9router/gemini/gemma-4-31b-it", "opencode/beam-free",
+    "opencode/big-pickle", "opencode/deepseek-v4.1-flash-free", "opencode/flint-40b-free",
+    "opencode/glm-5.3-flash-free", "opencode/mimo-v2.6-flash-free", "opencode/nemotron-3.5-lightning-free",
+    "opencode/nemotron-3.5-super-vl-free", "opencode-go/beam-free", "opencode-go/claude-haiku-5-5",
+    "opencode-go/deepseek-v4-pro", "opencode-go/deepseek-v4.1-flash", "opencode-go/gemini-4-argon",
+    "opencode-go/glm-5.2", "opencode-go/glm-5.3", "opencode-go/glm-5.3-flash", "opencode-go/gpt-5.6-luna",
+    "opencode-go/gpt-6-luna", "opencode-go/grok-4.7", "opencode-go/hy3", "opencode-go/hy4-preview",
+    "opencode-go/iceman-contributor-free", "opencode-go/kimi-k2.7-code", "opencode-go/kimi-k3",
+    "opencode-go/kimi-k3.1-pro", "opencode-go/longcat-2.0", "opencode-go/mimo-v2.5",
+    "opencode-go/mimo-v2.5-pro", "opencode-go/mimo-v2.6-flash", "opencode-go/mimo-v2.6-pro",
+    "opencode-go/minimax-m3", "opencode-go/minimax-m3.1-flash", "opencode-go/muse-spark-1.2-contributor",
+    "opencode-go/muse-spark-1.3-contributor", "opencode-go/qwen3.7-plus", "opencode-go/qwen3.8-flash",
+    "opencode-go/qwen3.8-max", "opencode-go/step-5-preview",
 ]
 
 
@@ -428,6 +426,38 @@ def build_model_entry(model_id: str, provider: str, auth_status: str, curated: d
     }
 
 
+# Providers behind a local proxy answer only while the proxy process is up.  A
+# scouted catalog keeps saying "available" long after the proxy died, so these
+# are probed before role selection -- not warned about, excluded.
+LOCAL_PROXY_PROVIDERS = {"9router": ("127.0.0.1", 20128)}
+PROXY_PROBE_TIMEOUT = 0.4
+
+
+def probe_tcp(host: str, port: int, *, timeout: float = PROXY_PROBE_TIMEOUT) -> bool:
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def probe_local_providers(*, timeout: float = PROXY_PROBE_TIMEOUT) -> dict[str, bool]:
+    """Reachability of every local-proxy provider, honouring SWARM_* overrides."""
+    result: dict[str, bool] = {}
+    for provider_id, (host, port) in LOCAL_PROXY_PROVIDERS.items():
+        h, p = host, port
+        if provider_id == "9router":
+            h = os.environ.get("SWARM_9ROUTER_HOST") or host
+            override = os.environ.get("SWARM_9ROUTER_PORT")
+            if override:
+                try:
+                    p = int(override)
+                except ValueError:
+                    p = port
+        result[provider_id] = probe_tcp(h, p, timeout=timeout)
+    return result
+
+
 def collect_catalog(root: Path, catalog_file: str | None, use_cli: bool,
                     include_unconfigured: bool, free_only: bool = False) -> dict:
     """Tra ve {source, models:[entry], providers:{}, warnings:[], stats:{}}"""
@@ -471,22 +501,49 @@ def collect_catalog(root: Path, catalog_file: str | None, use_cli: bool,
         if provider_auth[provider_id] == "unconfigured" and provider_id in local["providers"]:
             provider_auth[provider_id] = "unknown"
 
+    # A local proxy that is down must never be selected as a role model.
+    for provider_id, reachable in probe_local_providers().items():
+        if provider_id in provider_auth and not reachable:
+            provider_auth[provider_id] = "unavailable"
+            warnings.append(
+                f"Provider '{provider_id}' khong phan hoi (proxy local tat) -- "
+                "da loai khoi chon vai tro"
+            )
+
     extra_meta = primary.get("metadata") or {}
     entries: list[dict] = []
     dropped: dict[str, int] = {}
+    dropped_unavailable: dict[str, int] = {}
     for model_id in primary["models"]:
         provider = model_id.split("/")[0]
         status = provider_auth.get(provider, "unknown")
+        if status == "unavailable":
+            dropped_unavailable[provider] = dropped_unavailable.get(provider, 0) + 1
+            continue
+        entry = build_model_entry(model_id, provider, status, extra_meta.get(model_id))
         if status == "unconfigured" and not include_unconfigured:
+            # Free models need no provider key: they stayed usable while
+            # `opencode auth list` showed nothing for the provider.  Dropping
+            # them removed the only working routes in the whole system.
+            if entry.get("is_free"):
+                entry["auth_status"] = "available"
+                entry["auth_note"] = "free model; no provider key required"
+                entries.append(entry)
+                continue
             dropped[provider] = dropped.get(provider, 0) + 1
             continue
-        entries.append(build_model_entry(model_id, provider, status, extra_meta.get(model_id)))
+        entries.append(entry)
 
     if dropped:
         warnings.append(
             "Da loai model cua provider chua cau hinh API key: "
             + ", ".join(f"{k}({v})" for k, v in dropped.items())
             + " -- dung --include-unconfigured de giu lai"
+        )
+    if dropped_unavailable:
+        warnings.append(
+            "Da loai model cua provider khong truy cap duoc: "
+            + ", ".join(f"{k}({v})" for k, v in dropped_unavailable.items())
         )
 
     if free_only:
@@ -515,6 +572,7 @@ def collect_catalog(root: Path, catalog_file: str | None, use_cli: bool,
             "catalog_total": len(primary["models"]),
             "usable": len(entries),
             "dropped_unconfigured": sum(dropped.values()),
+            "dropped_unavailable": sum(dropped_unavailable.values()),
             "free_only": free_only,
             "providers": {p: c for p, c in sorted(provider_auth.items())},
         },
@@ -730,6 +788,10 @@ def config_age_days(existing: dict | None) -> float | None:
         when = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except ValueError:
         return None
+    # A date-only value ("2026-10-31") parses without a timezone; subtracting it
+    # from an aware `now` raises TypeError instead of returning an age.
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
     return (datetime.now(timezone.utc) - when).total_seconds() / 86400.0
 
 
