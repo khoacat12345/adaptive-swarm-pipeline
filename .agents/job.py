@@ -667,6 +667,15 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             status = "error"
             update_state(phase="stopped", current=None)
             break
+        # The router chain is a proposal; it is not necessarily the model that
+        # actually answered (--model and fallback can change that).  Report the
+        # model recorded by the coder attempt so the CLI cannot lie.
+        attempts = list((report.get("fallback") or {}).get("attempts") or [])
+        actual_model = next(
+            (attempt.get("model") for attempt in reversed(attempts)
+             if attempt.get("status") == "ok" and attempt.get("model")),
+            None,
+        ) or getattr(coder, "model", None)
         records.append({
             "id": item["id"],
             "task_id": order.task_id,
@@ -674,6 +683,7 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             "requests": report.get("requests"),
             "seconds": round(time.perf_counter() - sub_started, 1),
             "file": report.get("file"),
+            "model": actual_model,
             "route": route_plan,
             "error": report.get("error"),
         })
@@ -686,7 +696,7 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
                 reviewer_name = "reviewer-unavailable"
             elif review_info.get("fallback_reason"):
                 reviewer_name = "heuristic-fallback"
-            team = {"coder": chain[0],
+            team = {"coder": actual_model or chain[0],
                     "fallback": chain[1] if len(chain) > 1 else None,
                     "reviewer": reviewer_name,
                     "reviewer_fallback": bool(review_info.get("fallback_reason")),
@@ -821,7 +831,8 @@ def main(argv=None) -> int:
             print(f"status  : {report['status']} ({report['duration_ms']}ms)")
             for item in report["subtasks"]:
                 chain = " -> ".join((item.get("route") or {}).get("chain") or [])
-                print(f"  {item['id']:<6} {item['status']:<10} {chain}")
+                shown = item.get("model") or chain
+                print(f"  {item['id']:<6} {item['status']:<10} {shown}")
         return 0 if report["status"] in ("applied", "dry-run") else 1
     finally:
         if server is not None:
