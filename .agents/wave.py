@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import os
 
+# Model IDs rotate: `opencode/nemotron-3-ultra-free` disappeared from the live
+# catalog, so `perf` pointed at a route that could never answer and every
+# meeting aborted at preflight/call time.  Keep these four distinct, free and
+# present in `opencode models`; preflight.py --live verifies that.
 DEFAULT_ROLES = {
     "security": "opencode/nemotron-3.5-super-vl-free",
     "qa": "opencode/deepseek-v4.1-flash-free",
-    "perf": "opencode/nemotron-3-ultra-free",
+    "perf": "opencode/mimo-v2.6-flash-free",
     "docs": "opencode/nemotron-3.5-lightning-free",
 }
 ROLE_ORDER = ("security", "qa", "perf", "docs")

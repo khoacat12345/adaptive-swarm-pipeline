@@ -559,8 +559,8 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
                 "Preflight failed: missing required reviewer roles: "
                 + ", ".join(missing)
                 + "\nMeeting/wave needs all four: security, qa, perf, docs.")
-        gate = preflight.check_models(root, list(role_models.values()),
-                                      strict=True, require_all=True)
+        gate = preflight.check_live(root, list(role_models.values()),
+                                    require_live=True)
         if not gate.get("ok"):
             raise ValueError(preflight.render(gate) +
                              "\nPreflight failed: no model was called.")

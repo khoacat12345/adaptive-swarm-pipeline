@@ -263,8 +263,11 @@ class MeetingOrchestrator:
                 "verdict": "error", "reasons": ["reviewer khong tra ket qua"],
             })
             findings.append(finding)
+            # An infrastructure failure ("error") is not a reviewer reject.
+            # Coercing it to reject made the ledger read as if the reviewer
+            # objected on the merits, when in fact it never answered.
             vote_verdict = finding["verdict"] if finding["verdict"] in (
-                "approve", "reject", "abstain") else "reject"
+                "approve", "reject", "abstain", "error") else "error"
             vote = Vote(role=role, verdict=vote_verdict,
                         reasons=finding.get("reasons") or [], round=1)
             try:
@@ -443,8 +446,11 @@ class MeetingOrchestrator:
                 "verdict": "error", "reasons": ["reviewer khong tra ket qua"],
             })
             findings.append(finding)
+            # An infrastructure failure ("error") is not a reviewer reject.
+            # Coercing it to reject made the ledger read as if the reviewer
+            # objected on the merits, when in fact it never answered.
             vote_verdict = finding["verdict"] if finding["verdict"] in (
-                "approve", "reject", "abstain") else "reject"
+                "approve", "reject", "abstain", "error") else "error"
             vote = Vote(role=role, verdict=vote_verdict,
                         reasons=finding.get("reasons") or [], round=2)
             self.blackboard.record_vote(vote)

@@ -87,9 +87,19 @@ class VetoPolicy:
             qa_test_tampering = True
         rejecting = [role for role, vote in votes_map.items()
                      if vote.verdict == "reject"]
+        errored = [role for role, vote in votes_map.items()
+                   if vote.verdict == "error"]
         reasons: list[str] = []
         vetoes: list[str] = []
         dissent: list[str] = []
+
+        # Fail closed: a reviewer that never answered is not an approval.
+        # Without this, 3 errors + 1 approve would fall through to
+        # "all reviewers approve".
+        if errored:
+            reasons.append("reviewer unavailable: " + ", ".join(sorted(errored)))
+            return Decision("reject", reasons, vetoes=[],
+                            dissent=sorted(errored), round=round_no)
 
         # Hard vetoes require an evidence-backed conflict.  A bare reject is
         # escalated rather than treated as a veto.

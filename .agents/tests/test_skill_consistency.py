@@ -21,6 +21,8 @@ import core.budget  # noqa: E402
 import recipe_c  # noqa: E402
 import scout  # noqa: E402
 import sync_skill  # noqa: E402
+import wave  # noqa: E402
+import workers  # noqa: E402
 
 
 class Checks:
@@ -62,6 +64,9 @@ def main() -> int:
         checks.check(f"skill: installed copy matches {path}", actual == expected,
                      "run python .agents/sync_skill.py --write")
 
+    checks.check("wave: worker and meeting role maps match",
+                 workers.WAVE_ROLES == wave.DEFAULT_ROLES,
+                 f"workers={workers.WAVE_ROLES} wave={wave.DEFAULT_ROLES}")
     checks.check("docs: recipe cap is 600s", recipe_c.BUDGET_MAX_SECONDS == 600,
                  recipe_c.BUDGET_MAX_SECONDS)
     checks.check("docs: meeting budget is 600s",

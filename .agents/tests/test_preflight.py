@@ -179,6 +179,39 @@ def test_chain(checks: Checks) -> None:
     checks.check("preflight: empty chain fails", not bad["ok"], bad)
 
 
+def test_live_catalog(checks: Checks) -> None:
+    root = TEMP_ROOT / "live"
+    shutil.rmtree(root, ignore_errors=True)
+    write_config(root, extra_models={
+        "opencode-go/go-a": {
+            "id": "opencode-go/go-a", "provider": "opencode-go",
+            "auth_status": "available", "is_free": True,
+        },
+    })
+    original = preflight.live_models
+    try:
+        preflight.live_models = lambda _root: {"opencode/free-a"}
+        result = preflight.check_live(
+            root, ["opencode/free-a", "opencode-go/go-a"])
+        checks.check("preflight: live catches missing opencode-go model",
+                     not result["ok"]
+                     and any("opencode-go/go-a" in error
+                             for error in result.get("errors") or []),
+                     result)
+        preflight.live_models = lambda _root: None
+        degraded = preflight.check_live(root, ["opencode/free-a"])
+        checks.check("preflight: live unavailable degrades to warning",
+                     degraded.get("ok")
+                     and any("live catalog unavailable" in warning
+                             for warning in degraded.get("warnings") or []),
+                     degraded)
+        strict = preflight.check_live(root, ["opencode/free-a"], require_live=True)
+        checks.check("preflight: require_live fails closed", not strict.get("ok"),
+                     strict)
+    finally:
+        preflight.live_models = original
+
+
 def test_job_preflight_aborts(checks: Checks) -> None:
     root = TEMP_ROOT / "job"
     shutil.rmtree(root, ignore_errors=True)
@@ -244,6 +277,7 @@ def main() -> int:
         ("stale cache", test_stale_cache),
         ("chain", test_chain),
         ("auth list", test_auth_status_from_opencode_auth_list),
+        ("live catalog", test_live_catalog),
         ("job preflight", test_job_preflight_aborts),
         ("roles/classification", test_roles_and_classification),
     ):

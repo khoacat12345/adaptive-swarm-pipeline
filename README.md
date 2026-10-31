@@ -6,7 +6,7 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **v1.0.3** (skill sync + health preflight + meeting time budget).
+> Status: **v1.0.4** (live catalog preflight + error-vote truth).
 > Original acceptance on Windows; Linux/macOS paths are supported and covered
 > by the cross-platform CI workflow.
 >
@@ -91,7 +91,9 @@ most one targeted rebuttal and a machine re-verify before Lead applies.
 
 Before a wave or meeting starts, the pipeline checks every required reviewer
 model against the local catalog: provider availability, auth status, provider
-health and cooldown. Meeting/wave requires all four roles
+health and cooldown. For meeting/wave it also cross-checks the **live**
+`opencode models` catalog, so a model removed upstream cannot pass on an old
+snapshot. Meeting/wave requires all four roles
 (`security`, `qa`, `perf`, `docs`). If any role or route is unavailable, the run
 **aborts before calling a model**; it never falls back to an automatic heuristic
 approval. Health results are cached for 15 minutes and invalidated when
@@ -102,7 +104,8 @@ Preflight is also applied to the routed coder chain: a chain with at least one
 available model proceeds; a chain with none is blocked. Meeting runs allow up to
 600 seconds total; each role reviewer gets 240 seconds (override with
 `SWARM_REVIEWER_TIMEOUT`). Use `python .agents/tests/test_preflight.py` to verify
-the gate.
+the gate, or run `python .agents/preflight.py --live` manually. A live catalog
+lookup failure makes meeting/wave fail closed.
 
 ## What a Work Order looks like
 

@@ -72,7 +72,7 @@ DEFAULT_OPENCODE_BIN = unwrap_cmd_shim(_SHIM)
 WAVE_ROLES = {
     "security": "opencode/nemotron-3.5-super-vl-free",
     "qa": "opencode/deepseek-v4.1-flash-free",
-    "perf": "opencode/nemotron-3-ultra-free",
+    "perf": "opencode/mimo-v2.6-flash-free",
     "docs": "opencode/nemotron-3.5-lightning-free",
 }
 

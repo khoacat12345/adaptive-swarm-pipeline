@@ -194,7 +194,8 @@ def validate_meeting_event(event: dict) -> list[str]:
     elif event_type == "meeting.vote":
         if str(data.get("role") or "").lower() not in MEETING_ROLES:
             problems.append("meeting.vote thieu role hop le")
-        if str(data.get("verdict") or "").lower() not in ("approve", "reject", "abstain"):
+        if str(data.get("verdict") or "").lower() not in (
+                "approve", "reject", "abstain", "error"):
             problems.append("meeting.vote verdict khong hop le")
     elif event_type == "meeting.decision":
         if str(data.get("verdict") or "").lower() not in ("approve", "reject", "escalate"):

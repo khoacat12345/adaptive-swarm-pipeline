@@ -49,7 +49,7 @@ KNOWN_ROLES = (
     "systembot",
 )
 ALLOWED_RECIPIENTS = KNOWN_ROLES + ("all",)
-VOTE_VERDICTS = ("approve", "reject", "abstain")
+VOTE_VERDICTS = ("approve", "reject", "abstain", "error")
 DECISION_VERDICTS = ("approve", "reject", "escalate")
 SEVERITIES = ("info", "warn", "block")
 MAX_BODY_CHARS = 12_000

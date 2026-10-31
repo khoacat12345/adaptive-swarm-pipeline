@@ -42,8 +42,10 @@ mistaken for unconfigured.
 reviewer roles, so the preflight has fresh evidence.
 
 Before wave/meeting runs, `preflight.py` checks all required reviewer models and
-the routed coder chain. Missing routes/auth, provider unavailability or cooldown
-abort the run before any model call. Meeting/wave requires all four reviewers;
+the routed coder chain. It also cross-checks the live `opencode models` catalog
+for `opencode/*` and `opencode-go/*`; if the live lookup cannot run, meeting/wave
+fails closed. Missing routes/auth, provider unavailability or cooldown abort the
+run before any model call. Meeting/wave requires all four reviewers;
 it never auto-approves through a heuristic fallback. Health results cache for
 15 minutes; config/model changes invalidate the cache; a >24h cache is rechecked
 with a warning. Meeting runs have a 600s wall-clock cap; role reviewers get

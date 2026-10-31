@@ -176,6 +176,10 @@ def test_independent_and_error(checks: Checks) -> None:
     checks.check("round1: no auto approve", not result.all_approved, result.findings)
     checks.check("round1: error role is unavailable, not a reject vote",
                  result.unavailable == ["qa"], result.unavailable)
+    qa_vote = next((vote for vote in result.votes if vote.role == "qa"), None)
+    checks.check("round1: ledger vote keeps error, not reject",
+                 qa_vote is not None and qa_vote.verdict == "error",
+                 qa_vote.to_dict() if qa_vote else None)
     checks.check("round1: reviewers did not receive peer messages",
                  all("messages" not in item.seen_kwargs for item in roles.values()),
                  [item.seen_kwargs for item in roles.values()])

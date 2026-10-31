@@ -145,6 +145,12 @@ def test_policy(checks: Checks) -> None:
     d = policy.evaluate(all_approve, [])
     checks.check("policy: 4/4 approve", d.verdict == "approve", d.to_dict())
 
+    d = policy.evaluate(votes(security="error", qa="approve",
+                              perf="approve", docs="approve"), [])
+    checks.check("policy: 1 error + 3 approve -> reject, never approve",
+                 d.verdict == "reject" and "unavailable" in " ".join(d.reasons),
+                 d.to_dict())
+
     d = policy.evaluate(votes(security="reject", qa="approve", perf="approve", docs="approve"),
                         [conflict("security")])
     checks.check("policy: security evidence veto", d.verdict == "reject" and d.vetoes == ["security"],

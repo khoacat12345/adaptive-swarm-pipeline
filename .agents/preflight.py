@@ -13,11 +13,14 @@ import hashlib
 import json
 import os
 import socket
+import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 CACHE_TTL_SECONDS = 15 * 60
 STALE_SECONDS = 24 * 60 * 60
+CATALOG_MAX_AGE_DAYS = 7
 DEFAULT_9ROUTER_HOST = "127.0.0.1"
 DEFAULT_9ROUTER_PORT = 20128
 
@@ -210,6 +213,11 @@ def check_models(root, models, *, use_cache: bool = True, strict: bool = True,
         errors.append("no model requested")
     if not providers:
         warnings.append("config has no provider catalog")
+    age = config_age_days(config, now)
+    if age is not None and age > CATALOG_MAX_AGE_DAYS:
+        warnings.append(
+            f"model catalog is {age:.0f} days old; a model removed upstream still "
+            "passes this gate (re-run scout.py --write to refresh, or use --live)")
 
     payload = {
         "ok": not errors,
@@ -274,3 +282,118 @@ def render(result: dict) -> str:
     if result.get("cached"):
         lines.append("  (cached)")
     return "\n".join(lines)
+
+
+def config_age_days(config: dict, now: float | None = None) -> float | None:
+    """Age of the scouted model catalog, in days.  ``None`` when unparseable."""
+    raw = str((config or {}).get("scouted_at") or "").strip()
+    if not raw:
+        return None
+    try:
+        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return max(0.0, ((now or time.time()) - stamp.timestamp()) / 86400)
+
+
+def _opencode_binary(root) -> str:
+    config = _load_json(_config_path(root))
+    configured = str(((config.get("platform") or {}).get("opencode_cli")) or "").strip()
+    try:
+        # On Windows `shutil.which("opencode")` can return an npm .CMD shim
+        # while the actual executable is under node_modules.  Workers knows how
+        # to unwrap that shim and is the canonical resolver.
+        import workers
+        return workers.resolve_binary(configured or None)
+    except Exception:                            # noqa: BLE001
+        return configured or os.environ.get("OPENCODE_BIN") or "opencode"
+
+
+def live_models(root, *, timeout: float = 30.0) -> set[str] | None:
+    """Model IDs the OpenCode CLI exposes right now.
+
+    Returns ``None`` when the CLI cannot be queried, so callers can degrade to a
+    warning instead of a false failure.
+    """
+    binary = _opencode_binary(root)
+    try:
+        proc = subprocess.run([binary, "models"], capture_output=True,
+                              text=True, encoding="utf-8", errors="replace",
+                              timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    ids = {line.strip() for line in str(proc.stdout or "").splitlines()
+           if "/" in line and " " not in line.strip()}
+    return ids or None
+
+
+def check_live(root, models, *, use_cache: bool = True,
+               require_live: bool = False) -> dict:
+    """Health check plus a cross-check against the live CLI catalog.
+
+    The scouted catalog is a snapshot: a model removed upstream keeps looking
+    ``available`` and the gate passes, then the call fails with ``no-route``.
+    This is the check that actually catches that.
+    """
+    result = check_models(root, models, use_cache=use_cache)
+    live = live_models(root)
+    if live is None:
+        message = "live catalog unavailable; model existence was not cross-checked"
+        if require_live:
+            result["ok"] = False
+            result.setdefault("errors", []).append(message)
+        else:
+            result.setdefault("warnings", []).append(message)
+        return result
+    # `opencode models` exposes both personal (`opencode/`) and subscription
+    # (`opencode-go/`) IDs.  Missing a Go model was exactly the failure mode
+    # that made a reviewer route look healthy until call time.
+    live_prefixes = ("opencode/", "opencode-go/")
+    missing = [model for model in result.get("models") or []
+               if model.startswith(live_prefixes) and model not in live]
+    for model in missing:
+        entry = result.setdefault("results", {}).setdefault(model, {})
+        entry.update({"ok": False, "status": "unavailable",
+                      "reason": "not in live `opencode models` catalog"})
+        result.setdefault("errors", []).append(
+            f"{model}: not in live `opencode models` catalog")
+    if missing:
+        result["ok"] = False
+    return result
+
+
+def main(argv=None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Read-only health gate. Never calls a model.")
+    parser.add_argument("--root", default=".")
+    parser.add_argument("--live", action="store_true",
+                        help="also cross-check the live `opencode models` catalog")
+    parser.add_argument("--roles", default=None,
+                        help="comma list role=model (default: wave reviewer roles)")
+    args = parser.parse_args(argv)
+
+    try:
+        import wave
+        roles = wave.normalize_roles(args.roles)
+    except Exception:                            # noqa: BLE001
+        roles = {}
+    models = list(roles.values())
+    if not models:
+        print("no models to check (pass --roles role=model,...)")
+        return 2
+    result = (check_live(args.root, models, require_live=True)
+              if args.live else check_models(args.root, models))
+    for role, model in roles.items():
+        print(f"  role {role:<9} {model}")
+    print(render(result))
+    return 0 if result.get("ok") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

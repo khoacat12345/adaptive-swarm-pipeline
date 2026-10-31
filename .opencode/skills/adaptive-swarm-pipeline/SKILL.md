@@ -15,6 +15,7 @@ python3 .agents/scout.py --write --verify        # free-only; paid needs --allow
 python3 .agents/recipe_c.py --order order.json   # run a task
 python3 .agents/replay.py --last                 # inspect a run (0 requests)
 python3 .agents/dashboard.py --port 8080 --open  # dashboard
+python3 .agents/preflight.py --live              # live route/catalog gate
 python3 .agents/tests/test_preflight.py          # health/cost gate
 python3 .agents/tests/test_phase4.py             # acceptance smoke
 ```

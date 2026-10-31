@@ -1250,8 +1250,8 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             print("Meeting/wave needs all four: security, qa, perf, docs.", file=sys.stderr)
             return 3
-        gate = preflight.check_models(args.root, list(role_models.values()),
-                                      strict=True, require_all=True)
+        gate = preflight.check_live(args.root, list(role_models.values()),
+                                    require_live=True)
         if not gate.get("ok"):
             print(preflight.render(gate))
             print("Preflight failed: no model was called. Fix model routes or run scout.py --write.",

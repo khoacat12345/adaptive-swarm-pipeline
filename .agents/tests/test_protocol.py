@@ -200,6 +200,15 @@ def test_schema(checks: Checks) -> None:
         "data": data,
     }
     checks.check("schema: meeting event valid", not schema.validate(ok), schema.validate(ok))
+    error_vote = {
+        "schema_version": 1, "event_id": "err-vote", "timestamp": "2026-10-31T00:00:00Z",
+        "run_id": "r", "event_type": "meeting.vote",
+        "result": {"status": "info"},
+        "data": {"task_id": "task-1", "role": "perf", "verdict": "error",
+                 "reasons": ["quota"], "round": 1},
+    }
+    checks.check("schema: error vote is valid", not schema.validate(error_vote),
+                 schema.validate(error_vote))
     checks.check("schema: meeting node mapped",
                  schema.node_of("meeting.message") == "meeting", schema.node_of("meeting.message"))
     checks.check("schema: decision node mapped",
