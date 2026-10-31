@@ -37,4 +37,4 @@ id_ed25519
 .aws/
 .ssh/
 config.json
-config.json.bak
+config.json.*
