@@ -4505,17 +4505,28 @@
         const diff = Math.max(0, ms - Date.now());
         const hours = Math.floor(diff / 3600000);
         const minutes = Math.floor((diff % 3600000) / 60000);
-        return hours ? `resets in ${hours}h ${minutes}m` : `resets in ${minutes}m`;
+        const local = new Date(ms).toLocaleString();
+        return (hours ? `resets in ${hours}h ${minutes}m` : `resets in ${minutes}m`) +
+          ` · ${local}`;
       };
-      const live = shared.source === 'console';
+      const source = shared.source || 'estimate';
+      const live = source === 'go-api' || source === 'console';
+      const sourceLabel = source === 'go-api'
+        ? 'live from OpenCode Go API · /zen/go/v1/usage'
+        : source === 'console'
+          ? 'live from OpenCode console'
+          : 'local estimate — console is billing source';
       $('#limitCard').innerHTML = `<div class="spread"><h2 style="margin:0">Go limits</h2>
-    <span class="muted" style="font-size:10.5px">${live ? 'live from OpenCode console' : 'local estimate · console is billing source'}</span></div>
+    <span class="muted" style="font-size:10.5px">${sourceLabel}</span></div>
     ${rows.map(([key, label]) => {
         const window = windows[key] || {};
-        const pct = window.pct || 0;
-        const exact = window.limit ? `$${Number(window.used || 0).toFixed(2)} / $${Number(window.limit).toFixed(0)}` : '';
+        const pct = Number(window.pct || 0);
+        const isGo = source === 'go-api';
+        const exact = isGo
+          ? `${pct.toFixed(2)} / 100 percentage points`
+          : (window.limit ? `$${Number(window.used || 0).toFixed(2)} / $${Number(window.limit).toFixed(0)}` : '');
         return `<div class="limitrow" title="${exact}"><span class="lab">${label}</span>
-        ${bar(pct)}<span class="pct">${pct.toFixed(0)}% used</span>
+        ${bar(pct)}<span class="pct">${pct.toFixed(2)}% used</span>
         <span class="reset">${resetLabel(resets[key])}</span></div>`;
       }).join('')}`;
 
@@ -4543,7 +4554,8 @@
       $('#hourTokens').classList.toggle('active', mode !== 'cost');
 
       $('#quotaChecked').textContent = quota.fetched_at
-        ? 'checked ' + new Date(quota.fetched_at * 1000).toLocaleTimeString() : '';
+        ? `checked ${new Date(quota.fetched_at * 1000).toLocaleString()} · ${source}`
+        : '';
 
       const models = (quota.models || []).slice().sort((a, b) => b.worst_pct - a.worst_pct);
       if (!models.length) {
@@ -4566,7 +4578,7 @@
         }).join('')}</tbody></table>
       <div class="muted" style="margin-top:8px;font-size:10.5px">
         Costs are exact, read from <b>opencode.db</b> per assistant message (rolling 5h / 7d / 30d).
-        The OpenCode console remains the billing source of truth for plan percentages.
+        Plan percentages and reset timestamps come from <b>${source === 'go-api' ? 'OpenCode Go usage API' : 'the OpenCode console'}</b>.
       </div>`;
       }
 

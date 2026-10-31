@@ -418,7 +418,7 @@ def make_handler(root: Path, ledger: Path):
                         "Content-Disposition": f'{disposition}; filename="{path.name}"'})
                 elif route == "/api/quota":
                     import quota as quota_module
-                    tracker = quota_module.QuotaTracker(root=root).refresh()
+                    tracker = quota_module.QuotaTracker(root=root).refresh(force=True)
                     models = list(quota_module.CAPS.keys()) + [
                         "opencode/deepseek-v4.1-flash-free",
                         "opencode/glm-5.3-flash-free",
