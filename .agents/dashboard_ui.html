@@ -1246,7 +1246,7 @@
       stroke-width: 1.6;
       stroke-dasharray: 3 6;
       opacity: .8;
-      animation: dash 2.4s linear infinite
+      animation: none
     }
 
     @keyframes dash {
@@ -1258,27 +1258,34 @@
     .war .link.meet {
       stroke: #fb923c;
       stroke-width: 1.7;
-      opacity: .75;
-      stroke-dasharray: 6 4;
-      animation: dash 1.6s linear infinite;
+      opacity: .62;
+      stroke-dasharray: 6 5;
+      animation: dash 7s linear infinite;
     }
     .war .link.meet.base {
       stroke: #fb923c;
       stroke-width: 1.7;
-      opacity: .7;
-      stroke-dasharray: 6 4;
-      animation: none;
+      opacity: .62;
+      stroke-dasharray: 6 5;
+      animation: dash 7s linear infinite;
     }
     .war .link.meet.base.hot {
       stroke-width: 2.6;
       opacity: 1;
-      animation: dash 1.6s linear infinite;
+      animation: dash 1.05s linear infinite;
       filter: drop-shadow(0 0 5px #fb923c);
     }
     .war .link.meet.hot {
       stroke-width: 2.6;
       opacity: 1;
+      animation: dash 1.05s linear infinite;
       filter: drop-shadow(0 0 5px #fb923c);
+    }
+    .anode.leader.live {
+      border-color: #fb923c;
+      background: linear-gradient(145deg, #4a250d, #1f120a);
+      box-shadow: 0 0 0 1px #fb923c55, 0 0 24px #fb923c55;
+      animation: none;
     }
     .anode.hot {
       border-color: #fb923c !important;
@@ -1448,8 +1455,8 @@
     }
 
     .anode.idle {
-      opacity: .8;
-      filter: saturate(.5)
+      opacity: 1;
+      filter: none
     }
 
     .anode.done {
@@ -1464,8 +1471,7 @@
     .anode.leader {
       width: 168px;
       border-color: #2f6180;
-      background: linear-gradient(145deg, #123448, #0d1d2b);
-      box-shadow: 0 0 32px #38bdf822
+      background: linear-gradient(145deg, #123448, #0d1d2b)
     }
 
     .anode.leader .nm {
@@ -1661,7 +1667,10 @@
       .anode.run,
       .anode.next,
       .war .link.run,
-      .war .link.next {
+      .war .link.next,
+      .war .link.meet,
+      .war .link.meet.base,
+      .war .link.meet.base.hot {
         animation: none
       }
     }
@@ -3365,8 +3374,11 @@
         root: state.planState && state.planState.root
       })) return;
       const status = $('#planStatus');
+      // Same precedence as the Overview pill (jobState.phase first), so the two
+      // pages never disagree: Plan used to show `decision.status` (approved)
+      // while Overview showed `phase` (running) for the same run.
       const effectiveStatus = jobState.phase === 'done' ? 'done'
-        : (decision.status || jobState.phase || 'none');
+        : (jobState.phase || decision.status || 'idle');
       status.className = 'pill ' + STATUS_CLASS(effectiveStatus);
       status.textContent = effectiveStatus;
       if (!plan) {
@@ -3497,7 +3509,14 @@
       };
       if (state.replayIndex != null && events[state.replayIndex]) {
         active = events[state.replayIndex];
-        mark(active.node);
+        const replayRoles = rolesForEvent(active);
+        if (replayRoles.size) {
+          replayRoles.forEach((role) => {
+            if (status[role] != null) status[role] = 'running';
+          });
+        } else {
+          mark(active.node);
+        }
       } else if (['awaiting_approval', 'approved'].includes(phase)) {
         status.coder = 'next';
       } else if (['running', 'paused'].includes(phase)) {
@@ -3607,10 +3626,14 @@
       const meetingEdgesData = meetingEdges(visibleMeeting);
       const meetingMode = allMeeting.length > 0;
       const livePhase = idx == null && phase === 'running';
-      const activeRoles = livePhase
-        ? new Set(Object.keys(status).filter((role) => status[role] === 'running'))
-        : new Set();
-      const leaderState = livePhase ? 'run' : idx != null ? 'replay'
+      const replayRoles = idx != null && activeEvent
+        ? rolesForEvent(activeEvent) : new Set();
+      const activeRoles = idx != null
+        ? new Set([...replayRoles].filter((role) => role !== 'lead'))
+        : livePhase ? new Set(Object.keys(status).filter((role) => status[role] === 'running')) : new Set();
+      const leadActive = phase !== 'done' || (idx != null && activeEvent
+        && !['recipe.done', 'job.done'].includes(activeEvent.event_type));
+      const leaderState = leadActive ? 'live' : idx != null ? 'replay'
         : phase === 'done' ? 'done' : centerState;
       const short = (model) => shortModel(model);
       const roleNode = (role) => {
@@ -3727,7 +3750,7 @@
         <defs><marker id="meeting-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3"
           orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L7,3 z" fill="#fb923c"></path></marker></defs>
         ${lines}</svg>
-      <button type="button" class="anode leader ${leaderState} ${livePhase ? 'hot' : ''}" style="left:50%;top:48%"
+      <button type="button" class="anode leader ${leaderState}" style="left:50%;top:48%"
         onclick="focusAgent('lead')" title="Lead · ${esc(phase)}">
         <span class="av">LD</span><span><span class="nm">Lead</span>
           <span class="md">${esc(jobState.job_id || plan.job_id || 'orchestrator')}</span>
@@ -4261,6 +4284,37 @@
       return [messages[messages.length - 1].sender].filter(Boolean);
     }
 
+    function rolesForEvent(event) {
+      const roles = new Set();
+      const add = (role) => {
+        const value = String(role || '').toLowerCase();
+        if (['lead', 'coder', 'security', 'qa', 'perf', 'docs'].includes(value)) roles.add(value);
+      };
+      if (!event) return roles;
+      const details = event.details || {};
+      add(details.role);
+      add(details.sender);
+      add(event.node);
+      (details.per_role || []).forEach((item) => add(item && item.role));
+      if (event.event_type === 'recipe.coder') add('coder');
+      if (event.event_type === 'meeting.opened') add('lead');
+      return roles;
+    }
+
+    function meetingLinePoints(from, to) {
+      const dx = to[0] - from[0];
+      const dy = to[1] - from[1];
+      const length = Math.hypot(dx, dy) || 1;
+      const startPad = Math.min(8, length * 0.3);
+      const endPad = Math.min(8, length * 0.3);
+      return {
+        x1: from[0] + (dx / length) * startPad,
+        y1: from[1] + (dy / length) * startPad,
+        x2: to[0] - (dx / length) * endPad,
+        y2: to[1] - (dy / length) * endPad,
+      };
+    }
+
     function renderMeetingGraph(edges, active) {
       const activeSet = active instanceof Set ? active : new Set(active || []);
       const all = [
@@ -4276,9 +4330,10 @@
       }).map((edge) => {
         const from = MEETING_POS[edge.from] || [50, 50];
         const to = MEETING_POS[edge.to] || [50, 50];
+        const points = meetingLinePoints(from, to);
         const hot = (activeSet.has(edge.from) || activeSet.has(edge.to)) ? 'hot' : '';
         const base = edge.base ? 'base' : '';
-        return `<line x1="${from[0]}" y1="${from[1]}" x2="${to[0]}" y2="${to[1]}"
+        return `<line x1="${points.x1}" y1="${points.y1}" x2="${points.x2}" y2="${points.y2}"
           class="link meet ${base} ${hot}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}"
           marker-end="url(#meeting-arrow)" vector-effect="non-scaling-stroke"></line>`;
       }).join('');

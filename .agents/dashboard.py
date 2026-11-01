@@ -579,8 +579,25 @@ def make_server(port: int = DEFAULT_PORT, *, root=".", ledger=None,
     return server
 
 
+def _port_busy(host: str, port: int, *, timeout: float = 0.4) -> bool:
+    """True when something already accepts connections on host:port.
+
+    Windows allows a second bind on the same port when SO_REUSEADDR is set
+    (ThreadingHTTPServer sets it), so a stale dashboard can keep answering with
+    an old copy of the HTML while a new one looks "fixed" but stays invisible.
+    """
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(timeout)
+        return probe.connect_ex((host, int(port))) == 0
+
+
 def serve(port: int = DEFAULT_PORT, *, root=".", ledger=None, host: str = DEFAULT_HOST,
           open_browser: bool = False) -> int:
+    if _port_busy(host, port):
+        print(f"dashboard: port {port} da co process khac giu -- khong khoi dong them.")
+        print("  dung process cu truoc, hoac chay voi --port khac (vd --port 8081)")
+        return 1
     server = make_server(port, root=root, ledger=ledger, host=host)
     actual = server.server_address[1]
     print(f"dashboard: http://{host}:{actual}/  (ledger={Path(ledger).resolve() if ledger else ledger_for(Path(root).resolve())})")
