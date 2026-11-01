@@ -1285,7 +1285,7 @@
       position: absolute;
       inset: 0;
       pointer-events: none;
-      z-index: 1;
+      z-index: 3;
     }
     .war-dot {
       position: absolute;
@@ -3834,6 +3834,11 @@
       <div class="meta">${esc(subs.length)} subtask(s) · ${esc(subs.filter((item) => ['applied', 'done'].includes(item.status)).length)} applied · approval ${esc(decision.status || 'pending')}</div>
     </div>
   </div>`;
+      requestAnimationFrame(() => {
+        layoutWarGraph();
+        requestAnimationFrame(layoutWarGraph);
+        setTimeout(layoutWarGraph, 80);
+      });
     }
 
     function renderVerify(plan, jobState, decision) {
@@ -4388,10 +4393,73 @@
         const to = MEETING_POS[edge.to] || [50, 50];
         const points = meetingLinePoints(from, to);
         const hot = (activeSet.has(edge.from) || activeSet.has(edge.to)) ? 'hot' : '';
-        return `<span class="war-dot origin ${hot}" style="left:${points.x1}%;top:${points.y1}%"></span>
-          <span class="war-dot target ${hot}" style="left:${points.x2}%;top:${points.y2}%"></span>`;
+        return `<span class="war-dot origin ${hot}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}" data-side="origin" style="left:${points.x1}%;top:${points.y1}%"></span>
+          <span class="war-dot target ${hot}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}" data-side="target" style="left:${points.x2}%;top:${points.y2}%"></span>`;
       }).join('');
     }
+
+    function warCardRect(war, role) {
+      const node = role === 'lead'
+        ? war.querySelector('.anode.leader')
+        : war.querySelector('.anode.role-' + role);
+      if (!node) return null;
+      const wr = war.getBoundingClientRect();
+      const r = node.getBoundingClientRect();
+      return {
+        left: r.left - wr.left, top: r.top - wr.top,
+        right: r.right - wr.left, bottom: r.bottom - wr.top,
+        cx: (r.left + r.right) / 2 - wr.left,
+        cy: (r.top + r.bottom) / 2 - wr.top,
+      };
+    }
+
+    function warEdgePoint(rect, tx, ty) {
+      const dx = tx - rect.cx;
+      const dy = ty - rect.cy;
+      let t = Infinity;
+      if (dx > 0) t = Math.min(t, (rect.right - rect.cx) / dx);
+      else if (dx < 0) t = Math.min(t, (rect.left - rect.cx) / dx);
+      if (dy > 0) t = Math.min(t, (rect.bottom - rect.cy) / dy);
+      else if (dy < 0) t = Math.min(t, (rect.top - rect.cy) / dy);
+      if (!Number.isFinite(t) || t <= 0) return { x: rect.cx, y: rect.cy };
+      return { x: rect.cx + dx * t, y: rect.cy + dy * t };
+    }
+
+    function layoutWarGraph() {
+      const war = document.querySelector('.war');
+      if (!war) return;
+      const wr = war.getBoundingClientRect();
+      if (!wr.width || !wr.height) return;
+      const lines = Array.from(war.querySelectorAll('line[data-from][data-to]'));
+      const dots = Array.from(war.querySelectorAll('.war-dot[data-from][data-to]'));
+      for (const line of lines) {
+        const from = line.dataset.from;
+        const to = line.dataset.to;
+        const source = warCardRect(war, from);
+        const target = warCardRect(war, to);
+        if (!source || !target) continue;
+        const start = warEdgePoint(source, target.cx, target.cy);
+        const end = warEdgePoint(target, source.cx, source.cy);
+        const p1x = start.x / wr.width * 100;
+        const p1y = start.y / wr.height * 100;
+        const p2x = end.x / wr.width * 100;
+        const p2y = end.y / wr.height * 100;
+        line.setAttribute('x1', p1x);
+        line.setAttribute('y1', p1y);
+        line.setAttribute('x2', p2x);
+        line.setAttribute('y2', p2y);
+        for (const side of ['origin', 'target']) {
+          const dot = dots.find((item) => item.dataset.from === from
+            && item.dataset.to === to && item.dataset.side === side);
+          if (!dot) continue;
+          const point = side === 'origin' ? { x: p1x, y: p1y } : { x: p2x, y: p2y };
+          dot.style.left = point.x + '%';
+          dot.style.top = point.y + '%';
+        }
+      }
+    }
+
+    window.addEventListener('resize', () => layoutWarGraph());
 
     function setMeetingRound(round) {
       state.meetingRound = String(round || 'all');
