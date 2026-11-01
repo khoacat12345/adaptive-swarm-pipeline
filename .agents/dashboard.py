@@ -526,6 +526,22 @@ def make_handler(root: Path, ledger: Path):
                         self._json({"error": str(exc)}, 409)
                     except Exception as exc:  # noqa: BLE001
                         self._json({"error": str(exc)[:300]}, 400)
+                elif route == "/api/v2/control":
+                    from v2 import web as v2_web
+                    from v2.errors import StateTransitionError
+                    try:
+                        self._json(v2_web.control(
+                            root,
+                            str(payload.get("run_id") or ""),
+                            str(payload.get("token") or ""),
+                            str(payload.get("action") or ""),
+                        ))
+                    except PermissionError as exc:
+                        self._json({"error": str(exc)}, 403)
+                    except StateTransitionError as exc:
+                        self._json({"error": str(exc)}, 409)
+                    except Exception as exc:  # noqa: BLE001
+                        self._json({"error": str(exc)[:300]}, 400)
                 elif route == "/api/plan/decision":
                     import job as job_module
                     try:

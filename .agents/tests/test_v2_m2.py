@@ -330,6 +330,12 @@ def test_web(checks: Checks) -> None:
         detail = v2_web.run_detail(root, run_id)
         checks.check("web: signed plan is marked", detail["signed"] is True)
         checks.check("web: signed plan cannot be signed twice", detail["can_sign"] is False)
+        paused = v2_web.control(root, run_id, token, "pause")
+        checks.check("web: pause control works", paused["status"] == "PAUSED")
+        resumed = v2_web.control(root, run_id, token, "resume")
+        checks.check("web: resume control works", resumed["status"] == "PROVISIONING")
+        stopped = v2_web.control(root, run_id, token, "stop")
+        checks.check("web: stop control works", stopped["status"] == "STOPPED")
         isolation.remove_worktree(runner.workspace(run_id), keep_branch=False)
     finally:
         rmtree(wt_root)

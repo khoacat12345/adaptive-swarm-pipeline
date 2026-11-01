@@ -224,6 +224,22 @@ class V2Runner:
         provided = str(token or "")
         return bool(expected) and hmac.compare_digest(expected, provided)
 
+    def pause(self, run_id: str, *, reason: str = "user requested pause") -> dict[str, Any]:
+        store = self.load(run_id)
+        return store.transition("pause", reason=reason)
+
+    def resume(self, run_id: str) -> dict[str, Any]:
+        store = self.load(run_id)
+        return store.transition("resume")
+
+    def stop(self, run_id: str, *, reason: str = "user requested stop") -> dict[str, Any]:
+        store = self.load(run_id)
+        return store.transition("stop", reason=reason)
+
+    def accept_handoff(self, run_id: str) -> dict[str, Any]:
+        store = self.load(run_id)
+        return store.transition("user_accepts")
+
     def workspace(self, run_id: str) -> isolation.Workspace:
         store = self.load(run_id)
         data = (store.load().get("workspace") or {})

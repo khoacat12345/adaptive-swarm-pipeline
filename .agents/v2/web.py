@@ -53,9 +53,15 @@ PAGE = r"""<!doctype html>
     <div class="row"><b>Selected run</b><span id="selected" class="muted">none</span><span class="grow"></span><span id="status" class="pill">-</span></div>
     <div id="hash" class="muted" style="margin-top:8px"></div>
     <div class="row" style="margin-top:12px">
-      <input id="token" type="password" placeholder="sign-off token from prepare output" autocomplete="off">
+      <input id="token" type="password" placeholder="run token from prepare output" autocomplete="off">
       <button class="primary" id="approve" onclick="approve()" disabled>Approve exact plan hash</button>
+      <button id="pause" onclick="control('pause')" disabled>Pause</button>
+      <button id="resume" onclick="control('resume')" disabled>Resume</button>
+      <button id="stop" onclick="control('stop')" disabled>Stop</button>
+      <button id="accept" onclick="control('accept')" disabled>Accept handoff</button>
     </div>
+    <div id="statusline" class="muted" style="margin-top:10px"></div>
+    <div id="budget" class="muted" style="margin-top:6px"></div>
     <div id="msg" class="muted" style="margin-top:10px"></div>
     <pre id="plan" style="margin-top:12px">Select a run.</pre>
   </section>
@@ -91,11 +97,26 @@ async function selectRun(id) {
   try {
     const data = await api('/api/v2/runs/' + encodeURIComponent(id));
     $('status').textContent = data.status || '-';
-    $('status').className = 'pill ' + (data.status === 'AWAITING_SIGNOFF' ? 'warn' : data.status === 'PROVISIONING' ? 'ok' : '');
+    $('status').className = 'pill ' + (data.status === 'AWAITING_SIGNOFF' ? 'warn' : data.status === 'PROVISIONING' || data.status === 'PHASE_EXECUTING' ? 'ok' : '');
     $('hash').textContent = data.plan_hash ? 'plan_hash: ' + data.plan_hash : 'No plan submitted.';
+    $('statusline').textContent = data.workspace?.worktree_path ? ('worktree: ' + data.workspace.worktree_path) : '';
+    $('budget').textContent = data.budget ? `budget: ${data.budget.global?.used_requests || 0} used / ${data.budget.global?.reserved_requests || 0} reserved / phase ${data.budget.phases ? Object.keys(data.budget.phases).length : 0}` : 'budget: not started';
     $('plan').textContent = JSON.stringify(data.plan || {}, null, 2);
     $('approve').disabled = !data.can_sign;
-    if (data.signed) $('msg').innerHTML = '<span class="ok">Already signed. Any plan change requires reapproval.</span>';
+    $('pause').disabled = !data.can_control?.pause;
+    $('resume').disabled = !data.can_control?.resume;
+    $('stop').disabled = !data.can_control?.stop;
+    $('accept').disabled = !data.can_control?.accept;
+    if (data.signed) $('msg').innerHTML = '<span class="ok">Signed. Any plan change requires reapproval.</span>';
+  } catch (err) { $('msg').innerHTML = `<span class="bad">${escapeHtml(err.message)}</span>`; }
+}
+async function control(action) {
+  if (!selected) return;
+  $('msg').textContent = action + '...';
+  try {
+    const data = await api('/api/v2/control', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({run_id:selected, token:$('token').value, action})});
+    $('msg').innerHTML = `<span class="ok">${escapeHtml(action)} → ${escapeHtml(data.status || '')}</span>`;
+    await selectRun(selected);
   } catch (err) { $('msg').innerHTML = `<span class="bad">${escapeHtml(err.message)}</span>`; }
 }
 async function approve() {
@@ -172,17 +193,40 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
             signed = bool(current_hash) and signed_record.get("plan_hash") == current_hash
         except (OSError, json.JSONDecodeError):
             signed = False
-    can_sign = manifest.get("status") == "AWAITING_SIGNOFF" and bool(plan) and not signed
+    budget = {}
+    if store.budget_path.exists():
+        try:
+            budget = json.loads(store.budget_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            budget = {}
+    status = manifest.get("status")
+    can_control = {
+        "pause": status in {"PROVISIONING", "PHASE_EXECUTING", "PHASE_VERIFYING"},
+        "resume": status == "PAUSED",
+        "stop": status in {"PROVISIONING", "PHASE_EXECUTING", "PHASE_VERIFYING", "PAUSED", "BLOCKED"},
+        "accept": status == "HANDOFF_READY",
+    }
+    can_sign = status == "AWAITING_SIGNOFF" and bool(plan) and not signed
     return {
         "run_id": run_id,
         "goal": manifest.get("goal"),
-        "status": manifest.get("status"),
+        "status": status,
         "plan_hash": current_hash or manifest.get("plan_hash"),
         "budget_hash": manifest.get("budget_hash"),
         "workspace": manifest.get("workspace") or {},
         "plan": plan,
+        "budget": budget,
+        "phases": [
+            {"id": phase.get("id"), "title": phase.get("title"),
+             "status": "committed" if any(
+                 item.get("phase_id") == phase.get("id")
+                 for item in (manifest.get("checkpoints") or [])
+             ) else "pending"}
+            for phase in (plan.get("phases") or [])
+        ],
         "signed": signed,
         "can_sign": can_sign,
+        "can_control": can_control,
     }
 
 
@@ -216,3 +260,21 @@ def approve(root: str | Path, run_id: str, token: str) -> dict[str, Any]:
         raise PlanChangedError("plan file changed after submission")
     result = runner.signoff(run_id, approved_by="dashboard-user")
     return {"ok": True, **result}
+
+
+def control(root: str | Path, run_id: str, token: str, action: str) -> dict[str, Any]:
+    runner = V2Runner(root)
+    if not runner.verify_signoff_token(run_id, token):
+        raise PermissionError("invalid run token")
+    action = str(action or "").lower()
+    if action == "pause":
+        manifest = runner.pause(run_id)
+    elif action == "resume":
+        manifest = runner.resume(run_id)
+    elif action == "stop":
+        manifest = runner.stop(run_id)
+    elif action == "accept":
+        manifest = runner.accept_handoff(run_id)
+    else:
+        raise StateTransitionError(f"unknown control action: {action}")
+    return {"ok": True, "action": action, "status": manifest.get("status")}

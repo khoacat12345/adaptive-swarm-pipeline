@@ -31,6 +31,7 @@ from v2.errors import (  # noqa: E402
     SecurityVeto,
     TestIntegrityError,
 )
+from v2.adapters import WorkersCoderAdapter, WorkersReviewerAdapter  # noqa: E402
 from v2.execution import ExecutionEngine, ExecutionSeat  # noqa: E402
 from v2.plan import plan_hash, validate_plan  # noqa: E402
 from v2.runner import V2Runner  # noqa: E402
@@ -254,6 +255,8 @@ def test_happy_path(checks: Checks) -> None:
         checks.check("m3: worktree has verified value",
                      (workspace.path / "src.py").read_text(encoding="utf-8") == "VALUE = 2\n")
         checks.check("m3: coder called once", coder.calls == 1)
+        accepted = runner.accept_handoff(run_id)
+        checks.check("m4: handoff can be accepted", accepted["status"] == "DONE")
     finally:
         cleanup(runner, root, wt_root)
 
@@ -397,24 +400,81 @@ def test_budget_stop(checks: Checks) -> None:
         cleanup(runner, root, wt_root)
 
 
+class _FakeWorkerCoder:
+    def patch_set(self, order, *, current_files, feedback, round_index):
+        return {"src.py": {"format": "whole", "content": "VALUE = 2\n"}}
+
+
+class _FakeWorkerReviewer:
+    def review(self, order, *, diff, new_content, old_content, level, sink):
+        return {"verdict": "reject", "reasons": ["injection in diff"]}
+
+
+def test_adapters(checks: Checks) -> None:
+    root = make_repo("adapters")
+    try:
+        coder = WorkersCoderAdapter(
+            "mock/coder", sandbox_root=TEMP_ROOT / "adapter-sandbox"
+        )
+        coder.coder = _FakeWorkerCoder()
+        proposed = coder.propose(
+            {
+                "id": "S1",
+                "objective": "set value",
+                "verify_command": "python check.py",
+                "target_files": ["src.py"],
+                "level": 1,
+            },
+            cwd=root,
+            round_index=1,
+            feedback=None,
+        )
+        checks.check("m3.5: coder adapter returns content",
+                     proposed == {"src.py": "VALUE = 2\n"})
+
+        reviewer = WorkersReviewerAdapter("security", "mock/reviewer")
+        reviewer.reviewer = _FakeWorkerReviewer()
+        finding = reviewer.review(
+            "security",
+            diff="diff",
+            work_order={
+                "id": "S1",
+                "objective": "set value",
+                "verify_command": "python check.py",
+                "target_files": ["src.py"],
+                "level": 1,
+            },
+            phase={"id": "P1"},
+        )
+        checks.check("m3.5: security adapter maps reject to blocker",
+                     finding["verdict"] == "reject" and finding["severity"] == "blocker")
+        checks.check("m3.5: reviewer evidence is preserved",
+                     finding["evidence"] == ["injection in diff"])
+    finally:
+        rmtree(TEMP_ROOT / "adapter-sandbox")
+        rmtree(root)
+
+
 def main() -> int:
     rmtree(TEMP_ROOT)
     TEMP_ROOT.mkdir(parents=True, exist_ok=True)
     checks = Checks()
-    print("[1/7] happy path ...")
+    print("[1/8] happy path ...")
     test_happy_path(checks)
-    print("[2/7] repair ...")
+    print("[2/8] repair ...")
     test_repair(checks)
-    print("[3/7] cross-family ...")
+    print("[3/8] cross-family ...")
     test_cross_family(checks)
-    print("[4/7] security veto ...")
+    print("[4/8] security veto ...")
     test_security_veto(checks)
-    print("[5/7] test integrity ...")
+    print("[5/8] test integrity ...")
     test_test_integrity(checks)
-    print("[6/7] no-progress ...")
+    print("[6/8] no-progress ...")
     test_no_progress(checks)
-    print("[7/7] per-phase budget stop ...")
+    print("[7/8] per-phase budget stop ...")
     test_budget_stop(checks)
+    print("[8/8] worker adapters ...")
+    test_adapters(checks)
     print("")
     print(f"V2 M3: {checks.passed}/{checks.total} PASS")
     for failure in checks.failures:

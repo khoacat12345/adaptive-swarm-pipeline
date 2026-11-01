@@ -35,7 +35,7 @@ def _budget_config(path: str | None, phases: list[str]) -> BudgetConfig | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Adaptive Swarm v2.1 M1 runner")
+    parser = argparse.ArgumentParser(description="Adaptive Swarm v2.1 runner")
     parser.add_argument("--root", default=".")
     parser.add_argument("--state-root", default=None)
     parser.add_argument("--worktree-root", default=None)
@@ -64,6 +64,16 @@ def main(argv: list[str] | None = None) -> int:
 
     assert_parser = sub.add_parser("assert-signoff")
     assert_parser.add_argument("--run-id", required=True)
+
+    execute = sub.add_parser("execute")
+    execute.add_argument("--run-id", required=True)
+    execute.add_argument("--coder-model", default=None)
+    execute.add_argument("--coder-kind", choices=("agentic", "opencode"), default="agentic")
+    execute.add_argument("--reviewer", action="append", default=[],
+                         help="role=model; repeat for security, qa, perf, docs")
+    execute.add_argument("--free", action="store_true",
+                         help="use the free-only coder/reviewer defaults")
+    execute.add_argument("--timeout", type=int, default=300)
 
     handoff = sub.add_parser("handoff")
     handoff.add_argument("--run-id", required=True)
@@ -116,6 +126,37 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "assert-signoff":
         record = runner.assert_signed(args.run_id)
         print(json.dumps(record, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "execute":
+        from v2.adapters import FREE_MODELS, build_worker_seats, free_reviewer_models
+        from v2.execution import ExecutionEngine
+
+        reviewer_models = free_reviewer_models() if args.free else {}
+        for item in args.reviewer:
+            if "=" not in item:
+                raise SystemExit(f"bad --reviewer value: {item!r}; use role=model")
+            role, model = item.split("=", 1)
+            reviewer_models[role.strip()] = model.strip()
+        coder_model = args.coder_model or (FREE_MODELS["coder"] if args.free else None)
+        if not coder_model:
+            raise SystemExit("execute needs --coder-model or --free")
+        missing = [role for role in ("security", "qa", "perf", "docs")
+                   if not reviewer_models.get(role)]
+        if missing:
+            raise SystemExit(f"missing reviewer models: {', '.join(missing)}")
+        store = runner.load(args.run_id)
+        coder, reviewers = build_worker_seats(
+            coder_model=coder_model,
+            reviewer_models=reviewer_models,
+            sandbox_root=store.run_dir / "coder_sandbox",
+            coder_kind=args.coder_kind,
+            timeout=args.timeout,
+        )
+        result = ExecutionEngine(runner).execute(
+            args.run_id, coder=coder, reviewers=reviewers
+        )
+        print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "handoff":
