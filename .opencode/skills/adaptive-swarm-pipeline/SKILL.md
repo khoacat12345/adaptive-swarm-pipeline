@@ -8,6 +8,33 @@ description: Run, observe and harden the Adaptive Swarm Pipeline in the project'
 The full English runbook lives in `.agents/README.md`. Read it before doing
 anything else; this file only exists so OpenCode can discover the skill.
 
+## ⚠️ MANDATORY EXECUTION PROTOCOL (THIẾT QUÂN LUẬT)
+
+1. **NEVER CODE MONOLITHICALLY IN CHAT**:
+   When the user invokes `/swarm` or asks to implement a feature, bugfix, or code change:
+   - **DO NOT** write code or generate solution files directly in chat.
+   - **DO NOT** answer with conversational promises without invoking tools.
+
+2. **MANDATORY TERMINAL INVOCATION**:
+   You MUST immediately run the pipeline via bash/powershell tool:
+   - For a natural language task / new feature:
+     ```bash
+     python .agents/planner.py --goal "<User's exact task>" --submit
+     ```
+   - For an existing Work Order file:
+     ```bash
+     python .agents/recipe_c.py --order order.json
+     ```
+   - For checking last run / replay / debug:
+     ```bash
+     python .agents/replay.py --last
+     ```
+
+3. **WORKFLOW EXECUTION**:
+   - Execute `python .agents/planner.py --goal "..." --submit` via your shell tool.
+   - Capture the terminal output, return the approval dashboard URL to the user, and wait for human sign-off.
+   - All code writes MUST go through the swarm pipeline (`safe_writer`) and pass `verify_command`.
+
 Quick reference:
 
 ```bash
