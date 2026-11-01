@@ -3613,7 +3613,12 @@
       const meetingMode = allMeeting.length > 0;
       // Only a running role may glow.  At replay/done the base graph stays
       // visible but static.
-      const activeRoles = new Set(Object.keys(status).filter((role) => status[role] === 'running'));
+      const livePhase = idx == null && phase === 'running';
+      const activeRoles = livePhase
+        ? new Set(Object.keys(status).filter((role) => status[role] === 'running'))
+        : new Set();
+      const leaderState = livePhase ? 'run' : idx != null ? 'replay'
+        : phase === 'done' ? 'done' : centerState;
       const short = (model) => shortModel(model);
       const roleNode = (role) => {
         const item = roles.find((row) => row.role === role) || { role, label: role };
@@ -3733,7 +3738,7 @@
             orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L7,3 z" fill="#5b7fa3"></path></marker>
         </defs>
         ${lines}</svg>
-      <button type="button" class="anode leader ${centerState} ${centerState === 'run' ? 'hot' : ''}" style="left:50%;top:48%"
+      <button type="button" class="anode leader ${leaderState} ${livePhase ? 'hot' : ''}" style="left:50%;top:48%"
         onclick="focusAgent('lead')" title="Lead · ${esc(phase)}">
         <span class="av">LD</span><span><span class="nm">Lead</span>
           <span class="md">${esc(jobState.job_id || plan.job_id || 'orchestrator')}</span>
