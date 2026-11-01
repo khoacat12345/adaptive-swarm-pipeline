@@ -6,7 +6,7 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **v1.0.15** (replay/paused graph is inert; running is live).
+> Status: **v1.0.16** (war-room graph restored to visual baseline).
 > Original acceptance on Windows; Linux/macOS paths are supported and covered
 > by the cross-platform CI workflow.
 >
