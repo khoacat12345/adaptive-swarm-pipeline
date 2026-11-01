@@ -3600,7 +3600,7 @@
       const activeEvent = idx != null ? timeline[idx] : (timeline[timeline.length - 1] || null);
       const rangeMax = Math.max(0, timeline.length - 1);
       const replayNode = idx != null && activeEvent ? String(activeEvent.node || '').toLowerCase() : '';
-      const centerState = idx != null && activeEvent ? 'run'
+      const centerState = idx != null && activeEvent ? 'replay'
         : phase === 'done' ? 'done' : ['running', 'paused'].includes(phase)
           ? 'run' : ['awaiting_approval', 'approved'].includes(phase) ? 'next' : '';
       const pos = { coder: [50, 14], security: [15, 31], qa: [85, 31], perf: [28, 77], docs: [72, 77], systembot: [50, 90] };
