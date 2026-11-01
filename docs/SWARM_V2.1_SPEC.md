@@ -1,9 +1,10 @@
 # Adaptive Swarm Pipeline v2.1 — Technical Specification
 
-> **Status:** Draft for implementation
+> **Status:** Draft for implementation; M1 core implemented
 > **Supersedes:** `SWARM_V2_ARCHITECTURE_DRAFT.md`
 > **Scope:** autonomous overnight execution with strict isolation and per-phase budget control
 > **Priority order:** safe isolation → budget enforcement → resumability → planning quality → UI
+> **Implementation:** `.agents/v2/` (`isolation.py`, `budget.py`, `state.py`, `runner.py`, `run.py`)
 
 ---
 
@@ -406,7 +407,7 @@ Values are defaults for the sign-off screen, not promises:
   },
   "per_phase": {
     "max_requests": 24,
-    "max_cost_usd": 0.80,
+    "max_cost_usd": 0.70,
     "max_wall_seconds": 7200,
     "repair_reserve_pct": 20
   },
@@ -423,11 +424,11 @@ The signed plan must allocate no more than the global cap. Example for 4 phases:
 | Bucket | Requests | USD | Wall time |
 |---|---:|---:|---:|
 | Planning | 12 | 0.25 | 15m |
-| Phase 1 | 24 | 0.80 | 2h |
-| Phase 2 | 24 | 0.80 | 2h |
-| Phase 3 | 24 | 0.80 | 2h |
-| Phase 4 | 24 | 0.80 | 2h |
-| Emergency reserve | 12 | 0.05 | remaining |
+| Phase 1 | 24 | 0.70 | 2h |
+| Phase 2 | 24 | 0.70 | 2h |
+| Phase 3 | 24 | 0.70 | 2h |
+| Phase 4 | 24 | 0.70 | 2h |
+| Emergency reserve | 12 | 0.45 | remaining |
 | **Total cap** | **120** | **3.50** | **10h** |
 
 The planner may allocate differently, but the validator rejects any plan where
@@ -479,7 +480,7 @@ Each phase has:
 ```json
 {
   "phase_id": "P2",
-  "allocated": {"requests": 24, "cost_usd": 0.80, "wall_seconds": 7200},
+  "allocated": {"requests": 24, "cost_usd": 0.70, "wall_seconds": 7200},
   "reserved": {"requests": 0, "cost_usd": 0.0},
   "actual": {"requests": 0, "cost_usd": 0.0, "tokens": 0, "wall_seconds": 0},
   "repair_used": 0,
@@ -764,7 +765,7 @@ repair attempt or a pause, depending on severity. No auto-approve.
       "depends_on": [],
       "allowed_paths": ["src/app.py", "tests/test_app.py"],
       "forbidden_paths": [".git", ".env", ".agents/tmp"],
-      "budget": {"requests": 24, "cost_usd": 0.8, "wall_seconds": 7200},
+      "budget": {"requests": 24, "cost_usd": 0.7, "wall_seconds": 7200},
       "work_orders": [
         {
           "id": "S1",
@@ -1036,6 +1037,22 @@ deleting the worktree or resetting the main repo.
 
 **Exit:** no data loss, no main-tree write, all caps enforced, handoff reviewable.
 
+### M1 implementation map (current)
+
+```text
+.agents/v2/isolation.py   guarded worktree, checkpoint, quarantine, handoff
+.agents/v2/budget.py      reserve/settle ledger, per-phase caps, wall clock
+.agents/v2/state.py       manifest and state transitions
+.agents/v2/runner.py      prepare/checkpoint/quarantine/handoff shell
+.agents/v2/run.py         prepare/status/handoff CLI
+.agents/tests/test_v2_m1.py
+```
+
+M1 tests use temporary Git repositories and mock budget calls only; no model is
+called. v1 remains the default execution path. M1 acceptance currently passes
+`43/43` via `python .agents/tests/test_v2_m1.py`. M2 is the first milestone
+allowed to add planning/sign-off, and M3 is the first allowed to call a coder.
+
 ---
 
 ## 15. Open decisions
@@ -1044,8 +1061,9 @@ deleting the worktree or resetting the main repo.
    require clean.**
 2. Keep 7 execution seats including Clean, or 6 with Clean disabled? **Default:
    7 seats defined, Clean disabled unless the plan enables it.**
-3. Worktree root location on Windows? **Default: `%LOCALAPPDATA%`; never inside
-   the repo.**
+3. Worktree root location on Windows? **Default: `%LOCALAPPDATA%`; if that path
+   would be inside the repo (home-directory layout), use the sibling
+   `<repo>.swarm-worktrees`; never inside the repo.**
 4. Auto-merge? **Default: no.**
 5. Exact default budget values? **Use the envelope in §5.2; sign-off may lower,
    not raise hard caps.**
