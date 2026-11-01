@@ -529,6 +529,35 @@ class BudgetController:
             )
             self._save()
 
+    def replace_if_unused(self, config: BudgetConfig) -> "BudgetController":
+        """Attach the signed plan budget before any model call.
+
+        prepare() creates a provisional envelope so isolation can be tested
+        before a plan exists. Signoff may replace it only while every counter is
+        zero. After a reservation exists, the budget is immutable.
+        """
+        with self._lock:
+            global_data = self._global()
+            used = (
+                int(global_data["used_requests"])
+                + int(global_data["reserved_requests"])
+                + int(global_data["used_tokens"])
+                + int(global_data["used_wall_seconds"])
+                + int(global_data["reserved_wall_seconds"])
+                + float(global_data["used_cost_usd"])
+                + float(global_data["reserved_cost_usd"])
+            )
+            if used:
+                raise BudgetError("cannot replace budget after usage or reservation")
+            validated = config.validate()
+            self.config = validated
+            self._state = self._new_state()
+            self._elapsed_base = 0.0
+            self._clock_base = self._clock()
+            self._append_event("budget.reconfigure", {"config_hash": validated.digest})
+            self._save()
+            return self
+
     def stop(self, reason: str) -> None:
         with self._lock:
             self._state["stopped"] = True

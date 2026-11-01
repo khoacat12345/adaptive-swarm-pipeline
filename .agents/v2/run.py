@@ -52,6 +52,19 @@ def main(argv: list[str] | None = None) -> int:
     status = sub.add_parser("status")
     status.add_argument("--run-id", required=True)
 
+    plan_parser = sub.add_parser("plan")
+    plan_parser.add_argument("--run-id", required=True)
+    plan_parser.add_argument("--plan", required=True, help="path to master plan JSON")
+
+    signoff_parser = sub.add_parser("signoff")
+    signoff_parser.add_argument("--run-id", required=True)
+    signoff_parser.add_argument("--approved-by", default="local-user")
+    signoff_parser.add_argument("--auto-merge", action="store_true")
+    signoff_parser.add_argument("--allow-dirty-snapshot", action="store_true")
+
+    assert_parser = sub.add_parser("assert-signoff")
+    assert_parser.add_argument("--run-id", required=True)
+
     handoff = sub.add_parser("handoff")
     handoff.add_argument("--run-id", required=True)
     handoff.add_argument("--report", default=None)
@@ -79,6 +92,30 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "status":
         print(json.dumps(runner.status(args.run_id), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "plan":
+        plan_path = Path(args.plan).expanduser()
+        if not plan_path.is_absolute():
+            plan_path = Path(args.root) / plan_path
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        result = runner.submit_plan(args.run_id, plan)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "signoff":
+        result = runner.signoff(
+            args.run_id,
+            approved_by=args.approved_by,
+            auto_merge=args.auto_merge,
+            allow_dirty_snapshot=args.allow_dirty_snapshot,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "assert-signoff":
+        record = runner.assert_signed(args.run_id)
+        print(json.dumps(record, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "handoff":

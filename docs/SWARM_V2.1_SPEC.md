@@ -1,10 +1,10 @@
 # Adaptive Swarm Pipeline v2.1 — Technical Specification
 
-> **Status:** Draft for implementation; M1 core implemented
+> **Status:** Draft for implementation; M1 and M2 core implemented
 > **Supersedes:** `SWARM_V2_ARCHITECTURE_DRAFT.md`
 > **Scope:** autonomous overnight execution with strict isolation and per-phase budget control
 > **Priority order:** safe isolation → budget enforcement → resumability → planning quality → UI
-> **Implementation:** `.agents/v2/` (`isolation.py`, `budget.py`, `state.py`, `runner.py`, `run.py`)
+> **Implementation:** `.agents/v2/` (`isolation.py`, `budget.py`, `state.py`, `plan.py`, `planning.py`, `signoff.py`, `web.py`, `runner.py`, `run.py`)
 
 ---
 
@@ -1037,21 +1037,27 @@ deleting the worktree or resetting the main repo.
 
 **Exit:** no data loss, no main-tree write, all caps enforced, handoff reviewable.
 
-### M1 implementation map (current)
+### M1/M2 implementation map (current)
 
 ```text
 .agents/v2/isolation.py   guarded worktree, checkpoint, quarantine, handoff
 .agents/v2/budget.py      reserve/settle ledger, per-phase caps, wall clock
 .agents/v2/state.py       manifest and state transitions
-.agents/v2/runner.py      prepare/checkpoint/quarantine/handoff shell
-.agents/v2/run.py         prepare/status/handoff CLI
-.agents/tests/test_v2_m1.py
+.agents/v2/plan.py        master plan schema, DAG/path/budget validation, hashes
+.agents/v2/planning.py    3-seat council, critique round, Lead synthesis
+.agents/v2/signoff.py     immutable signoff record and reapproval checks
+.agents/v2/web.py         /v2 sign-off page + /api/v2 runs/signoff endpoints
+.agents/v2/runner.py      prepare/plan/signoff/checkpoint/quarantine/handoff
+.agents/v2/run.py         prepare/plan/signoff/status/handoff CLI
+.agents/tests/test_v2_m1.py  isolation/budget/state tests
+.agents/tests/test_v2_m2.py  plan/council/signoff/web tests
 ```
 
-M1 tests use temporary Git repositories and mock budget calls only; no model is
-called. v1 remains the default execution path. M1 acceptance currently passes
-`43/43` via `python .agents/tests/test_v2_m1.py`. M2 is the first milestone
-allowed to add planning/sign-off, and M3 is the first allowed to call a coder.
+M1/M2 tests use temporary Git repositories and deterministic fake planners;
+no model is called. v1 remains the default execution path. Current acceptance:
+M1 `43/43`, M2 `35/35`. The dashboard exposes `/v2` and `/api/v2/runs`,
+`/api/v2/runs/<id>`, `/api/v2/runs/<id>/plan`, `/api/v2/signoff`; approval uses
+the run-local sign-off token. M3 is the first milestone allowed to call a coder.
 
 ---
 
@@ -1073,37 +1079,25 @@ allowed to add planning/sign-off, and M3 is the first allowed to call a coder.
 
 ## 16. Appendix: operator commands
 
-Create/run:
+Create, plan and sign off:
 
 ```bash
-python .agents/v2/run.py prepare --root . --goal "<goal>" --base-sha HEAD
-python .agents/v2/run.py plan --run-id <id>
-python .agents/v2/run.py signoff --run-id <id> --plan-hash <hash>
-python .agents/v2/run.py run --run-id <id>
+python .agents/v2/run.py prepare --root . --goal "<goal>" --phase P1
+python .agents/v2/run.py plan --run-id <id> --plan plan.json
+python .agents/v2/run.py signoff --run-id <id> --approved-by "local-user"
+python .agents/v2/run.py assert-signoff --run-id <id>
 ```
 
-Inspect:
+Inspect and hand off:
 
 ```bash
 python .agents/v2/run.py status --run-id <id>
-python .agents/v2/run.py budget --run-id <id>
-python .agents/v2/run.py checkpoints --run-id <id>
-python .agents/v2/run.py quarantine --run-id <id>
-```
-
-Handoff:
-
-```bash
+python .agents/v2/run.py handoff --run-id <id>
 git -C <worktree> log --oneline <base_sha>..HEAD
 git diff <base_sha>..HEAD > handoff.patch
 # review, then merge the swarm branch manually
 ```
 
-Emergency stop:
-
-```bash
-python .agents/v2/run.py stop --run-id <id> --reason "user stop"
-```
-
-These commands are illustrative; the final CLI names may be adjusted, but the
-safety semantics above are mandatory.
+M2 is plan/sign-off only; the `run`/execution command is intentionally absent
+until M3. These commands are illustrative; the final CLI names may be adjusted,
+but the safety semantics above are mandatory.

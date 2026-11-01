@@ -9,13 +9,17 @@ milestones will use.
 
 from __future__ import annotations
 
+import hmac
 import json
+import secrets
 from pathlib import Path
 from typing import Any
 
 from . import isolation
 from .budget import BudgetConfig, BudgetController
 from .errors import ManifestError, StateTransitionError
+from .plan import budget_from_plan, save_plan, validate_plan
+from .signoff import create_signoff, signoff_summary, assert_signoff
 from .state import RunStore, resolve_state_root
 
 
@@ -80,10 +84,12 @@ class V2Runner:
                 else BudgetConfig.default(phase_ids)
             )
             budget = BudgetController(store.run_dir, config)
+            signoff_token = secrets.token_urlsafe(24)
             store.update(
                 budget_hash=budget.config_hash,
                 plan_hash=None,
                 status="CREATED",
+                signoff_token=signoff_token,
             )
             store.transition("preflight_ok")
             store.append_event(
@@ -100,6 +106,7 @@ class V2Runner:
                 "workspace": workspace.as_dict(),
                 "budget": budget.summary(first_phase),
                 "manifest": store.summary(),
+                "signoff_token": signoff_token,
             }
         except Exception as exc:
             try:
@@ -114,6 +121,108 @@ class V2Runner:
         if not store.manifest_path.exists():
             raise ManifestError(f"run not found: {run_id}")
         return store
+
+    def submit_plan(self, run_id: str, plan: dict[str, Any]) -> dict[str, Any]:
+        """Validate a signed-plan candidate and persist it for review."""
+        store = self.load(run_id)
+        workspace = self.workspace(run_id)
+        status = store.load().get("status")
+        if status == "PRECHECKED":
+            store.transition("start_planning")
+            status = "PLANNING"
+        if status == "PROVISIONING":
+            store.transition("plan_changed")
+            status = "AWAITING_SIGNOFF"
+        if status not in {"PLANNING", "AWAITING_SIGNOFF"}:
+            raise StateTransitionError(
+                f"plan submission requires PLANNING/AWAITING_SIGNOFF/PROVISIONING, got {status}"
+            )
+        validated = validate_plan(plan, worktree=workspace.path)
+        save_plan(store.run_dir / "plan.json", plan)
+        store.update(plan_hash=validated["plan_hash"])
+        if status == "PLANNING":
+            store.transition("plan_valid")
+        else:
+            store.append_event(
+                "plan.changed",
+                {"plan_hash": validated["plan_hash"], "requires_reapproval": True},
+            )
+        store.append_event(
+            "plan.submitted",
+            {"plan_hash": validated["plan_hash"], "phase_ids": validated["phase_ids"]},
+        )
+        return {
+            "run_id": run_id,
+            "status": store.load().get("status"),
+            "plan_hash": validated["plan_hash"],
+            "budget_hash": validated["budget_hash"],
+            "phase_ids": validated["phase_ids"],
+            "signoff": signoff_summary(store),
+        }
+
+    def signoff(
+        self,
+        run_id: str,
+        *,
+        approved_by: str = "local-user",
+        auto_merge: bool = False,
+        allow_dirty_snapshot: bool = False,
+    ) -> dict[str, Any]:
+        """Approve the exact plan on disk and switch to PROVISIONING."""
+        store = self.load(run_id)
+        store.assert_state("AWAITING_SIGNOFF")
+        workspace = self.workspace(run_id)
+        plan_path = store.run_dir / "plan.json"
+        if not plan_path.exists():
+            raise ManifestError(f"run has no plan: {run_id}")
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        validated = validate_plan(plan, worktree=workspace.path)
+        config = budget_from_plan(plan)
+        if store.budget_path.exists():
+            current = json.loads(store.budget_path.read_text(encoding="utf-8"))
+            old_config = BudgetConfig.from_dict(current.get("config") or {})
+            budget = BudgetController(store.run_dir, old_config)
+            budget.replace_if_unused(config)
+        else:
+            budget = BudgetController(store.run_dir, config)
+        record = create_signoff(
+            store,
+            plan,
+            worktree=workspace.path,
+            approved_by=approved_by,
+            auto_merge=auto_merge,
+            allow_dirty_snapshot=allow_dirty_snapshot,
+        )
+        store.transition("sign_off")
+        store.append_event(
+            "signoff.approved",
+            {
+                "plan_hash": record["plan_hash"],
+                "budget_hash": record["budget_hash"],
+                "model_snapshot_hash": record["model_snapshot_hash"],
+                "budget_config_hash": budget.config_hash,
+            },
+        )
+        return {
+            "run_id": run_id,
+            "status": store.load().get("status"),
+            "signoff": record,
+            "budget": budget.summary(validated["phase_ids"][0]),
+        }
+
+    def assert_signed(self, run_id: str) -> dict[str, Any]:
+        store = self.load(run_id)
+        plan_path = store.run_dir / "plan.json"
+        if not plan_path.exists():
+            raise ManifestError(f"run has no plan: {run_id}")
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        return assert_signoff(store, plan)
+
+    def verify_signoff_token(self, run_id: str, token: str) -> bool:
+        """Check the local dashboard approval token without exposing it in status."""
+        expected = str(self.load(run_id).load().get("signoff_token") or "")
+        provided = str(token or "")
+        return bool(expected) and hmac.compare_digest(expected, provided)
 
     def workspace(self, run_id: str) -> isolation.Workspace:
         store = self.load(run_id)
@@ -200,4 +309,5 @@ class V2Runner:
                 summary["budget"] = json.loads(budget_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 summary["budget"] = None
+        summary["signoff"] = signoff_summary(store)
         return summary

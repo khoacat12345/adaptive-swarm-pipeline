@@ -356,6 +356,26 @@ def make_handler(root: Path, ledger: Path):
             try:
                 if route == "/":
                     self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
+                elif route == "/v2":
+                    from v2 import web as v2_web
+                    self._send(200, v2_web.page().encode("utf-8"), "text/html; charset=utf-8")
+                elif route == "/api/v2/runs":
+                    from v2 import web as v2_web
+                    self._json(v2_web.list_runs(root))
+                elif route.startswith("/api/v2/runs/") and route.endswith("/plan"):
+                    from v2 import web as v2_web
+                    run_id = route[len("/api/v2/runs/"):-len("/plan")].strip("/")
+                    try:
+                        self._json(v2_web.plan_detail(root, run_id))
+                    except Exception as exc:  # noqa: BLE001
+                        self._json({"error": str(exc)[:300]}, 404)
+                elif route.startswith("/api/v2/runs/"):
+                    from v2 import web as v2_web
+                    run_id = route[len("/api/v2/runs/"):].strip("/")
+                    try:
+                        self._json(v2_web.run_detail(root, run_id))
+                    except Exception as exc:  # noqa: BLE001
+                        self._json({"error": str(exc)[:300]}, 404)
                 elif route == "/api/stream":
                     self._sse(parse_qs(parsed.query))
                 elif route == "/api/meeting":
@@ -491,7 +511,22 @@ def make_handler(root: Path, ledger: Path):
                     return
                 raw = self.rfile.read(length) if length else b""
                 payload = json.loads(raw.decode("utf-8") or "{}")
-                if route == "/api/plan/decision":
+                if route == "/api/v2/signoff":
+                    from v2 import web as v2_web
+                    from v2.errors import PlanChangedError, StateTransitionError
+                    try:
+                        self._json(v2_web.approve(
+                            root,
+                            str(payload.get("run_id") or ""),
+                            str(payload.get("token") or ""),
+                        ))
+                    except PermissionError as exc:
+                        self._json({"error": str(exc)}, 403)
+                    except (PlanChangedError, StateTransitionError) as exc:
+                        self._json({"error": str(exc)}, 409)
+                    except Exception as exc:  # noqa: BLE001
+                        self._json({"error": str(exc)[:300]}, 400)
+                elif route == "/api/plan/decision":
                     import job as job_module
                     try:
                         result = job_module.decide(

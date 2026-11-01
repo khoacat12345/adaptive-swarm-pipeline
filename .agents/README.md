@@ -94,6 +94,8 @@ python3 .agents/tests/test_meeting_ui.py
 python3 .agents/tests/test_sse.py
 python3 .agents/tests/test_adapter.py
 python3 .agents/tests/test_model_selector.py
+python3 .agents/tests/test_v2_m1.py
+python3 .agents/tests/test_v2_m2.py
 python3 .agents/tests/test_phase4.py --fast
 ```
 

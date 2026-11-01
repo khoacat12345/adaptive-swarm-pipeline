@@ -13,6 +13,7 @@ from .errors import (  # noqa: F401
     CleanTreeRequired,
     IsolationError,
     IsolationGuardFailed,
+    PlanChangedError,
     StateTransitionError,
     V2Error,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "CleanTreeRequired",
     "IsolationError",
     "IsolationGuardFailed",
+    "PlanChangedError",
     "StateTransitionError",
     "V2Error",
 ]

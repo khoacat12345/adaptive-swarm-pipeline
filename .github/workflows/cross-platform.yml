@@ -25,6 +25,8 @@ jobs:
         run: python .agents/tests/test_preflight.py
       - name: V2 M1 isolation and budget
         run: python .agents/tests/test_v2_m1.py
+      - name: V2 M2 planning and signoff
+        run: python .agents/tests/test_v2_m2.py
       - name: Skill consistency
         run: python .agents/tests/test_skill_consistency.py
       - name: Wave reviewer / fail-closed

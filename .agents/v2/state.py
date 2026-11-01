@@ -43,6 +43,7 @@ TRANSITIONS: dict[tuple[str, str], str] = {
     ("PRECHECKED", "start_planning"): "PLANNING",
     ("PLANNING", "plan_valid"): "AWAITING_SIGNOFF",
     ("PLANNING", "plan_changed"): "AWAITING_SIGNOFF",
+    ("PROVISIONING", "plan_changed"): "AWAITING_SIGNOFF",
     ("AWAITING_SIGNOFF", "sign_off"): "PROVISIONING",
     ("PROVISIONING", "worktree_ready"): "PHASE_EXECUTING",
     ("PHASE_EXECUTING", "verify_start"): "PHASE_VERIFYING",

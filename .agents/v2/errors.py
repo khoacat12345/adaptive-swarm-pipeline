@@ -65,3 +65,7 @@ class StateTransitionError(V2Error):
 
 class ManifestError(V2Error):
     code = "MANIFEST_ERROR"
+
+
+class PlanChangedError(V2Error):
+    code = "PLAN_MISMATCH"
