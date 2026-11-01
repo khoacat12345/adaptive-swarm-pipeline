@@ -1,7 +1,7 @@
 # Adaptive Swarm Pipeline v2.1 — Technical Specification
 
-> **Status:** Draft for implementation; M1-M5 acceptance harness implemented;
-> live free-model pilot/soak remains an operator run
+> **Status:** v2.1.0 release; M5 acceptance harness implemented; live
+> free-model pilot/soak remains an operator run
 > **Supersedes:** `SWARM_V2_ARCHITECTURE_DRAFT.md`
 > **Scope:** autonomous overnight execution with strict isolation and per-phase budget control
 > **Priority order:** safe isolation → budget enforcement → resumability → planning quality → UI

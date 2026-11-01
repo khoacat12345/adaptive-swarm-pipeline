@@ -6,11 +6,30 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **v1.0.5** (dots land on card borders).
+> Status: **v2.1.0** — opt-in v2.1 foundation (isolation, budget, planning,
+> sign-off, execution and local controls). v1 remains the default until the
+> live free-model pilot and 8–10 hour soak are completed.
 > Original acceptance on Windows; Linux/macOS paths are supported and covered
 > by the cross-platform CI workflow.
 >
 > Built with AI assistance; every change is machine-verified.
+
+## v2.1 — isolated autonomous foundation
+
+The v2.1 path is opt-in and lives under `.agents/v2/`. It adds a guarded Git
+worktree, reserve-before-call budgets, three-seat planning, immutable plan
+sign-off, a coder/reviewer execution engine and a local `/v2` control page.
+It does **not** auto-merge and does not replace the v1 execution path yet.
+
+```bash
+python .agents/v2/run.py prepare --goal "your task" --phase P1
+python .agents/v2/run.py plan --run-id <id> --plan plan.json
+python .agents/v2/run.py signoff --run-id <id>
+python .agents/v2/run.py execute --run-id <id> --free
+```
+
+Details: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Release notes:
+[`docs/RELEASE_v2.1.0.md`](docs/RELEASE_v2.1.0.md).
 
 ## Why
 
