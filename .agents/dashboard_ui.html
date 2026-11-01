@@ -1226,10 +1226,11 @@
     }
 
     .war .link {
-      stroke: #27405a;
-      stroke-width: 1.2;
+      stroke: #3f6484;
+      stroke-width: 1.4;
+      opacity: .9;
       vector-effect: non-scaling-stroke;
-      stroke-dasharray: 4 6;
+      stroke-dasharray: 5 5;
       transition: stroke .2s
     }
 
@@ -1263,10 +1264,10 @@
       animation: dash 1.6s linear infinite;
     }
     .war .link.meet.base {
-      stroke: #27405a;
-      stroke-width: 1.2;
-      opacity: .55;
-      stroke-dasharray: 4 6;
+      stroke: #5b7fa3;
+      stroke-width: 1.5;
+      opacity: .9;
+      stroke-dasharray: 5 5;
       animation: none;
     }
 
@@ -3725,8 +3726,12 @@
     </div>` : ''}
     <div class="war">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-        <defs><marker id="meeting-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3"
-          orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L7,3 z" fill="#fb923c"></path></marker></defs>
+        <defs>
+          <marker id="meeting-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3"
+            orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L7,3 z" fill="#fb923c"></path></marker>
+          <marker id="meeting-arrow-base" markerWidth="8" markerHeight="8" refX="6" refY="3"
+            orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L7,3 z" fill="#5b7fa3"></path></marker>
+        </defs>
         ${lines}</svg>
       <button type="button" class="anode leader ${centerState} ${centerState === 'run' ? 'hot' : ''}" style="left:50%;top:48%"
         onclick="focusAgent('lead')" title="Lead · ${esc(phase)}">
@@ -4281,9 +4286,10 @@
         const to = MEETING_POS[edge.to] || [50, 50];
         const hot = (activeSet.has(edge.from) || activeSet.has(edge.to)) ? 'hot' : '';
         const base = edge.base ? 'base' : '';
+        const marker = edge.base && !hot ? 'meeting-arrow-base' : 'meeting-arrow';
         return `<line x1="${from[0]}" y1="${from[1]}" x2="${to[0]}" y2="${to[1]}"
           class="link meet ${base} ${hot}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}"
-          marker-end="url(#meeting-arrow)" vector-effect="non-scaling-stroke"></line>`;
+          marker-end="url(#${marker})" vector-effect="non-scaling-stroke"></line>`;
       }).join('');
     }
 
