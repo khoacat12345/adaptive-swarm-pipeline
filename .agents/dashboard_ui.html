@@ -1281,6 +1281,37 @@
       animation: dash 1.05s linear infinite;
       filter: drop-shadow(0 0 5px #fb923c);
     }
+    .war-dots {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .war-dot {
+      position: absolute;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #fb923c;
+      opacity: .55;
+      transform: translate(-50%, -50%);
+      transition: opacity .2s, box-shadow .2s, width .2s, height .2s;
+    }
+    .war-dot.origin {
+      opacity: .42;
+    }
+    .war-dot.target {
+      width: 7px;
+      height: 7px;
+      opacity: .9;
+    }
+    .war-dot.hot {
+      width: 8px;
+      height: 8px;
+      opacity: 1;
+      background: #ffb86b;
+      box-shadow: 0 0 9px #fb923c;
+    }
     .anode.leader.live {
       border-color: #fb923c;
       background: linear-gradient(145deg, #4a250d, #1f120a);
@@ -3660,6 +3691,8 @@
           return `<line x1="50" y1="48" x2="${x}" y2="${y}" class="link ${cls}"
       vector-effect="non-scaling-stroke"/>`;
         }).join('');
+      const meetingDots = meetingMode
+        ? renderMeetingDots(meetingEdgesData, activeRoles) : '';
       const agentCards = roles.map((item) => {
         const st = status[item.role] || 'idle';
         const quota = quotaFor(item.model);
@@ -3747,9 +3780,8 @@
     </div>` : ''}
     <div class="war">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-        <defs><marker id="meeting-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3"
-          orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L7,3 z" fill="#fb923c"></path></marker></defs>
         ${lines}</svg>
+      ${meetingDots ? `<div class="war-dots">${meetingDots}</div>` : ''}
       <button type="button" class="anode leader ${leaderState}" style="left:50%;top:48%"
         onclick="focusAgent('lead')" title="Lead · ${esc(phase)}">
         <span class="av">LD</span><span><span class="nm">Lead</span>
@@ -4323,7 +4355,7 @@
       ];
       const seen = new Set();
       return all.filter((edge) => {
-        const key = `${edge.from}->${edge.to}`;
+        const key = [edge.from, edge.to].sort().join("->");
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -4335,7 +4367,29 @@
         const base = edge.base ? 'base' : '';
         return `<line x1="${points.x1}" y1="${points.y1}" x2="${points.x2}" y2="${points.y2}"
           class="link meet ${base} ${hot}" data-from="${esc(edge.from)}" data-to="${esc(edge.to)}"
-          marker-end="url(#meeting-arrow)" vector-effect="non-scaling-stroke"></line>`;
+          vector-effect="non-scaling-stroke"></line>`;
+      }).join('');
+    }
+
+    function renderMeetingDots(edges, active) {
+      const activeSet = active instanceof Set ? active : new Set(active || []);
+      const all = [
+        ...['coder', 'security', 'qa', 'perf', 'docs'].map((to) => ({ from: 'lead', to, base: true })),
+        ...(edges || []),
+      ];
+      const seen = new Set();
+      return all.filter((edge) => {
+        const key = [edge.from, edge.to].sort().join("->");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).map((edge) => {
+        const from = MEETING_POS[edge.from] || [50, 50];
+        const to = MEETING_POS[edge.to] || [50, 50];
+        const points = meetingLinePoints(from, to);
+        const hot = (activeSet.has(edge.from) || activeSet.has(edge.to)) ? 'hot' : '';
+        return `<span class="war-dot origin ${hot}" style="left:${points.x1}%;top:${points.y1}%"></span>
+          <span class="war-dot target ${hot}" style="left:${points.x2}%;top:${points.y2}%"></span>`;
       }).join('');
     }
 
