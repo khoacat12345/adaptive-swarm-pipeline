@@ -1,10 +1,11 @@
 # Adaptive Swarm Pipeline v2.1 — Technical Specification
 
-> **Status:** Draft for implementation; M1-M4 core implemented
+> **Status:** Draft for implementation; M1-M5 acceptance harness implemented;
+> live free-model pilot/soak remains an operator run
 > **Supersedes:** `SWARM_V2_ARCHITECTURE_DRAFT.md`
 > **Scope:** autonomous overnight execution with strict isolation and per-phase budget control
 > **Priority order:** safe isolation → budget enforcement → resumability → planning quality → UI
-> **Implementation:** `.agents/v2/` (`isolation.py`, `budget.py`, `state.py`, `plan.py`, `planning.py`, `signoff.py`, `execution.py`, `adapters.py`, `web.py`, `runner.py`, `run.py`)
+> **Implementation:** `.agents/v2/` (`isolation.py`, `budget.py`, `state.py`, `plan.py`, `planning.py`, `signoff.py`, `execution.py`, `adapters.py`, `models.py`, `web.py`, `runner.py`, `run.py`)
 
 ---
 
@@ -1048,23 +1049,26 @@ deleting the worktree or resetting the main repo.
 .agents/v2/signoff.py     immutable signoff record and reapproval checks
 .agents/v2/execution.py   apply, test integrity, cross-family review, veto/repair
 .agents/v2/adapters.py    OpenCode coder/reviewer bridge for live M3.5 runs
+.agents/v2/models.py      catalog/auth-aware free and explicit provider selection
 .agents/v2/web.py         /v2 sign-off/run page + runs/signoff/control endpoints
 .agents/v2/runner.py      prepare/plan/signoff/checkpoint/quarantine/handoff/control
 .agents/v2/run.py         prepare/plan/signoff/execute/status/handoff CLI
 .agents/tests/test_v2_m1.py  isolation/budget/state tests
 .agents/tests/test_v2_m2.py  plan/council/signoff/web/control tests
 .agents/tests/test_v2_m3.py  execution/review/veto/integrity/budget/adapter tests
+.agents/tests/test_v2_m5.py  provider/cost/multi-phase/wall/fault tests
 ```
 
-M1-M4 tests use temporary Git repositories and deterministic fake
+M1-M5 tests use temporary Git repositories and deterministic fake
 planners/coders/reviewers; no model is called. v1 remains the default execution
-path. Current acceptance: M1 `43/43`, M2 `38/38`, M3 `24/24`. The dashboard
-exposes `/v2` and `/api/v2/runs`, `/api/v2/runs/<id>`,
+path. Current acceptance: M1 `43/43`, M2 `38/38`, M3 `24/24`, M5 `14/14`. The
+dashboard exposes `/v2` and `/api/v2/runs`, `/api/v2/runs/<id>`,
 `/api/v2/runs/<id>/plan`, `/api/v2/signoff`, `/api/v2/control`; approval and
 control use the run-local token. M3 uses `safe_writer.Transaction`, per-phase
 budget reservations, test-file hashing, cross-family checks and a security hard
 veto. M3.5 adds an OpenCode worker bridge; M4 adds pause/resume/stop/accept and
-handoff status to the local page.
+handoff status to the local page. M5 adds catalog-aware free selection, paid-cost
+blocking, wall-clock enforcement and multi-phase/fault acceptance tests.
 
 ---
 

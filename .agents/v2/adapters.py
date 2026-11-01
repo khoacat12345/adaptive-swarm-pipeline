@@ -15,9 +15,9 @@ from typing import Any, Mapping
 
 from .errors import ExecutionError
 from .execution import ExecutionSeat, model_family
+from .models import is_free, select_free_seats, validate_explicit
 
-# Free-only defaults for the explicit ``--free`` path. They are still passed
-# through the worker layer; callers can override every model.
+# Emergency fallback only; the preferred path resolves from .agents/config.json.
 FREE_MODELS = {
     "coder": "opencode/glm-5.3-flash-free",
     "security": "opencode/nemotron-3.5-super-vl-free",
@@ -177,21 +177,41 @@ def build_worker_seats(
     sandbox_root: str | Path,
     coder_kind: str = "agentic",
     timeout: int = 300,
+    config: Mapping[str, Any] | None = None,
+    paid_cost_usd: float = 0.0,
+    free_only: bool = False,
 ) -> tuple[ExecutionSeat, dict[str, ExecutionSeat]]:
+    if config is not None:
+        validate_explicit(coder_model, reviewer_models, config, free_only=free_only)
     coder_backend = WorkersCoderAdapter(
         coder_model, kind=coder_kind, sandbox_root=sandbox_root, timeout=timeout
     )
-    coder = ExecutionSeat("coder", coder_model, model_family(coder_model), coder_backend)
+    coder_free = is_free(coder_model, config or {})
+    coder = ExecutionSeat(
+        "coder",
+        coder_model,
+        model_family(coder_model),
+        coder_backend,
+        is_free=coder_free,
+        cost_usd=0.0 if coder_free else max(0.0, float(paid_cost_usd)),
+    )
     reviewers: dict[str, ExecutionSeat] = {}
     for role, model in reviewer_models.items():
+        free = is_free(str(model), config or {})
         reviewers[str(role)] = ExecutionSeat(
             str(role),
             str(model),
             model_family(str(model)),
             WorkersReviewerAdapter(str(role), str(model), timeout=timeout),
+            is_free=free,
+            cost_usd=0.0 if free else max(0.0, float(paid_cost_usd)),
         )
     return coder, reviewers
 
 
 def free_reviewer_models() -> dict[str, str]:
     return {role: FREE_MODELS[role] for role in ("security", "qa", "perf", "docs")}
+
+
+def free_seats_from_config(config: Mapping[str, Any]) -> tuple[str, dict[str, str]]:
+    return select_free_seats(config)

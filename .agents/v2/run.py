@@ -72,7 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     execute.add_argument("--reviewer", action="append", default=[],
                          help="role=model; repeat for security, qa, perf, docs")
     execute.add_argument("--free", action="store_true",
-                         help="use the free-only coder/reviewer defaults")
+                         help="select free models from .agents/config.json")
+    execute.add_argument("--paid-cost", type=float, default=0.0,
+                         help="max USD estimate per paid call; paid models stay blocked at 0")
     execute.add_argument("--timeout", type=int, default=300)
 
     handoff = sub.add_parser("handoff")
@@ -129,16 +131,31 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "execute":
-        from v2.adapters import FREE_MODELS, build_worker_seats, free_reviewer_models
+        from v2.adapters import FREE_MODELS, build_worker_seats, free_seats_from_config
         from v2.execution import ExecutionEngine
+        from v2.models import load_config
 
-        reviewer_models = free_reviewer_models() if args.free else {}
+        config = None
+        try:
+            config = load_config(args.root)
+        except Exception:
+            config = None
+        reviewer_models: dict[str, str] = {}
+        coder_model = args.coder_model
+        if args.free:
+            if config is not None:
+                coder_model, reviewer_models = free_seats_from_config(config)
+            else:
+                coder_model = FREE_MODELS["coder"]
+                reviewer_models = {
+                    role: FREE_MODELS[role]
+                    for role in ("security", "qa", "perf", "docs")
+                }
         for item in args.reviewer:
             if "=" not in item:
                 raise SystemExit(f"bad --reviewer value: {item!r}; use role=model")
             role, model = item.split("=", 1)
             reviewer_models[role.strip()] = model.strip()
-        coder_model = args.coder_model or (FREE_MODELS["coder"] if args.free else None)
         if not coder_model:
             raise SystemExit("execute needs --coder-model or --free")
         missing = [role for role in ("security", "qa", "perf", "docs")
@@ -152,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
             sandbox_root=store.run_dir / "coder_sandbox",
             coder_kind=args.coder_kind,
             timeout=args.timeout,
+            config=config,
+            paid_cost_usd=args.paid_cost,
+            free_only=args.free,
         )
         result = ExecutionEngine(runner).execute(
             args.run_id, coder=coder, reviewers=reviewers

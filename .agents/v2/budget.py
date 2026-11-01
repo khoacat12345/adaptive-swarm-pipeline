@@ -384,6 +384,10 @@ class BudgetController:
             phase = self._phase(phase_id)
             self._check_requests(phase, int(requests), allow_emergency=allow_emergency)
             self._check_cost(phase, cost)
+            if self._elapsed() >= self.config.envelope.max_wall_seconds:
+                raise BudgetExceeded(
+                    f"global wall-clock cap reached: {self._elapsed():.1f}s"
+                )
             if self._wall_remaining(phase_id) < max(0.0, float(wall_seconds)):
                 raise BudgetExceeded(
                     f"not enough wall time for phase {phase_id}: "

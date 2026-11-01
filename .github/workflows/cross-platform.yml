@@ -29,6 +29,8 @@ jobs:
         run: python .agents/tests/test_v2_m2.py
       - name: V2 M3 execution and integrity
         run: python .agents/tests/test_v2_m3.py
+      - name: V2 M5 provider/cost/soak
+        run: python .agents/tests/test_v2_m5.py
       - name: Skill consistency
         run: python .agents/tests/test_skill_consistency.py
       - name: Wave reviewer / fail-closed

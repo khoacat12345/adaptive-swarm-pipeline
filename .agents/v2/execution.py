@@ -19,6 +19,7 @@ from typing import Any, Callable, Mapping, Protocol
 from . import isolation
 from .budget import BudgetConfig, BudgetController
 from .errors import (
+    BudgetBlocked,
     BudgetError,
     CrossFamilyError,
     ExecutionError,
@@ -72,6 +73,8 @@ class ExecutionSeat:
     model: str
     family: str
     backend: Any
+    is_free: bool = True
+    cost_usd: float = 0.0
 
 
 @dataclass
@@ -328,20 +331,25 @@ class ExecutionEngine:
         *,
         repair: bool = False,
     ) -> Any:
+        if not seat.is_free and seat.cost_usd <= 0:
+            raise BudgetBlocked(
+                f"paid model requires an explicit cost estimate: {seat.model}"
+            )
+        cost = max(0.0, float(seat.cost_usd))
         reservation = budget.reserve(
             phase_id,
             role=seat.role,
             model=seat.model,
-            cost_usd=0.0,
+            cost_usd=cost,
             repair=repair,
         )
         try:
             result = fn()
-            budget.settle(reservation, requests=1, cost_usd=0.0)
+            budget.settle(reservation, requests=1, cost_usd=cost)
             return result
         except Exception:
             try:
-                budget.settle(reservation, requests=1, cost_usd=0.0)
+                budget.settle(reservation, requests=1, cost_usd=cost)
             except Exception:
                 pass
             raise
