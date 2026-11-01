@@ -1,10 +1,10 @@
 # Adaptive Swarm Pipeline v2.1 — Technical Specification
 
-> **Status:** Draft for implementation; M1 and M2 core implemented
+> **Status:** Draft for implementation; M1, M2 and M3 core implemented
 > **Supersedes:** `SWARM_V2_ARCHITECTURE_DRAFT.md`
 > **Scope:** autonomous overnight execution with strict isolation and per-phase budget control
 > **Priority order:** safe isolation → budget enforcement → resumability → planning quality → UI
-> **Implementation:** `.agents/v2/` (`isolation.py`, `budget.py`, `state.py`, `plan.py`, `planning.py`, `signoff.py`, `web.py`, `runner.py`, `run.py`)
+> **Implementation:** `.agents/v2/` (`isolation.py`, `budget.py`, `state.py`, `plan.py`, `planning.py`, `signoff.py`, `execution.py`, `web.py`, `runner.py`, `run.py`)
 
 ---
 
@@ -1046,18 +1046,22 @@ deleting the worktree or resetting the main repo.
 .agents/v2/plan.py        master plan schema, DAG/path/budget validation, hashes
 .agents/v2/planning.py    3-seat council, critique round, Lead synthesis
 .agents/v2/signoff.py     immutable signoff record and reapproval checks
+.agents/v2/execution.py   apply, test integrity, cross-family review, veto/repair
 .agents/v2/web.py         /v2 sign-off page + /api/v2 runs/signoff endpoints
 .agents/v2/runner.py      prepare/plan/signoff/checkpoint/quarantine/handoff
 .agents/v2/run.py         prepare/plan/signoff/status/handoff CLI
 .agents/tests/test_v2_m1.py  isolation/budget/state tests
 .agents/tests/test_v2_m2.py  plan/council/signoff/web tests
+.agents/tests/test_v2_m3.py  execution/review/veto/integrity/budget tests
 ```
 
-M1/M2 tests use temporary Git repositories and deterministic fake planners;
-no model is called. v1 remains the default execution path. Current acceptance:
-M1 `43/43`, M2 `35/35`. The dashboard exposes `/v2` and `/api/v2/runs`,
-`/api/v2/runs/<id>`, `/api/v2/runs/<id>/plan`, `/api/v2/signoff`; approval uses
-the run-local sign-off token. M3 is the first milestone allowed to call a coder.
+M1-M3 tests use temporary Git repositories and deterministic fake
+planners/coders/reviewers; no model is called. v1 remains the default execution
+path. Current acceptance: M1 `43/43`, M2 `35/35`, M3 `20/20`. The dashboard
+exposes `/v2` and `/api/v2/runs`, `/api/v2/runs/<id>`,
+`/api/v2/runs/<id>/plan`, `/api/v2/signoff`; approval uses the run-local
+sign-off token. M3 uses `safe_writer.Transaction`, per-phase budget reservations,
+test-file hashing, cross-family checks and a security hard veto.
 
 ---
 

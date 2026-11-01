@@ -69,3 +69,23 @@ class ManifestError(V2Error):
 
 class PlanChangedError(V2Error):
     code = "PLAN_MISMATCH"
+
+
+class ExecutionError(V2Error):
+    code = "EXECUTION_ERROR"
+
+
+class CrossFamilyError(ExecutionError):
+    code = "CROSS_FAMILY_REQUIRED"
+
+
+class TestIntegrityError(ExecutionError):
+    code = "TEST_TAMPER"
+
+
+class SecurityVeto(ExecutionError):
+    code = "SECURITY_VETO"
+
+
+class NoProgressError(ExecutionError):
+    code = "NO_PROGRESS"

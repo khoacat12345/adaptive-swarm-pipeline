@@ -96,6 +96,7 @@ python3 .agents/tests/test_adapter.py
 python3 .agents/tests/test_model_selector.py
 python3 .agents/tests/test_v2_m1.py
 python3 .agents/tests/test_v2_m2.py
+python3 .agents/tests/test_v2_m3.py
 python3 .agents/tests/test_phase4.py --fast
 ```
 
