@@ -37,6 +37,8 @@ jobs:
         run: python .agents/tests/test_v2_adaptive.py
       - name: V2 adaptive flags
         run: python -m unittest discover -s .agents/tests -p "test_v2_adaptive_flags.py"
+      - name: V2 repo map planning
+        run: python -m unittest discover -s .agents/tests -p "test_v2_planner_repo_map.py"
       - name: Skill consistency
         run: python .agents/tests/test_skill_consistency.py
       - name: Wave reviewer / fail-closed

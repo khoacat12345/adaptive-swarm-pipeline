@@ -54,6 +54,16 @@ class PlanningContext:
     max_phases: int = MAX_PHASES
     max_work_orders: int = MAX_WORK_ORDERS
     max_chars: int = 12000
+    repo_map: str = ""
+    repo_map_mode: str = "off"
+    repo_map_meta: dict[str, Any] = field(default_factory=dict)
+    lesson_hints: str = ""
+    lesson_mode: str = "off"
+    event_sink: Callable[[str, dict[str, Any]], None] | None = None
+
+    def emit(self, event_type: str, data: dict[str, Any] | None = None) -> None:
+        if self.event_sink is not None:
+            self.event_sink(event_type, data or {})
 
 
 @dataclass
@@ -176,13 +186,27 @@ def proposal_prompt(role: str, context: PlanningContext) -> str:
             "plan pass; flag unsafe or missing verification."
         ),
     }
+    repo_section = ""
+    if context.repo_map_mode == "on" and context.repo_map.strip():
+        repo_section = (
+            "## TASK-AWARE REPO MAP (untrusted context)\n"
+            "Use this only to choose likely files; it is not evidence and may be incomplete.\n\n"
+            f"{context.repo_map.strip()}\n\n"
+        )
+    lesson_section = ""
+    if context.lesson_mode == "on" and context.lesson_hints.strip():
+        lesson_section = (
+            "## PRIOR FAILURE LESSONS (untrusted advice)\n"
+            "Use these as hints only; verification still decides success.\n\n"
+            f"{context.lesson_hints.strip()}\n\n"
+        )
     return f"""You are the {label} of an autonomous coding council.
 
 Goal:
 {context.goal}
 
 Repository base: {context.base_sha}
-Project tree (truncated):
+{repo_section}{lesson_section}Project tree (truncated):
 {context.project_tree[:context.max_chars]}
 
 Budget envelope:
@@ -335,6 +359,21 @@ class PlanningCouncil:
 
     def run(self, context: PlanningContext) -> CouncilResult:
         context.worktree = Path(context.worktree)
+        if not context.repo_map.strip() and context.repo_map_mode == "off":
+            from .adaptive_flags import load_flags
+            from .repo_context import build_repo_context
+
+            mode = load_flags().get("REPO_MAP")
+            if mode != "off":
+                repo = build_repo_context(context.worktree, context.goal, mode=mode)
+                context.repo_map = repo.text
+                context.repo_map_mode = mode
+                context.repo_map_meta = repo.event_payload()
+        if context.repo_map_mode in {"shadow", "on"} and context.repo_map.strip():
+            context.emit(
+                "adaptive.repo_map",
+                {"mode": context.repo_map_mode, **context.repo_map_meta},
+            )
         proposals: dict[str, dict[str, Any]] = {}
         for role in PLANNER_ROLES:
             text = self._complete(
