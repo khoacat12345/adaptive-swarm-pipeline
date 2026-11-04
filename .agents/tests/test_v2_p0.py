@@ -15,8 +15,6 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-import yaml  # noqa: E402
-
 from v2.constitution import constitution_hash, load_constitution  # noqa: E402
 from v2.errors import PlanChangedError  # noqa: E402
 from v2.plan import validate_plan  # noqa: E402
@@ -120,7 +118,7 @@ def test_tasks_bridge(checks: Checks) -> None:
         base = prepared["workspace"]["base_sha"]
         tasks = valid_tasks(run_id, base)
         tasks_path = root / "specs" / "demo" / "tasks.yaml"
-        tasks_path.write_text(yaml.safe_dump(tasks, sort_keys=False), encoding="utf-8")
+        tasks_path.write_text(json.dumps(tasks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
         bridged = bridge_spec_kit(
             root, tasks_path, run_id=run_id, base_sha=base,
