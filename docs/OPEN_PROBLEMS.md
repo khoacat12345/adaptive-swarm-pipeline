@@ -240,6 +240,16 @@
 
 ---
 
+### P2-10 - research shortlist: adaptive open-source patterns
+
+- **Status:** watchlist
+- **Area:** research
+- **Reference:** [`docs/RESEARCH_BACKLOG.md`](RESEARCH_BACKLOG.md)
+- **Top picks after P0:** aider repo map, SWE-agent ACI, mem0-style failure memory, Letta-style tiered memory.
+- **Rule:** extract mechanisms only; do not add DSPy/Mem0/Letta/LiteLLM/AutoGen as runtime dependencies without separate approval.
+
+---
+
 ## Spec Kit pending checklist
 
 When the repo is installed, inspect and record:

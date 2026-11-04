@@ -32,7 +32,8 @@ Details: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Constitution:
 [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md). Tasks schema:
 [`docs/schemas/tasks.schema.json`](docs/schemas/tasks.schema.json). Release
 notes: [`docs/RELEASE_v2.1.0.md`](docs/RELEASE_v2.1.0.md). Known gaps and the
-next fix batches: [`docs/OPEN_PROBLEMS.md`](docs/OPEN_PROBLEMS.md).
+next fix batches: [`docs/OPEN_PROBLEMS.md`](docs/OPEN_PROBLEMS.md). Research
+shortlist: [`docs/RESEARCH_BACKLOG.md`](docs/RESEARCH_BACKLOG.md).
 
 ## Why
 
