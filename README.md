@@ -29,7 +29,8 @@ python .agents/v2/run.py execute --run-id <id> --free
 ```
 
 Details: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Release notes:
-[`docs/RELEASE_v2.1.0.md`](docs/RELEASE_v2.1.0.md).
+[`docs/RELEASE_v2.1.0.md`](docs/RELEASE_v2.1.0.md). Known gaps and the next
+fix batches: [`docs/OPEN_PROBLEMS.md`](docs/OPEN_PROBLEMS.md).
 
 ## Why
 
