@@ -4,7 +4,25 @@
 > swarm control plane.
 > Rule: **extract ideas, not frameworks**. No dependency is added without a
 > separate approval and a safety review.
-> Last updated: 2026-11-04
+> Last verified: 2026-11-04 (repository locations and feature claims checked on
+> GitHub).
+
+## Verification notes
+
+- `aider` now lives at `Aider-AI/aider`.
+- `SWE-agent` now lives at `SWE-agent/SWE-agent`.
+- `OpenHands` now lives at `OpenHands/OpenHands`.
+- `Roo-Code` now lives at `RooCodeInc/Roo-Code`.
+- `Letta`'s current source lives at `letta-ai/letta-code`; `letta` still
+  describes the memory-first agent platform.
+- `microsoft/autogen` is **archived** and points to `microsoft/agent-framework`.
+  Use its group-chat/speaker-selection *ideas* only.
+- `Significant-Gravitas/AutoGPT` is now a platform; the benchmark is the
+  separate `agbenchmark` package. Do not call AutoGPT itself an eval harness.
+- `DSPy` is a framework. Treat it as an offline experiment, not a runtime
+  dependency.
+- Repo-map token savings are workload-dependent; measure before claiming a
+  percentage.
 
 ## Selection criteria
 
@@ -22,43 +40,81 @@ framework to the runtime.
 
 ---
 
-## Top 10 — primary shortlist
+## Top 10 — one feature selected per repository
 
-| # | Repository | Pattern to study | Fit | Priority | What to keep | What not to copy |
-|---|---|---|---|---|---|---|
-| 1 | `paul-gauthier/aider` | Tree-sitter repo map / symbol graph | Planner and coder context selection | **P0 next** | Rank symbols by relevance to the task; send a compact map; cap tokens | Do not paste the whole repo; do not assume map equals correctness |
-| 2 | `princeton-nlp/SWE-agent` | Agent-Computer Interface (ACI) | Command/action safety | **P0/P1** | Narrow, typed actions; explicit observation format; no free shell | Do not let the agent invent commands outside the allowlist |
-| 3 | `stanfordnlp/dspy` | Metric-driven prompt optimization | Offline prompt improvement | **P2 research** | Use verify pass/fail as a metric; optimize offline; compare against baseline | Not automatic "self-evolution"; needs datasets, training cost and approval |
-| 4 | `mem0ai/mem0` | Failure-learned memory | Coder hints / reviewer memory | **P1** | Store failure signature -> lesson -> relevant files/tests; inject only high-confidence tips | Do not store secrets or raw code; do not let memory override verify |
-| 5 | `All-Hands-AI/OpenHands` | Event-stream action/observation ledger | Replay and audit | **P1/P2** | Action -> observation -> event; stable event IDs; replayable state | Our ledger already covers much of this; do not replace it |
-| 6 | `letta-ai/letta` | Tiered memory (working/recall/archival) | Long-run context management | **P1/P2** | Separate hot context from project archive; explicit recall policy | Do not add a memory server for a local one-user harness |
-| 7 | `BerriAI/litellm` | Gateway, budget and fallback metadata | Provider gateway | **P2** | Normalize model IDs, usage and fallback events; budget headers | 9Router/OpenCode already cover transport; avoid duplicate gateway |
-| 8 | `Roo-Code/Roo-Code` | Persona/role boundaries | Role policy and permissions | **P2** | Hard capability matrix per role (read-only reviewer, writer=Lead) | We already enforce this in the execution engine; do not fork the IDE |
-| 9 | `microsoft/autogen` | Dynamic speaker selection | Meeting/wave routing | **P2** | Choose the next role based on evidence, not a fixed turn order | Do not import the framework; our meeting state machine is enough |
-| 10 | `Significant-Gravitas/AutoGPT` | Benchmark / eval harness | Regression confidence | **P2** | Fixed tasks, success/cost/time metrics, baseline comparison | Do not adopt its agent runtime |
+| # | Repository | Selected feature | Why it fits | Priority | Guardrail |
+|---|---|---|---|---|---|
+| 1 | `Aider-AI/aider` | **Repo Map**: tree-sitter symbols + relevance ranking + token cap | Planner chooses target files without dumping the repo | **P0 next** | Cap tokens; exclude secrets; measure accuracy on this repo |
+| 2 | `SWE-agent/SWE-agent` | **ACI**: typed actions + structured observations; no free shell | Aligns with `system_bot`/worktree safety | **P0/P1** | Deny-by-default action allowlist; no mid-run shell invention |
+| 3 | `stanfordnlp/dspy` | **Optimizer**: metric-driven prompt/few-shot tuning | Improves prompts only after a baseline exists | **P1 research / P2 runtime** | Offline only; dataset + cost + approval required |
+| 4 | `mem0ai/mem0` | **Context-aware memory**: extract useful lessons, retrieve only relevant ones | Turn repeated failures into hints | **P1** | Local JSONL first; no secrets/raw code; memory cannot override verify |
+| 5 | `OpenHands/OpenHands` | **Event stream**: action -> observation -> status event | Improves replay/audit beyond current ledger | **P1/P2** | Add fields, do not replace ledger; Docker sandbox later |
+| 6 | `letta-ai/letta-code` | **Tiered memory**: working / recall / archival | Keeps 8–10h context bounded | **P1/P2** | Start as local context policy; no memory server |
+| 7 | `BerriAI/litellm` | **Router metadata**: fallback, budget headers, usage | We already have 9Router/OpenCode; borrow metadata model | **P2** | Do not add a second gateway by default |
+| 8 | `RooCodeInc/Roo-Code` | **Custom modes**: role-specific tools and boundaries | Hard policy profiles for planner/coder/reviewer | **P2** | Encode in our policy config, not IDE fork |
+| 9 | `microsoft/autogen` (archived) | **Group-chat speaker selection**: pick next role by evidence | Could improve meeting/wave routing | **P2** | Concept only; do not import archived framework |
+| 10 | `Significant-Gravitas/AutoGPT` / `agbenchmark` | **Benchmark harness**: fixed tasks + success/cost/time metrics | Prevents “better” releases without evidence | **P2** | Use SWE-bench/own tasks; do not adopt AutoGPT runtime |
 
 ## Next 5 — watchlist only
 
 | # | Repository | Pattern | Why defer |
 |---|---|---|---|
-| 11 | `tree-sitter/tree-sitter` | Actual parser used by repo-map implementations | Adds a native dependency; use Python `ast` for Python-only first |
-| 12 | `SWE-bench/SWE-bench` | Real issue-resolution benchmark | Heavy setup; useful after live pilot |
+| 11 | `tree-sitter/tree-sitter` | Parser for multi-language repo maps | Native dependency; start with Python `ast` |
+| 12 | `SWE-bench/SWE-bench` | Real issue-resolution benchmark | Heavy setup; after live pilot |
 | 13 | `sweepai/sweep` | Issue -> PR workflow | Product overlap; study handoff UX |
-| 14 | `AgentOps-AI/agentops` / `langfuse/langfuse` | Tracing and eval observability | Our ledger is local; add only if multi-run debugging demands it |
-| 15 | `geekan/MetaGPT` / `OpenBMB/ChatDev` | Company-style role decomposition | Conceptual overlap with planning council; no runtime import |
+| 14 | `AgentOps-AI/agentops` / `langfuse/langfuse` | Tracing/eval observability | Local ledger may be enough |
+| 15 | `geekan/MetaGPT` / `OpenBMB/ChatDev` | Company-style role decomposition | Conceptual overlap with planning council |
 
 ---
 
-## Recommended order after Spec Kit P0
+## Implementation order (features, not repos)
 
-1. **Aider repo map** — biggest immediate token/context win.
-2. **SWE-agent ACI** — strengthen the action boundary and observation contract.
-3. **Mem0-style failure memory** — local JSONL first, no vector service required.
-4. **Letta-style tiered memory** — only after failure memory proves useful.
-5. **DSPy-style offline experiments** — after there is a benchmark set and a
-   frozen baseline; never mutate production prompts automatically.
-6. **LiteLLM/AutoGen/AutoGPT ideas** — only when provider or evaluation scale
-   demands it.
+### P0 — next two features
+
+1. **Repo Map** (`aider` mechanism)
+   - Python `ast` first; tree-sitter only if multi-language is required.
+   - Input: task + repo tree.
+   - Output: ranked symbols/files within a token cap.
+   - Test: target-file recall on known tasks; no secrets.
+
+2. **ACI / action-observation contract** (`SWE-agent` mechanism)
+   - Define allowed actions: read, search, open, patch, verify.
+   - Every action returns a compact structured observation.
+   - No raw shell; all commands pass `system_bot`.
+   - Test: unsafe command is rejected; malformed observation fails closed.
+
+### P1 — memory and replay
+
+3. **Failure lessons memory** (`mem0` mechanism)
+   - Store: `failure_signature -> cause -> fix -> files/tests`.
+   - Retrieve by file/symbol/task similarity.
+   - Seed from existing `ledger.jsonl` and `memory.py`.
+
+4. **Tiered context** (`letta` mechanism)
+   - Working: current phase.
+   - Recall: recent failures/decisions.
+   - Archival: constitution/spec/plan/lessons.
+   - Inject only on demand with provenance.
+
+5. **Event schema extension** (`OpenHands` mechanism)
+   - Add action/observation/status fields to existing ledger.
+   - Keep replay compatibility; do not replace the ledger.
+
+### P2 — optimization and scale
+
+6. **DSPy-style offline optimizer** — only after a frozen benchmark.
+7. **Gateway metadata** (`LiteLLM` ideas) — fallback/cost fields, not a new proxy.
+8. **Role modes** (`Roo-Code` ideas) — policy presets, not IDE extension.
+9. **Speaker selection** (`AutoGen` concept) — only if meeting routing becomes a bottleneck.
+10. **Benchmark harness** (`SWE-bench`/`agbenchmark`) — eval after pilot.
+
+## Do not take
+
+- Spec Kit Git extension — conflicts with worktree/checkpoint/handoff.
+- Prose `tasks.md` parser — use canonical `tasks.yaml`.
+- Spec Kit free-form execution model — keep `safe_writer`, budget, verify.
+- DSPy/Mem0/Letta/LiteLLM/AutoGen as runtime dependencies now.
+- AutoGPT as an eval harness — use `agbenchmark`/SWE-bench/own tests.
 
 ## Guardrails for every adoption
 
@@ -80,11 +136,13 @@ OpenHands events      -> ledger event schema + replay
 litellm ideas         -> models.py gateway metadata (not transport)
 Roo role modes        -> presets/policy profiles
 autogen speaker       -> meeting policy
-AutoGPT eval          -> tests/eval harness
+AutoGPT/agbenchmark   -> tests/eval harness
 ```
 
 ## Decision
 
-Study **aider ACI/repo map** and **SWE-agent ACI** first.
-Do **not** add DSPy, Mem0, Letta, LiteLLM or AutoGen as runtime dependencies in
-this phase.
+Study **aider repo map** and **SWE-agent ACI** first.
+
+DSPy stays **P1 research / P2 runtime** until there is a benchmark baseline and
+budget for offline optimization. Do not add any of these frameworks to the
+runtime in this phase.
