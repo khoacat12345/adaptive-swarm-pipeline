@@ -101,6 +101,7 @@ python3 .agents/tests/test_v2_m5.py
 python3 .agents/tests/test_v2_p0.py
 python3 .agents/tests/test_v2_adaptive_flags.py
 python3 .agents/tests/test_v2_planner_repo_map.py
+python3 .agents/tests/test_v2_aci_integration.py
 python3 .agents/tests/test_v2_adaptive.py
 python3 .agents/tests/test_phase4.py --fast
 ```

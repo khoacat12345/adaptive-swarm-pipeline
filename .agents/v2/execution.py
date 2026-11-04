@@ -281,13 +281,25 @@ class ExecutionEngine:
         if set(files) - set(targets):
             raise TestIntegrityError("coder touched files outside the work order")
         self._check_test_integrity(worktree, files, test_hashes)
+        old_files: dict[str, str] = {}
         diff_parts: list[str] = []
         for relative, content in files.items():
             target = (worktree / relative).resolve()
             if not isolation._is_within(target, worktree):
                 raise ExecutionError(f"path escapes worktree: {relative}")
             old = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
+            old_files[relative] = old
             diff_parts.append(_diff(old, str(content), relative))
+        from .aci_context import validate_proposed_files
+        from .adaptive_flags import load_flags
+
+        aci_mode = load_flags().get("ACI")
+        if aci_mode in {"shadow", "on"}:
+            validation = validate_proposed_files(
+                worktree, old_files, files, work_order, test_hashes=test_hashes
+            )
+            if aci_mode == "on" and not validation.ok:
+                raise ExecutionError("ACI validation failed: " + "; ".join(validation.issues[:8]))
 
         import safe_writer  # type: ignore
 
