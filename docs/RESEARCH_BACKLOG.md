@@ -24,6 +24,65 @@
 - Repo-map token savings are workload-dependent; measure before claiming a
   percentage.
 
+## Local source findings (downloaded repos)
+
+These are the parts that are **not obvious from README** and matter for our
+design:
+
+### aider — `aider/repomap.py`
+
+- Repo map is not just "list symbols": it builds a symbol/reference graph and
+  uses **personalized PageRank** (`networkx.pagerank`) to rank definitions.
+- It caches tree-sitter tags with mtime checks and has a map cache.
+- It uses the model tokenizer, not a character approximation, and keeps a hard
+  map-token budget.
+- **Gap in our primitive:** `RepoMapper` currently uses AST + term scoring only.
+  Next upgrade: PageRank over file/import/symbol edges + cache + exact token cap.
+
+### SWE-agent — `tools/`
+
+- Real ACI is a bundle of scripts, not a prompt: `windowed` (`open`, `goto`,
+  `scroll_up/down`), `search` (`find_file`, `search_file`, `search_dir`),
+  `edit_*` with linting, and `submit`.
+- `windowed_file.py` keeps numbered line windows; observations are compact.
+- `windowed_edit_linting` validates the edit and helps reject malformed/ambiguous
+  replacements.
+- **Gap in our primitive:** `ActionPolicy` has list/read/search/verify, but no
+  line-window viewer, no edit uniqueness validation and no submit gate.
+
+### mem0 — `mem0/memory/main.py`
+
+- `Memory.add` can extract facts with an LLM and decide **ADD / UPDATE / DELETE**
+  against related memories, with entity linking and hybrid keyword/semantic
+  search.
+- It is more than a vector store; the valuable part is the **memory mutation
+  policy**.
+- **Gap in our primitive:** `LessonStore` is append-only. Add dedupe by
+  signature, latest-fix/supersede semantics, confidence and provenance.
+
+### Letta — `letta-code`
+
+- The current implementation is an agent harness with memory blocks and
+  context/archival management, not a small Python memory library.
+- **Gap in our primitive:** `ContextPacker` is a static token packer. Add
+  per-tier budgets and eviction policy before using it for 8–10h runs.
+
+### OpenHands — event/action architecture
+
+- The valuable boundary is action -> observation -> event with a canonical SDK
+  stream. Docker sandbox is useful but heavier than our worktree.
+- **Gap:** our `adaptive_event` needs stable event IDs, action references and
+  replay compatibility with the existing ledger.
+
+### LiteLLM / Roo-Code / AutoGen / AutoGPT
+
+- LiteLLM: mature router/fallback/budget; we already have 9Router/OpenCode, so
+  only borrow metadata fields.
+- Roo-Code: modes are **tool permission groups**, not just prompt personas.
+- AutoGen: archived; group-chat selector is concept-only.
+- AutoGPT: benchmark is `agbenchmark`; our `run_benchmark` is a lightweight
+  local equivalent, not AutoGPT runtime.
+
 ## Selection criteria
 
 A repository is worth studying only if it improves one of these:
