@@ -242,7 +242,7 @@
 
 ### P2-10 - research shortlist: adaptive open-source patterns
 
-- **Status:** watchlist
+- **Status:** P0-P2 primitives implemented; live validation pending
 - **Area:** research
 - **Reference:** [`docs/RESEARCH_BACKLOG.md`](RESEARCH_BACKLOG.md)
 - **Top picks after P0:** aider repo map, SWE-agent ACI, mem0-style failure memory, Letta-style tiered memory.

@@ -99,6 +99,7 @@ python3 .agents/tests/test_v2_m2.py
 python3 .agents/tests/test_v2_m3.py
 python3 .agents/tests/test_v2_m5.py
 python3 .agents/tests/test_v2_p0.py
+python3 .agents/tests/test_v2_adaptive.py
 python3 .agents/tests/test_phase4.py --fast
 ```
 

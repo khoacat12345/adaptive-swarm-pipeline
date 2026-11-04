@@ -33,6 +33,8 @@ jobs:
         run: python .agents/tests/test_v2_m5.py
       - name: V2 P0 Spec Kit bridge
         run: python .agents/tests/test_v2_p0.py
+      - name: V2 adaptive toolkit P0-P2
+        run: python .agents/tests/test_v2_adaptive.py
       - name: Skill consistency
         run: python .agents/tests/test_skill_consistency.py
       - name: Wave reviewer / fail-closed
