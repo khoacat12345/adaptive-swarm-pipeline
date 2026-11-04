@@ -67,15 +67,29 @@ design:
 
 - The current implementation is an agent harness with memory blocks and
   context/archival management, not a small Python memory library.
+- `memory-constraints.ts` enforces concrete limits: `maxDepth=2`,
+  `maxFileCharacters=20_000`, `maxCoreMemoryCharacters=65_536`,
+  `fileCharacterLimits`, and `readOnlyFiles`.
+- Memory is **git-backed**, with commit-time constraints and a conflict-repair
+  claim protocol (attempt token, process liveness, file lock).
+- `memory-frontmatter.ts` treats `read_only` and other metadata as protected
+  fields that the agent may not silently rewrite.
 - **Gap in our primitive:** `ContextPacker` is a static token packer. Add
-  per-tier budgets and eviction policy before using it for 8–10h runs.
+  per-tier/per-file budgets, read-only memory files and conflict/attempt
+  semantics before using it for 8–10h runs.
 
 ### OpenHands — event/action architecture
 
-- The valuable boundary is action -> observation -> event with a canonical SDK
-  stream. Docker sandbox is useful but heavier than our worktree.
-- **Gap:** our `adaptive_event` needs stable event IDs, action references and
-  replay compatibility with the existing ledger.
+- This checkout is the Agent Canvas/frontend, not the backend SDK. The useful
+  contract is still visible:
+  - `EventSearchOptions`: pagination (`pageId`/`limit`), timestamp filters,
+    `strictPagination` to avoid mistaking a partial page for exhaustion.
+  - `AgentState`: includes `rate_limited`, `awaiting_user_confirmation`,
+    `user_confirmed`, `user_rejected` in addition to running/paused/stopped.
+  - `ConversationStatus` is separate from agent state.
+- Docker sandbox is useful but heavier than our worktree.
+- **Gap:** our `adaptive_event` has no stable event ID/pagination semantics, and
+  our state machine lacks `rate_limited`/explicit user-confirmation states.
 
 ### LiteLLM / Roo-Code / AutoGen / AutoGPT
 
@@ -128,6 +142,18 @@ framework to the runtime.
 | 15 | `geekan/MetaGPT` / `OpenBMB/ChatDev` | Company-style role decomposition | Conceptual overlap with planning council |
 
 ---
+
+## New source-level priorties (after current primitives)
+
+1. **Letta memory constraints**: per-file/core character caps, read-only memory
+   files and conflict/attempt markers.
+2. **Mem0 mutation policy**: add delete/supersede and conflict handling on top of
+   the current LessonStore upsert.
+3. **OpenHands event pagination/state**: stable event IDs, page tokens and
+   `rate_limited`/user-confirmation states.
+4. **SWE-agent submit gate + tool bundles**: finish ACI beyond read/edit_check.
+5. **Aider tag cache + optional tree-sitter**: the PageRank path is already in
+   our primitive; cache/tree-sitter remain future work.
 
 ## Implementation order (features, not repos)
 
