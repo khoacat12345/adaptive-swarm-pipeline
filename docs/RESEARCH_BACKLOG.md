@@ -36,8 +36,9 @@ design:
 - It caches tree-sitter tags with mtime checks and has a map cache.
 - It uses the model tokenizer, not a character approximation, and keeps a hard
   map-token budget.
-- **Gap in our primitive:** `RepoMapper` currently uses AST + term scoring only.
-  Next upgrade: PageRank over file/import/symbol edges + cache + exact token cap.
+- **Implemented primitive:** `RepoMapper` now has an AST import/reference graph,
+  personalized PageRank, optional tokenizer and a hard map-token budget.
+  Tree-sitter/cache remain future work.
 
 ### SWE-agent — `tools/`
 
@@ -47,8 +48,9 @@ design:
 - `windowed_file.py` keeps numbered line windows; observations are compact.
 - `windowed_edit_linting` validates the edit and helps reject malformed/ambiguous
   replacements.
-- **Gap in our primitive:** `ActionPolicy` has list/read/search/verify, but no
-  line-window viewer, no edit uniqueness validation and no submit gate.
+- **Implemented primitive:** `ActionPolicy` now has windowed `open`/`scroll`,
+  unique `edit_check` with syntax validation, and guarded `verify`. A submit gate
+  remains future work.
 
 ### mem0 — `mem0/memory/main.py`
 
@@ -57,8 +59,9 @@ design:
   search.
 - It is more than a vector store; the valuable part is the **memory mutation
   policy**.
-- **Gap in our primitive:** `LessonStore` is append-only. Add dedupe by
-  signature, latest-fix/supersede semantics, confidence and provenance.
+- **Implemented primitive:** `LessonStore` now upserts by signature, preserves
+  creation time, increments revision and keeps the latest fix. Entity linking/
+  confidence remain future work.
 
 ### Letta — `letta-code`
 

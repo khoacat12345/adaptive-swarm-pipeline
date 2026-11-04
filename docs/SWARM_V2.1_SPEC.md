@@ -1068,7 +1068,7 @@ deleting the worktree or resetting the main repo.
 M1-M5 tests use temporary Git repositories and deterministic fake
 planners/coders/reviewers; no model is called. v1 remains the default execution
 path. Current acceptance: M1 `43/43`, M2 `38/38`, M3 `24/24`, M5 `14/14`,
-P0 `15/15`, adaptive `29/29`. The
+P0 `15/15`, adaptive `42/42`. The
 dashboard exposes `/v2` and `/api/v2/runs`, `/api/v2/runs/<id>`,
 `/api/v2/runs/<id>/plan`, `/api/v2/signoff`, `/api/v2/control`; approval and
 control use the run-local token. M3 uses `safe_writer.Transaction`, per-phase

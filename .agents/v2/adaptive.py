@@ -95,11 +95,24 @@ class RepoMap:
 
 
 class RepoMapper:
-    """Python-first AST symbol map; tree-sitter can replace the extractor later."""
+    """Python AST repo map with a PageRank-inspired file relevance graph.
 
-    def __init__(self, root: str | Path, *, max_tokens: int = 1200):
+    The graph is deliberately lightweight (no networkx). It models local
+    imports and symbol references, then personalizes PageRank with task terms.
+    This is the mechanism extracted from aider/repomap.py, without its
+    tree-sitter dependency.
+    """
+
+    def __init__(self, root: str | Path, *, max_tokens: int = 1200,
+                 token_counter=None):
         self.root = Path(root).resolve()
         self.max_tokens = max(200, int(max_tokens))
+        self.token_counter = token_counter
+
+    def count_tokens(self, text: str) -> int:
+        if self.token_counter is not None:
+            return max(1, int(self.token_counter(text)))
+        return max(1, len(re.findall(r"[A-Za-z0-9_]+|[^\sA-Za-z0-9_]", text or "")))
 
     def _skip(self, path: Path) -> bool:
         relative = path.relative_to(self.root).as_posix()
@@ -108,14 +121,15 @@ class RepoMapper:
             or bool(SECRET_NAME_RE.search(path.name))
         )
 
-    def _parse(self, path: Path) -> list[Symbol]:
+    def _scan(self, path: Path) -> tuple[list[Symbol], list[str], set[str]]:
         relative = path.relative_to(self.root).as_posix()
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, SyntaxError):
-            return []
+            return [], [], set()
         symbols: list[Symbol] = []
         imports: list[str] = []
+        used: set[str] = set()
         for node in tree.body:
             if isinstance(node, ast.Import):
                 imports.extend(alias.name for alias in node.names)
@@ -133,41 +147,124 @@ class RepoMapper:
                                 relative, "method", child.name, child.lineno,
                                 parent=node.name, imports=list(imports),
                             ))
-        return symbols
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                used.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                used.add(node.attr)
+        return symbols, imports, used
+
+    @staticmethod
+    def _module_keys(relative: str) -> set[str]:
+        without = relative[:-3] if relative.endswith(".py") else relative
+        parts = [part for part in without.split("/") if part and part != "."]
+        if parts and parts[-1] == "__init__":
+            parts = parts[:-1]
+        keys = {".".join(parts), parts[-1] if parts else ""}
+        keys.update(part for part in parts if part)
+        return {key for key in keys if key}
+
+    @staticmethod
+    def _pagerank(graph: dict[str, dict[str, float]], personal: dict[str, float],
+                   *, alpha: float = 0.15, iterations: int = 25) -> dict[str, float]:
+        nodes = sorted(graph)
+        if not nodes:
+            return {}
+        total = sum(personal.get(node, 0.0) for node in nodes)
+        if total <= 0:
+            personal = {node: 1.0 / len(nodes) for node in nodes}
+        else:
+            personal = {node: personal.get(node, 0.0) / total for node in nodes}
+        rank = {node: 1.0 / len(nodes) for node in nodes}
+        outgoing = {
+            node: sum(weight for weight in graph.get(node, {}).values())
+            for node in nodes
+        }
+        for _ in range(iterations):
+            nxt = {node: (1.0 - alpha) * personal[node] for node in nodes}
+            dangling = sum(rank[node] for node in nodes if outgoing.get(node, 0.0) <= 0)
+            if dangling:
+                share = alpha * dangling / len(nodes)
+                for node in nodes:
+                    nxt[node] += share
+            for source in nodes:
+                degree = outgoing.get(source, 0.0)
+                if degree <= 0:
+                    continue
+                for target, weight in graph.get(source, {}).items():
+                    if target in nxt:
+                        nxt[target] += alpha * rank[source] * weight / degree
+            rank = nxt
+        return rank
 
     def build(self, task: str = "") -> RepoMap:
-        symbols: list[Symbol] = []
-        files = 0
+        terms = _tokens(task)
+        files: list[str] = []
+        symbols_by_file: dict[str, list[Symbol]] = {}
+        imports_by_file: dict[str, list[str]] = {}
+        used_by_file: dict[str, set[str]] = {}
+        definitions: dict[str, set[str]] = {}
         for path in sorted(self.root.rglob("*.py")):
             if not path.is_file() or self._skip(path):
                 continue
-            files += 1
-            symbols.extend(self._parse(path))
-        terms = _tokens(task)
+            relative = path.relative_to(self.root).as_posix()
+            files.append(relative)
+            symbols, imports, used = self._scan(path)
+            symbols_by_file[relative] = symbols
+            imports_by_file[relative] = imports
+            used_by_file[relative] = used
+            for symbol in symbols:
+                definitions.setdefault(symbol.name, set()).add(relative)
+        graph: dict[str, dict[str, float]] = {file: {} for file in files}
+        for file in files:
+            for imported in imports_by_file.get(file, []):
+                last = imported.split(".")[-1]
+                for target in files:
+                    if target == file:
+                        continue
+                    keys = self._module_keys(target)
+                    if imported in keys or last in keys or any(key.endswith("." + last) for key in keys):
+                        graph[file][target] = graph[file].get(target, 0.0) + 1.0
+            for used in used_by_file.get(file, set()):
+                for target in definitions.get(used, set()):
+                    if target != file:
+                        graph[file][target] = graph[file].get(target, 0.0) + 0.5
+        personal: dict[str, float] = {}
+        for file in files:
+            haystack = (file + " " + " ".join(
+                symbol.qualified for symbol in symbols_by_file.get(file, [])
+            )).lower()
+            hits = sum(1 for term in terms if term in haystack)
+            personal[file] = float(hits + (1 if not terms else 0))
+        rank = self._pagerank(graph, personal)
+        all_symbols = [item for file in files for item in symbols_by_file.get(file, [])]
+
         def score(item: Symbol) -> tuple:
             haystack = f"{item.path} {item.parent} {item.name} {' '.join(item.imports)}".lower()
             hits = sum(1 for term in terms if term in haystack)
             exact = sum(2 for term in terms if term in item.name.lower())
             kind_bonus = 2 if item.kind == "class" else 1
-            return (-(hits + exact + kind_bonus), item.path, item.line)
-        ranked = sorted(symbols, key=score)
-        lines = [f"# repo map ({files} Python files, task-aware)"]
-        used = _approx_tokens(lines[0])
+            return (-(rank.get(item.path, 0.0) * 100 + hits + exact + kind_bonus),
+                    item.path, item.line)
+
+        ranked = sorted(all_symbols, key=score)
+        lines = [f"# repo map ({len(files)} Python files, task-aware PageRank)"]
+        used_tokens = self.count_tokens(lines[0])
         kept: list[Symbol] = []
         current_path = ""
         for item in ranked:
             line = f"{item.path}:{item.line} {item.kind} {item.qualified}"
-            cost = _approx_tokens(line)
-            if used + cost > self.max_tokens:
+            cost = self.count_tokens(line)
+            if used_tokens + cost > self.max_tokens:
                 continue
             if item.path != current_path:
                 lines.append(f"{item.path}:")
                 current_path = item.path
-                used += _approx_tokens(lines[-1])
+                used_tokens += self.count_tokens(lines[-1])
             lines.append(f"  {item.line}: {item.kind} {item.qualified}")
-            used += cost
+            used_tokens += cost
             kept.append(item)
-        return RepoMap("\n".join(lines), kept, files, used)
+        return RepoMap("\n".join(lines), kept, len(files), used_tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +301,7 @@ class Observation:
 class ActionPolicy:
     """Allowlisted, root-bound actions; no arbitrary shell."""
 
-    ALLOWED = {"list", "read", "search", "verify"}
+    ALLOWED = {"list", "read", "open", "scroll", "search", "verify", "edit_check"}
 
     def __init__(self, root: str | Path, *, max_read_chars: int = 12000):
         self.root = Path(root).resolve()
@@ -244,6 +341,69 @@ class ActionPolicy:
                 truncated = len(text) > self.max_read_chars
                 return Observation("read", "ok", text[:self.max_read_chars],
                                    truncated=truncated, metadata={"path": relative})
+            if action.name in {"open", "scroll"}:
+                relative = str(action.args.get("path") or "")
+                path = self._path(relative)
+                if not path.is_file():
+                    return Observation(action.name, "failed", f"not a file: {relative}")
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                window = max(1, min(200, int(action.args.get("window") or 40)))
+                start = int(action.args.get("start_line") or action.args.get("line") or 1)
+                if action.name == "scroll":
+                    start += int(action.args.get("offset") or window)
+                start = max(1, min(start, max(1, len(lines))))
+                end = min(len(lines), start + window - 1)
+                body = "\n".join(f"{number:>5}: {lines[number - 1]}" for number in range(start, end + 1))
+                return Observation(
+                    action.name, "ok", body,
+                    metadata={"path": relative, "start_line": start, "end_line": end,
+                              "total_lines": len(lines)},
+                    truncated=end < len(lines),
+                )
+            if action.name == "edit_check":
+                relative = str(action.args.get("path") or "")
+                path = self._path(relative)
+                if not path.is_file():
+                    return Observation("edit_check", "failed", f"not a file: {relative}")
+                old = str(action.args.get("old") or "")
+                new = str(action.args.get("new") or "")
+                if not old:
+                    return Observation("edit_check", "failed", "old text is empty")
+                if old == new:
+                    return Observation("edit_check", "failed", "edit is a no-op")
+                text = path.read_text(encoding="utf-8", errors="replace")
+                count = text.count(old)
+                if count != 1:
+                    return Observation("edit_check", "failed",
+                                       f"old text must be unique; found {count} matches",
+                                       metadata={"path": relative, "matches": count})
+                line = text[:text.index(old)].count("\n") + 1
+                start_line = action.args.get("start_line")
+                end_line = action.args.get("end_line")
+                if start_line is not None or end_line is not None:
+                    low = int(start_line or 1)
+                    high = int(end_line or len(text.splitlines()))
+                    if not low <= line <= high:
+                        return Observation("edit_check", "failed",
+                                           f"edit line {line} is outside window {low}-{high}",
+                                           metadata={"path": relative, "line": line})
+                lint = "ok"
+                if path.suffix == ".py":
+                    candidate = text.replace(old, new, 1)
+                    try:
+                        compile(candidate, str(path), "exec")
+                    except SyntaxError as exc:
+                        lint = f"syntax: {exc.msg} at {exc.lineno}"
+                if lint != "ok":
+                    return Observation("edit_check", "failed", lint,
+                                       metadata={"path": relative, "line": line})
+                diff_lines = sum(1 for a, b in zip(old.splitlines(), new.splitlines()) if a != b)
+                diff_lines += abs(len(old.splitlines()) - len(new.splitlines()))
+                return Observation(
+                    "edit_check", "ok", "edit is unique and syntactically valid",
+                    metadata={"path": relative, "line": line, "matches": 1,
+                              "lint": lint, "diff_lines": diff_lines},
+                )
             if action.name == "search":
                 query = str(action.args.get("query") or "").strip()
                 if not query:
@@ -304,6 +464,8 @@ class Lesson:
     tags: list[str] = field(default_factory=list)
     source_run: str = ""
     created_at: str = field(default_factory=_now)
+    updated_at: str = field(default_factory=_now)
+    revision: int = 0
 
 
 class LessonStore:
@@ -328,18 +490,38 @@ class LessonStore:
                     tags=[str(x) for x in item.get("tags") or []],
                     source_run=str(item.get("source_run") or ""),
                     created_at=str(item.get("created_at") or _now()),
+                    updated_at=str(item.get("updated_at") or _now()),
+                    revision=int(item.get("revision") or 0),
                 ))
-            except json.JSONDecodeError:
+                self._upsert_memory(self.lessons[-1])
+            except (json.JSONDecodeError, ValueError):
                 continue
         return self
 
+    def _upsert_memory(self, lesson: "Lesson") -> None:
+        for index, item in enumerate(self.lessons[:-1]):
+            if item.signature == lesson.signature:
+                # The newest JSONL line wins; preserve the earliest creation time.
+                lesson.created_at = item.created_at
+                self.lessons.pop(index)
+                break
+
     def record(self, lesson: Lesson) -> Lesson:
+        """Upsert by signature: one current lesson, append-only audit line."""
         if not lesson.signature or not lesson.fix:
             raise ValueError("lesson needs signature and fix")
+        existing = next((item for item in self.lessons if item.signature == lesson.signature), None)
+        if existing is not None:
+            lesson.created_at = existing.created_at
+            lesson.revision = existing.revision + 1
+            self.lessons = [item for item in self.lessons if item.signature != lesson.signature]
         self.lessons.append(lesson)
+        lesson.updated_at = _now()
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = dict(lesson.__dict__)
+        payload["op"] = "upsert"
         with self.path.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(lesson.__dict__, ensure_ascii=False) + "\n")
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
         return lesson
 
     def query(self, *, files: Iterable[str] = (), text: str = "", limit: int = 3) -> list[Lesson]:

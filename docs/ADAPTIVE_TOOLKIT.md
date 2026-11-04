@@ -6,9 +6,9 @@
 
 | # | Source idea | Implemented primitive | What it does | Safety boundary |
 |---|---|---|---|---|
-| 1 | aider repo map | `RepoMapper` / `RepoMap` | Python AST symbol extraction, task relevance ranking, token-capped map | Names/paths only; no file contents, no secrets |
-| 2 | SWE-agent ACI | `ActionPolicy` / `Action` / `Observation` | Allowlisted list/read/search/verify actions with compact observations | No arbitrary shell; path-rooted; verify via SystemBot |
-| 3 | mem0 | `LessonStore` / `Lesson` | JSONL failure lessons, retrieval by file/term, compact hints | Local only; advice cannot override verify |
+| 1 | aider repo map | `RepoMapper` / `RepoMap` | Python AST symbols, import/reference graph, personalized PageRank, token-capped map | Names/paths only; no file contents/secrets; optional tokenizer |
+| 2 | SWE-agent ACI | `ActionPolicy` / `Action` / `Observation` | Allowlisted list/read/open/scroll/search/edit_check/verify; line-window views and unique-edit validation | No write through ACI; no arbitrary shell; path-rooted; SystemBot verify |
+| 3 | mem0 | `LessonStore` / `Lesson` | JSONL failure lessons, signature upsert/dedupe, retrieval by file/term, compact hints | Local only; advice cannot override verify |
 | 4 | Letta | `ContextPacker` | working / recall / archival tiers with token budget | Provenance labels; no unbounded history |
 | 5 | OpenHands | `adaptive_event` | action/observation/status event shape | Append-only ledger compatibility; no replacement |
 | 6 | DSPy | `PromptOptimizer` | Offline proposals from failure lessons | No automatic prompt mutation; benchmark required |
@@ -43,9 +43,10 @@
 ## Acceptance
 
 ```text
-V2 ADAPTIVE: 29/29 PASS
+V2 ADAPTIVE: 42/42 PASS
 ```
 
-Tests cover repo-map relevance/token cap, ACI path guards and blocked actions,
-lesson persistence/retrieval, context budgets, event schema, offline proposal,
-gateway selection, mode presets, speaker selection and guarded benchmarks.
+Tests cover PageRank relevance/token cap, windowed ACI and edit validation,
+lesson upsert/persistence/retrieval, context budgets, event schema, offline
+proposal, gateway selection, mode presets, speaker selection and guarded
+benchmarks.

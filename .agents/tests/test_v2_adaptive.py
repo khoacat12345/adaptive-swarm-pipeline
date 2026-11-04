@@ -96,6 +96,25 @@ def test_aci(checks):
     checks.check("aci: list works", listing.status == "ok" and "src" in listing.output)
     search = policy.execute(Action("search", {"query": "Calculator"}))
     checks.check("aci: search works", search.status == "ok" and "calc.py" in search.output)
+    window = policy.execute(Action("open", {"path": "src/calc.py", "start_line": 2, "window": 2}))
+    checks.check("aci: windowed open works",
+                 window.status == "ok" and "2:" in window.output and window.metadata.get("start_line") == 2)
+    scrolled = policy.execute(Action("scroll", {"path": "src/calc.py", "start_line": 2, "offset": 2}))
+    checks.check("aci: window scroll works", scrolled.status == "ok")
+    unique = policy.execute(Action("edit_check", {
+        "path": "src/calc.py", "old": "return a - b", "new": "return a + b",
+    }))
+    checks.check("aci: unique edit passes", unique.status == "ok")
+    duplicated = policy.execute(Action("edit_check", {
+        "path": "src/calc.py", "old": "a", "new": "b",
+    }))
+    checks.check("aci: non-unique edit is rejected", duplicated.status == "failed")
+    syntax = policy.execute(Action("edit_check", {
+        "path": "src/calc.py", "old": "return a - b", "new": "return a +",
+    }))
+    checks.check("aci: syntax-invalid edit is rejected", syntax.status == "failed")
+    checks.check("aci: edit check never writes",
+                 (root / "src" / "calc.py").read_text(encoding="utf-8") == "class Calculator:\n    def add(self, a, b):\n        return a - b\n\ndef helper(value):\n    return value\n")
     escape = policy.execute(Action("read", {"path": "../outside"}))
     checks.check("aci: path escape blocked", escape.status == "failed")
     shell = policy.execute(Action("bash", {"command": "whoami"}))
@@ -124,8 +143,21 @@ def test_lessons(checks):
     hits = store.query(files=["src/calc.py"], text="timeout")
     checks.check("lessons: retrieves relevant lesson", hits and hits[0].signature.startswith("timeout"))
     checks.check("lessons: hints are compact", "split file" in store.hints(files=["src/calc.py"]))
+    store.record(Lesson(
+        signature="timeout reading large file",
+        cause="new cause",
+        fix="use a smaller window",
+        files=["src/calc.py"],
+        tags=["timeout"],
+    ))
+    checks.check("lessons: duplicate signature upserts", len(store.lessons) == 2)
+    checks.check("lessons: upsert keeps latest fix",
+                 "smaller window" in store.lessons[-1].fix)
+    checks.check("lessons: upsert increments revision", store.lessons[-1].revision == 1)
     reloaded = LessonStore(TEMP_ROOT / "lessons" / "lessons.jsonl")
     checks.check("lessons: survives reload", len(reloaded.lessons) == 2)
+    checks.check("lessons: reload keeps latest fix",
+                 "smaller window" in reloaded.lessons[-1].fix)
 
 
 def test_context(checks):
@@ -213,12 +245,31 @@ def test_benchmark(checks):
                  blocked and blocked[0].exit_code == 126)
 
 
+def test_page_rank(checks):
+    root = TEMP_ROOT / "pagerank"
+    rmtree(root)
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "core.py").write_text("def important():\n    return 1\n", encoding="utf-8")
+    (root / "src" / "feature.py").write_text(
+        "from src.core import important\n\ndef feature():\n    return important()\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "noise.py").write_text("def noise():\n    return 0\n", encoding="utf-8")
+    result = RepoMapper(root, max_tokens=600).build("feature")
+    checks.check("repo-map: PageRank includes imported core",
+                 "core.py" in result.text and "feature.py" in result.text)
+    checks.check("repo-map: imported core outranks noise",
+                 result.text.find("core.py") < result.text.find("noise.py"))
+    checks.check("repo-map: PageRank returns a budgeted map", result.approx_tokens <= 620)
+
+
 def main():
     rmtree(TEMP_ROOT)
     TEMP_ROOT.mkdir(parents=True, exist_ok=True)
     checks = Checks()
     tests = [
         ("repo map", test_repo_map),
+        ("repo map PageRank", test_page_rank),
         ("ACI", test_aci),
         ("failures", test_lessons),
         ("context", test_context),
