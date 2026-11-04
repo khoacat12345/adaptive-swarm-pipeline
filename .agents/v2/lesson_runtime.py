@@ -72,7 +72,10 @@ class FailureLessonRuntime:
             tags=[str(item) for item in tags if str(item)],
             source_run=str(source_run or ""),
         )
-        return self.store.record(lesson)
+        from .context_runtime import MemoryLock
+
+        with MemoryLock(self.path):
+            return self.store.record(lesson)
 
     def record_fix(self, *, signature: str, fix: str, source_run: str = "") -> Lesson | None:
         matches = [item for item in self.store.lessons if item.signature == signature]

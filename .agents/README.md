@@ -103,6 +103,7 @@ python3 .agents/tests/test_v2_adaptive_flags.py
 python3 .agents/tests/test_v2_planner_repo_map.py
 python3 .agents/tests/test_v2_aci_integration.py
 python3 .agents/tests/test_v2_lessons_integration.py
+python3 .agents/tests/test_v2_context_constraints.py
 python3 .agents/tests/test_v2_adaptive.py
 python3 .agents/tests/test_phase4.py --fast
 ```
