@@ -53,6 +53,33 @@ Health preflight is mandatory: wave/meeting needs all four reviewer routes
 model call; no heuristic fallback may auto-approve a partial panel. A routed
 coder chain with no available model is blocked. `config.json` is machine-local.
 
+## Adaptive add-ons (Phase 0-6)
+
+Adaptive features are optional and default to `off`:
+
+```text
+SWARM_ADAPTIVE_REPO_MAP=off|shadow|on
+SWARM_ADAPTIVE_ACI=off|shadow|on
+SWARM_ADAPTIVE_LESSONS=off|shadow|on
+SWARM_ADAPTIVE_MEMORY_BUDGET=off|shadow|on
+SWARM_ADAPTIVE_EVENTS=off|shadow|on
+```
+
+Read-only inspection commands:
+
+```bash
+python3 .agents/v2/run.py --root . adaptive-map --task "..." --mode shadow
+python3 .agents/v2/run.py --root . adaptive-lessons --query "..."
+```
+
+Rules:
+
+- `shadow` computes/logs but must not change planner or execution prompts.
+- `on` injects repo-map/lesson context only as untrusted advice.
+- ACI is read-only (`open`, `scroll`, `search_symbol`, `verify`); it cannot write.
+- Memory constraints protect the constitution and cap core memory.
+- Adaptive flags never bypass `safe_writer`, worktree, budget or verify.
+
 ## Platforms
 
 Windows, Linux and macOS with Python 3.11+ are supported. Use `dashboard.sh` on

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -32,6 +33,10 @@ from typing import Any, Iterable, Mapping
 SKIP_DIRS = {
     ".git", ".agents/tmp", ".specify", "node_modules", "__pycache__",
     ".venv", "venv", "dist", "build", ".mypy_cache", ".pytest_cache",
+    "AppData", "Downloads", "Documents", "Desktop", "OneDrive",
+    "Music", "Pictures", "Videos", ".cache", ".local", ".config",
+    ".gemini", ".opencode", ".claude", ".copilot", ".vscode", ".github",
+    ".kaggle", ".antigravity-ide", ".lim", ".limpc",
 }
 SECRET_NAME_RE = re.compile(r"(secret|token|password|credential|private[_-]?key|\.env)", re.I)
 TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{1,}")
@@ -104,10 +109,11 @@ class RepoMapper:
     """
 
     def __init__(self, root: str | Path, *, max_tokens: int = 1200,
-                 token_counter=None):
+                 token_counter=None, max_files: int = 400):
         self.root = Path(root).resolve()
         self.max_tokens = max(200, int(max_tokens))
         self.token_counter = token_counter
+        self.max_files = max(1, int(max_files))
 
     def count_tokens(self, text: str) -> int:
         if self.token_counter is not None:
@@ -120,6 +126,22 @@ class RepoMapper:
             any(relative == item or relative.startswith(item + "/") for item in SKIP_DIRS)
             or bool(SECRET_NAME_RE.search(path.name))
         )
+
+    def _py_files(self) -> list[Path]:
+        found: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            current = Path(dirpath)
+            dirnames[:] = [
+                name for name in dirnames
+                if not self._skip(current / name)
+            ]
+            for name in filenames:
+                candidate = current / name
+                if candidate.suffix == ".py" and not self._skip(candidate):
+                    found.append(candidate)
+                    if len(found) >= self.max_files:
+                        return found
+        return found
 
     def _scan(self, path: Path) -> tuple[list[Symbol], list[str], set[str]]:
         relative = path.relative_to(self.root).as_posix()
@@ -204,7 +226,9 @@ class RepoMapper:
         imports_by_file: dict[str, list[str]] = {}
         used_by_file: dict[str, set[str]] = {}
         definitions: dict[str, set[str]] = {}
-        for path in sorted(self.root.rglob("*.py")):
+        for path in sorted(self._py_files()):
+            if len(files) >= self.max_files:
+                break
             if not path.is_file() or self._skip(path):
                 continue
             relative = path.relative_to(self.root).as_posix()

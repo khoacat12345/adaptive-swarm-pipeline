@@ -35,6 +35,10 @@ ACTIVE_STATES = {
     "HANDOFF_READY",
     "PAUSED",
     "BLOCKED",
+    "RATE_LIMITED",
+    "AWAITING_USER_CONFIRMATION",
+    "USER_CONFIRMED",
+    "USER_REJECTED",
 }
 
 # Normal transitions. The event name is stored in the manifest/event log.
@@ -53,6 +57,8 @@ TRANSITIONS: dict[tuple[str, str], str] = {
     ("PHASE_COMMITTED", "next_phase"): "PHASE_EXECUTING",
     ("PHASE_COMMITTED", "all_phases_done"): "HANDOFF_READY",
     ("HANDOFF_READY", "user_accepts"): "DONE",
+    ("AWAITING_USER_CONFIRMATION", "user_confirms"): "USER_CONFIRMED",
+    ("AWAITING_USER_CONFIRMATION", "user_rejects"): "USER_REJECTED",
 }
 
 # Any active state may enter these safety states.
@@ -62,6 +68,8 @@ ANY_ACTIVE_TRANSITIONS: dict[str, str] = {
     "block": "BLOCKED",
     "quarantine": "QUARANTINED",
     "fail": "FAILED",
+    "rate_limit": "RATE_LIMITED",
+    "request_confirmation": "AWAITING_USER_CONFIRMATION",
 }
 
 TERMINAL_STATES = {"DONE", "STOPPED", "FAILED", "QUARANTINED"}
@@ -217,7 +225,10 @@ class RunStore:
 
             if event == "resume":
                 resume_state = manifest.get("resume_state")
-                if current in {"PAUSED", "BLOCKED"} and resume_state in ACTIVE_STATES:
+                if current in {
+                    "PAUSED", "BLOCKED", "RATE_LIMITED",
+                    "AWAITING_USER_CONFIRMATION", "USER_CONFIRMED",
+                } and resume_state in ACTIVE_STATES:
                     next_state = str(resume_state)
                 else:
                     raise StateTransitionError(
@@ -229,7 +240,7 @@ class RunStore:
                     f"illegal transition: {current!r} --{event}--> ?"
                 )
 
-            if event in {"pause", "block"} and current in ACTIVE_STATES:
+            if event in {"pause", "block", "rate_limit", "request_confirmation"} and current in ACTIVE_STATES:
                 manifest["resume_state"] = current
             if event == "resume":
                 manifest["resume_state"] = None

@@ -82,6 +82,15 @@ def main(argv: list[str] | None = None) -> int:
                          help="max USD estimate per paid call; paid models stay blocked at 0")
     execute.add_argument("--timeout", type=int, default=300)
 
+    adaptive_map = sub.add_parser("adaptive-map")
+    adaptive_map.add_argument("--task", required=True)
+    adaptive_map.add_argument("--mode", choices=("off", "shadow", "on"), default=None)
+    adaptive_map.add_argument("--max-tokens", type=int, default=1200)
+
+    adaptive_lessons = sub.add_parser("adaptive-lessons")
+    adaptive_lessons.add_argument("--query", default="")
+    adaptive_lessons.add_argument("--file", action="append", default=[])
+
     handoff = sub.add_parser("handoff")
     handoff.add_argument("--run-id", required=True)
     handoff.add_argument("--report", default=None)
@@ -93,6 +102,35 @@ def main(argv: list[str] | None = None) -> int:
         worktree_root=args.worktree_root,
         require_clean=True,
     )
+
+    if args.command == "adaptive-map":
+        from v2.adaptive_flags import load_flags
+        from v2.repo_context import build_repo_context
+
+        mode = args.mode or load_flags().get("REPO_MAP")
+        context = build_repo_context(
+            args.root, args.task, mode=mode, max_tokens=args.max_tokens
+        )
+        print(json.dumps({
+            "mode": context.mode,
+            "files": context.files,
+            "tokens": context.tokens,
+            "fallback": context.fallback,
+            "reason": context.reason,
+            "text": context.text,
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "adaptive-lessons":
+        from v2.lesson_runtime import FailureLessonRuntime
+
+        lessons = FailureLessonRuntime.for_root(args.root)
+        hints = lessons.hints(files=args.file, text=args.query, limit=3)
+        print(json.dumps({
+            "count": len(lessons.store.lessons),
+            "hints": hints,
+        }, ensure_ascii=False, indent=2))
+        return 0
 
     if args.command == "prepare":
         phases = args.phase or ["P1"]
