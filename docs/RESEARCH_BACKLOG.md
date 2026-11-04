@@ -85,6 +85,6 @@ AutoGPT eval          -> tests/eval harness
 
 ## Decision
 
-Study **aider ACI/repo map** and **SWE-agent ACI** first.  
+Study **aider ACI/repo map** and **SWE-agent ACI** first.
 Do **not** add DSPy, Mem0, Letta, LiteLLM or AutoGen as runtime dependencies in
 this phase.
