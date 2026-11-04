@@ -112,12 +112,12 @@
 - **Risk:** spec says optional cleanup; implementation silently ignores it.
 - **Exit criterion:** either implement post-verify cleanup + full re-verify, or remove the parameter and document it as deferred.
 
-### P1-05 — Spec Kit bridge is not implemented
+### P1-05 - Spec Kit bridge is partially implemented
 
-- **Status:** blocked on Spec Kit install
+- **Status:** in progress (P0 bridge landed; real Spec Kit pilot pending)
 - **Area:** process/integration
-- **Evidence:** `spec-kit`/`specify` is not present in home yet.
-- **Needed:** install and inspect `spec-driven.md`, `.specify/memory/`, `templates/`, integration `opencode`.
+- **Evidence:** local `C:\Users\tuank\my-project` has Spec Kit 1.3.0 with the `opencode` integration. `v2/tasks.py` and `v2/speckit_bridge.py` now convert canonical `tasks.yaml` to a validated plan.
+- **Needed:** run one real Spec Kit feature through the bridge, then execute the signed plan.
 - **Exit criterion:** a bridge converts a Spec Kit `spec.md` + `plan.md` + `tasks.md` into a valid `MasterPlan.json`, then runs through v2 sign-off and execution.
 
 ### P1-06 — constitution / converge are missing
@@ -132,8 +132,8 @@
 
 - **Status:** open
 - **Area:** architecture
-- **Evidence:** adapters call `workers`/OpenCode CLI; no `AgentRuntime` interface for other CLIs.
-- **Risk:** future Claude Code/Codex/Gemini support requires touching execution core.
+- **Evidence:** `v2/runtime.py` now defines `AgentRuntime`/`RuntimeRegistry`; current execution still uses OpenCode workers.
+- **Risk:** future Claude Code/Codex/Gemini support still needs concrete adapters and headless compatibility tests.
 - **Exit criterion:** `AgentRuntime` protocol with OpenCode adapter; one stub second runtime tested.
 
 ### P1-08 — provider fallback and cross-family are not tied to a capability registry
@@ -169,9 +169,25 @@
 - **Exit criterion:** per-repo lock is enforced before planner/run; stale lock detection; no shared mutable plan.
 - **Note:** this already happened during M3 planning: a separate planner process was writing a different plan.
 
+### P1-12 - Spec Kit adoption plan
+
+- **Status:** approved; P0 in progress
+- **Area:** process/integration
+- **Decision:** borrow Spec Kit's process contracts, not its execution model.
+- **Take now (P0):**
+  - `constitution.md` + constitution hash bound into sign-off.
+  - canonical `tasks.yaml` schema with `verify_command`, `target_files`, dependencies and acceptance criteria.
+  - `speckit_bridge.py` converting Spec Kit artifacts into a validated `MasterPlan.json`.
+  - `AgentRuntime` interface and registry for OpenCode / Claude Code / Antigravity.
+- **Take later:** clarify/checklist/analyze gates, deterministic converge, preset profiles, optional agent-context sync.
+- **Do not take:** Spec Kit Git extension, prose `tasks.md` parsing, or its free-form execution model.
+- **Safety boundary:** do not change worktree isolation, `safe_writer`, budget caps or `verify_command`.
+- **Exit criterion:** a Spec Kit-generated `tasks.yaml` becomes a signed v2 plan without bypassing any safety gate.
+- **Reference:** `docs/SWARM_V2.1_SPEC.md`, `docs/CONSTITUTION.md`.
+
 ---
 
-## P2 — polish / product experience
+## P2 - polish / product experience
 
 ### P2-01 — notifications not wired to M4
 

@@ -31,6 +31,8 @@ jobs:
         run: python .agents/tests/test_v2_m3.py
       - name: V2 M5 provider/cost/soak
         run: python .agents/tests/test_v2_m5.py
+      - name: V2 P0 Spec Kit bridge
+        run: python .agents/tests/test_v2_p0.py
       - name: Skill consistency
         run: python .agents/tests/test_skill_consistency.py
       - name: Wave reviewer / fail-closed

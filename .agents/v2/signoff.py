@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from .constitution import load_constitution
 from .errors import PlanChangedError, V2Error
 from .plan import (
     budget_from_plan,
@@ -63,12 +64,16 @@ def create_signoff(
     wt = worktree or workspace.get("worktree_path")
     validated = validate_plan(plan, worktree=wt)
     budget = budget_from_plan(plan)
+    constitution = load_constitution(store.root)
     record = {
         "schema_version": "2.1",
         "run_id": store.run_id,
         "plan_hash": validated["plan_hash"],
         "budget_hash": validated["budget_hash"],
         "model_snapshot_hash": validated["model_snapshot_hash"],
+        "constitution_hash": constitution["hash"],
+        "constitution_path": constitution["path"],
+        "constitution_complete": constitution["complete"],
         "approved_by": str(approved_by or "local-user"),
         "approved_at": _now(),
         "nonce": secrets.token_hex(16),
@@ -91,6 +96,7 @@ def create_signoff(
         "plan_hash": record["plan_hash"],
         "budget_hash": record["budget_hash"],
         "model_snapshot_hash": record["model_snapshot_hash"],
+        "constitution_hash": record["constitution_hash"],
         "approved_by": record["approved_by"],
     })
     return record
@@ -106,6 +112,9 @@ def assert_signoff(store: RunStore, plan: Mapping[str, Any]) -> dict[str, Any]:
         "budget_hash": budget_from_plan(plan).digest,
         "model_snapshot_hash": model_snapshot_hash(plan),
     }
+    # Constitution is project state, not part of the plan body. Bind its hash
+    # separately so editing the constitution invalidates an old approval.
+    expected["constitution_hash"] = load_constitution(store.root)["hash"]
     for key, value in expected.items():
         if record.get(key) != value:
             raise PlanChangedError(
@@ -131,6 +140,9 @@ def signoff_summary(store: RunStore) -> dict[str, Any]:
         "plan_hash": record.get("plan_hash"),
         "budget_hash": record.get("budget_hash"),
         "model_snapshot_hash": record.get("model_snapshot_hash"),
+        "constitution_hash": record.get("constitution_hash"),
+        "constitution_path": record.get("constitution_path"),
+        "constitution_complete": bool(record.get("constitution_complete", False)),
         "approved_by": record.get("approved_by"),
         "approved_at": record.get("approved_at"),
         "auto_merge": bool(record.get("auto_merge", False)),

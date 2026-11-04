@@ -1,11 +1,12 @@
 # Adaptive Swarm Pipeline v2.1 — Technical Specification
 
-> **Status:** v2.1.0 release; M5 acceptance harness implemented; live
-> free-model pilot/soak remains an operator run
+> **Status:** v2.1.0 release; P0 Spec Kit bridge implemented; live free-model
+> pilot/soak remains an operator run
 > **Supersedes:** `SWARM_V2_ARCHITECTURE_DRAFT.md`
 > **Scope:** autonomous overnight execution with strict isolation and per-phase budget control
 > **Priority order:** safe isolation → budget enforcement → resumability → planning quality → UI
-> **Implementation:** `.agents/v2/` (`isolation.py`, `budget.py`, `state.py`, `plan.py`, `planning.py`, `signoff.py`, `execution.py`, `adapters.py`, `models.py`, `web.py`, `runner.py`, `run.py`)
+> **Implementation:** `.agents/v2/` (`isolation.py`, `budget.py`, `state.py`, `plan.py`, `planning.py`, `signoff.py`, `execution.py`, `adapters.py`, `models.py`, `web.py`, `runner.py`, `run.py`,
+`constitution.py`, `tasks.py`, `speckit_bridge.py`, `runtime.py`)
 
 ---
 
@@ -1050,6 +1051,10 @@ deleting the worktree or resetting the main repo.
 .agents/v2/execution.py   apply, test integrity, cross-family review, veto/repair
 .agents/v2/adapters.py    OpenCode coder/reviewer bridge for live M3.5 runs
 .agents/v2/models.py      catalog/auth-aware free and explicit provider selection
+.agents/v2/constitution.py project constitution discovery + sign-off hash
+.agents/v2/tasks.py       canonical tasks.yaml validation + MasterPlan bridge
+.agents/v2/speckit_bridge.py explicit bridge CLI
+.agents/v2/runtime.py     P0 AgentRuntime contract/registry
 .agents/v2/web.py         /v2 sign-off/run page + runs/signoff/control endpoints
 .agents/v2/runner.py      prepare/plan/signoff/checkpoint/quarantine/handoff/control
 .agents/v2/run.py         prepare/plan/signoff/execute/status/handoff CLI
@@ -1061,7 +1066,8 @@ deleting the worktree or resetting the main repo.
 
 M1-M5 tests use temporary Git repositories and deterministic fake
 planners/coders/reviewers; no model is called. v1 remains the default execution
-path. Current acceptance: M1 `43/43`, M2 `38/38`, M3 `24/24`, M5 `14/14`. The
+path. Current acceptance: M1 `43/43`, M2 `38/38`, M3 `24/24`, M5 `14/14`,
+P0 `15/15`. The
 dashboard exposes `/v2` and `/api/v2/runs`, `/api/v2/runs/<id>`,
 `/api/v2/runs/<id>/plan`, `/api/v2/signoff`, `/api/v2/control`; approval and
 control use the run-local token. M3 uses `safe_writer.Transaction`, per-phase

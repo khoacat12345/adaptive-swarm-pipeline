@@ -56,6 +56,11 @@ def main(argv: list[str] | None = None) -> int:
     plan_parser.add_argument("--run-id", required=True)
     plan_parser.add_argument("--plan", required=True, help="path to master plan JSON")
 
+    bridge = sub.add_parser("bridge")
+    bridge.add_argument("--run-id", required=True)
+    bridge.add_argument("--tasks", required=True, help="canonical tasks.yaml/tasks.json")
+    bridge.add_argument("--out", default=None, help="optional bridge output path")
+
     signoff_parser = sub.add_parser("signoff")
     signoff_parser.add_argument("--run-id", required=True)
     signoff_parser.add_argument("--approved-by", default="local-user")
@@ -113,6 +118,28 @@ def main(argv: list[str] | None = None) -> int:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
         result = runner.submit_plan(args.run_id, plan)
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "bridge":
+        from v2.tasks import bridge_spec_kit
+
+        store = runner.load(args.run_id)
+        workspace = runner.workspace(args.run_id)
+        bridged = bridge_spec_kit(
+            args.root,
+            args.tasks,
+            run_id=args.run_id,
+            base_sha=workspace.base_sha,
+            worktree=workspace.path,
+            out=args.out,
+        )
+        submitted = runner.submit_plan(args.run_id, bridged["plan"])
+        print(json.dumps({
+            "bridge": bridged["validated"],
+            "tasks_path": bridged["tasks_path"],
+            "submitted": submitted,
+            "state_root": str(store.run_dir),
+        }, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "signoff":
