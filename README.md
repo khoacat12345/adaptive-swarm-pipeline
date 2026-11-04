@@ -34,7 +34,8 @@ Details: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Constitution:
 notes: [`docs/RELEASE_v2.1.0.md`](docs/RELEASE_v2.1.0.md). Known gaps and the
 next fix batches: [`docs/OPEN_PROBLEMS.md`](docs/OPEN_PROBLEMS.md). Research
 shortlist: [`docs/RESEARCH_BACKLOG.md`](docs/RESEARCH_BACKLOG.md). Adaptive
-primitives: [`docs/ADAPTIVE_TOOLKIT.md`](docs/ADAPTIVE_TOOLKIT.md).
+primitives: [`docs/ADAPTIVE_TOOLKIT.md`](docs/ADAPTIVE_TOOLKIT.md). Integration
+plan: [`docs/SKILL_INTEGRATION_PLAN.md`](docs/SKILL_INTEGRATION_PLAN.md).
 
 ## Why
 
