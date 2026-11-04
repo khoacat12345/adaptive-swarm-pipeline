@@ -374,6 +374,19 @@ class PlanningCouncil:
                 "adaptive.repo_map",
                 {"mode": context.repo_map_mode, **context.repo_map_meta},
             )
+        if not context.lesson_hints.strip() and context.lesson_mode == "off":
+            from .adaptive_flags import load_flags
+            from .lesson_runtime import FailureLessonRuntime
+
+            mode = load_flags().get("LESSONS")
+            if mode != "off":
+                lessons = FailureLessonRuntime.for_root(context.worktree)
+                context.lesson_hints = lessons.hints(text=context.goal)
+                context.lesson_mode = mode
+                context.emit(
+                    "adaptive.lessons",
+                    {"mode": mode, **lessons.event_payload(text=context.goal)},
+                )
         proposals: dict[str, dict[str, Any]] = {}
         for role in PLANNER_ROLES:
             text = self._complete(

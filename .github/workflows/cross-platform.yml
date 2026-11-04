@@ -41,6 +41,8 @@ jobs:
         run: python -m unittest discover -s .agents/tests -p "test_v2_planner_repo_map.py"
       - name: V2 ACI integration
         run: python -m unittest discover -s .agents/tests -p "test_v2_aci_integration.py"
+      - name: V2 lessons integration
+        run: python -m unittest discover -s .agents/tests -p "test_v2_lessons_integration.py"
       - name: Skill consistency
         run: python .agents/tests/test_skill_consistency.py
       - name: Wave reviewer / fail-closed

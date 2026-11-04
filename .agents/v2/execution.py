@@ -413,6 +413,33 @@ class ExecutionEngine:
     # Public execution
     # ------------------------------------------------------------------
 
+    def _record_lesson(
+        self,
+        *,
+        kind: str,
+        error: str,
+        work_order: Mapping[str, Any],
+        phase_id: str,
+    ) -> None:
+        from .adaptive_flags import load_flags
+
+        if load_flags().get("LESSONS") == "off":
+            return
+        try:
+            from .lesson_runtime import FailureLessonRuntime
+
+            FailureLessonRuntime.for_root(self.runner.root).record_failure(
+                kind=kind,
+                error=error,
+                files=[str(item) for item in (work_order.get("target_files") or [])],
+                cause=kind,
+                source_run=str(getattr(self.runner, "root", "")),
+                tags=[str(phase_id)],
+            )
+        except Exception:
+            # Memory is best-effort; never break a run because of a lesson write.
+            return
+
     def execute(
         self,
         run_id: str,
@@ -487,6 +514,10 @@ class ExecutionEngine:
                             f"{verify.get('exit_code')}:{str(verify.get('output_tail') or verify.get('stderr') or '')[:200]}",
                         )
                         if tx is None:
+                            self._record_lesson(
+                                kind="verify_failure", error=signature[1],
+                                work_order=work_order, phase_id=phase_id,
+                            )
                             if signature == last_signature:
                                 repeated += 1
                             else:
@@ -523,6 +554,10 @@ class ExecutionEngine:
                         )
                         break
                     except (SecurityVeto, TestIntegrityError, CrossFamilyError, NoProgressError) as exc:
+                        self._record_lesson(
+                            kind=exc.code, error=str(exc),
+                            work_order=work_order, phase_id=phase_id,
+                        )
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("M3 review/integrity failure")
@@ -548,6 +583,10 @@ class ExecutionEngine:
                                 pass
                         raise
                     except ExecutionError as exc:
+                        self._record_lesson(
+                            kind="review_reject", error=str(exc),
+                            work_order=work_order, phase_id=phase_id,
+                        )
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("M3 review rejected")
