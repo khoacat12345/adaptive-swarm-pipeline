@@ -76,6 +76,53 @@
 - **Risk:** duplicate writes, stuck locks, or lost checkpoints under a real crash.
 - **Exit criterion:** kill runner after write/before verify and after verify/before checkpoint; new process resumes safely; no duplicate file version.
 
+### P0-06 — Approval policy is inconsistent; approval must apply only to War Room sessions
+
+- **Status:** open
+- **Priority rationale:** super-urgent product rule. Current behavior makes quick tasks require approval while some expensive paths bypass it; users cannot know when approval is actually required.
+- **Area:** approval / cost control
+- **Intended product rule (confirmed by owner):**
+  - **No approval** for the quick path: one bounded task, one coder + one reviewer, free model, small request/time budget, valid `verify_command`.
+  - **Approval required** only for a War Room session: multi-agent/long-running/expensive work (`--reviewer wave`, `--mode meeting`, multi-phase/overnight, paid model, or estimated cost/requests above the configured threshold).
+  - The dashboard’s **War Room tab is only a view**. In this rule, “War Room session” means the expensive multi-agent execution path, not the tab itself.
+- **Current inconsistent behavior:**
+  - `job.py --plan ...` requires an approved plan for **every** plan, including a quick one-coder task.
+  - `recipe_c.py --order ...` requires **no approval**, even when it runs `--reviewer wave` / `--mode meeting`.
+  - `.agents/SKILL.md` recommends `recipe_c.py --order ...` for existing Work Orders, so a skill-driven run can take either side of the rule accidentally.
+  - `--mode meeting` is a review mode, not an approval trigger.
+  - `--decision approve` is headless approval, not “no approval”.
+  - v2 `signoff` is an approval gate before `execute`; `Accept handoff` is a separate handoff acknowledgement, not the start/apply gate.
+- **Risk:**
+  - Approval fatigue: users click through quick tasks until approval becomes meaningless.
+  - Quota burn: an expensive wave/meeting can start without approval through the direct recipe path.
+  - False confidence: operators believe “everything is approved” when approval is path-dependent.
+  - Documentation contradicts itself about `--decision approve` versus `--wait --open`.
+- **Required law:**
+  ```text
+  approval_required =
+      mode == "meeting"
+      OR reviewer == "wave"
+      OR overnight/multi_phase
+      OR paid_model
+      OR estimated_requests > threshold
+      OR estimated_cost > threshold
+  ```
+  For the quick path:
+  ```text
+  approval_required = false
+  still required: verify_command + budget cap + reviewer + rollback
+  ```
+  If `approval_required` is true, every entry point must block before the first model call until an approval record exists. The approval must bind to the exact plan/work-order hash.
+- **Exit criterion:**
+  - One shared `approval_policy` helper; `job.py`, `recipe_c.py`, dashboard API and v2 use it.
+  - Quick path runs end-to-end without approval, but cannot exceed its request/time budget.
+  - Wave/meeting/overnight/paid/over-threshold runs are blocked without approval, including when invoked directly through `recipe_c`.
+  - Audit events: `approval.required`, `approval.approved`, `approval.skipped` (with actor/reason).
+  - Tests cover: quick path no-approval, War Room approval required, direct recipe cannot bypass War Room approval, plan/work-order hash mismatch is rejected.
+  - README has a single approval matrix; no contradictory “first task” command.
+- **Threat-model note:** if the agent has unrestricted shell access, it can bypass workflow gates entirely. This policy is a workflow and cost-control rule, not an OS sandbox; a real boundary needs separate OS/user/container permissions or an external approval service.
+- **Related:** P1-13; `.agents/SKILL.md`, `.agents/recipe_c.py`, `.agents/job.py`, `.agents/v2/execution.py`, `README.md`.
+
 ---
 
 ## P1 — before daily use / release-candidate confidence
@@ -214,26 +261,6 @@
 - **Exit criterion:** a person with no prior knowledge of this repository can follow the guide from a fresh project to a verified result without asking for help, and can explain when the dashboard, War Room and meeting should be used.
 - **Dependencies:** keep `docs/INSTALL.md` as the short setup reference; link both docs rather than duplicating commands.
 
-### P1-14 — Approval is path-dependent; direct recipe/skill path bypasses plan approval
-
-- **Status:** open
-- **Area:** safety / approval gate
-- **Evidence:**
-  - `job.py` checks `plan_decision.json == approved` before `run_job`; the normal plan workflow requires approval.
-  - `recipe_c.py --order order.json` has **no approval check**. It validates the Work Order, runs coder/reviewer/verify, and can apply through `safe_writer` immediately.
-  - `.agents/SKILL.md` tells the agent to use `recipe_c.py --order order.json` for an existing Work Order, so a skill-driven task can take the no-approval path.
-  - `--decision approve` and v2 `signoff` are still explicit approvals, but the agent itself can invoke them when it has shell access; a local token is not a separate human identity.
-  - Meeting is orthogonal: it is a review mode, not the approval gate. A direct `recipe_c --mode meeting` also bypasses plan approval.
-- **Risk:** “approve before write” is not a universal invariant. An operator may believe every task is approved, while a direct recipe/skill invocation writes after review/verify without any human pre-approval. This is especially dangerous for agent-driven runs.
-- **Threat-model note:** if the agent has unrestricted shell access, it can also call `safe_writer` or edit files directly. Approval artifacts enforce workflow discipline, not an adversarial sandbox. A real security boundary needs OS/user/container isolation or an approval service outside the agent.
-- **Exit criterion:**
-  - Every non-`--dry-run` apply path requires an approval record bound to the plan hash **or** Work Order hash.
-  - Direct `recipe_c` requires an explicit approval flag/token (or a clearly named `--auto-approve` with actor/reason audit) instead of silently running.
-  - Add tests for `job.py`, direct `recipe_c`, dashboard API, and v2 execute/signoff paths.
-  - README/operator guide contains an approval matrix: which entry point requires approval, and which is intentionally headless.
-- **Suggested first fix:** add a shared `approval_gate` helper used by `recipe_c` and `job.py`; default deny for direct apply, with an audited explicit override for tests/CI.
-- **Related:** P1-13; `.agents/SKILL.md`, `.agents/recipe_c.py`, `.agents/job.py`, `.agents/v2/execution.py`.
-
 ---
 
 ## P2 - polish / product experience
@@ -345,7 +372,7 @@ When the repo is installed, inspect and record:
 4. **P1-05 + P1-06**: Spec Kit bridge + constitution/converge.
 5. **P1-09 + P1-11**: stop v1 planner from silently choosing paid models; lock plan state.
 6. **P1-07**: AgentRuntime interface for future CLIs.
-7. **P1-14**: enforce approval on every non-dry-run apply path, especially direct `recipe_c`/skill invocation.
+7. **P0-06**: enforce the War-Room-only approval policy across every entry point; quick one-coder path stays approval-free.
 8. **P1-13**: write the beginner end-to-end operator guide before inviting new users.
 9. **P2**: UI/notifications/release polish.
 
@@ -356,4 +383,4 @@ When the repo is installed, inspect and record:
 - 2026-11-04: 9router is treated as a provider gateway; capability/cost metadata is a required gap, not a future nice-to-have.
 - 2026-11-05: Phase 0-6 adaptive modules landed with flags default off; shadow pilot passed. Live free-model execution is blocked by free-tier quota exhaustion, not a code failure.
 - 2026-11-06: Recorded P1-13: a new operator needs one end-to-end runbook covering install, OpenCode skill invocation, dashboard/War Room, meeting selection, approvals, execution trace and failure recovery.
-- 2026-11-06: Recorded P1-14: approval is path-dependent. `job.py` requires an approved plan, but direct `recipe_c --order` and the skill’s direct-order path can apply without plan approval; meeting is not the approval gate.
+- 2026-11-06: Promoted approval inconsistency to **P0-06** after owner clarification. The intended rule is **approval only for War Room/expensive long sessions**, not for a quick one-coder + one-reviewer task. Current `job.py` over-gates quick tasks while direct `recipe_c` under-gates expensive ones; the rule must be explicit and enforced at every entry point.
