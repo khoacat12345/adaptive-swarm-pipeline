@@ -242,11 +242,33 @@
 
 ### P2-10 - research shortlist: adaptive open-source patterns
 
-- **Status:** P0-P2 primitives implemented; live validation pending
+- **Status:** Phase 0-6 adaptive integration implemented; live pilot/wiring of some modules pending
 - **Area:** research
 - **Reference:** [`docs/RESEARCH_BACKLOG.md`](RESEARCH_BACKLOG.md)
 - **Top picks after P0:** aider repo map, SWE-agent ACI, mem0-style failure memory, Letta-style tiered memory.
 - **Rule:** extract mechanisms only; do not add DSPy/Mem0/Letta/LiteLLM/AutoGen as runtime dependencies without separate approval.
+
+### P2-11 - Adaptive Phase 0-6 integration status
+
+- **Status:** implemented + tested; partial live runtime wiring
+- **Commits:** `29002e8`, `0892f49`, `8c57b93`, `85bc3b2`, `102b612`, `d6631d5`
+- **Implemented:**
+  - feature flags (`off|shadow|on`), default off
+  - Phase 1 repo map with PageRank, token cap and secret filtering
+  - Phase 2 windowed read-only ACI + pre-apply edit validation
+  - Phase 3 failure lessons with signature upsert/dedupe and redaction
+  - Phase 4 memory caps, read-only constitution, lock and corruption recovery
+  - Phase 5 event IDs, pagination and rate-limit/user-confirmation states
+  - Phase 6 `adaptive-map` / `adaptive-lessons` CLI and synced skill docs
+- **Usefulness:** better target-file selection, safer edits, less repeated failure, bounded memory, safer replay/control.
+- **Still open:**
+  - live shadow pilot has not been run
+  - `MEMORY_BUDGET` and `EVENTS` are module/CLI-ready but not wired into every live runner path
+  - repo map is Python-AST first; tree-sitter and tags cache deferred
+  - ACI submit gate/tool bundles are deferred
+  - macOS CI runner has been queued/cancelled
+- **Tests (local):** 34 unittest discover; Adaptive 42/42; M1 43/43; M2 38/38; M3 24/24; M5 14/14; P0 15/15; Phase 4 full 36/36; Phase 6A 72/72; skill 16/16.
+- **Safety:** no changes to `safe_writer`, worktree isolation, budget caps or `verify_command`; ACI has no write path.
 
 ---
 
@@ -278,3 +300,4 @@ When the repo is installed, inspect and record:
 - 2026-11-04: v2.1.0 packaged as opt-in; v1.0.5 remains default until P0-01 and P1-01 pass.
 - 2026-11-04: Spec Kit is a process/artifact layer, not a replacement for v2 worktree/budget/verify.
 - 2026-11-04: 9router is treated as a provider gateway; capability/cost metadata is a required gap, not a future nice-to-have.
+- 2026-11-05: Phase 0-6 adaptive modules landed with flags default off; live shadow pilot still required before enabling `on`.
