@@ -46,7 +46,7 @@ phases    : P1
 plan_hash : b92999a1c4eddffff537be20be03e3eae0fac7981c38c88aa2a9b420d1970645
 ```
 
-Execution stopped because `security` hit its free quota.  
+Execution stopped because `security` hit its free quota.
 At that time the adapter incorrectly translated reviewer infrastructure errors into
 `SecurityVeto`.
 
@@ -60,7 +60,7 @@ phases    : P1
 plan_hash : 5b541e4746f951ba5f0be95751f621fa61de52f926f3753c3ccf48d37c15f45b
 ```
 
-Execution stopped at `perf` with another free quota error.  
+Execution stopped at `perf` with another free quota error.
 This time the error was correctly classified as `ReviewerUnavailable`, not a
 security veto.
 
