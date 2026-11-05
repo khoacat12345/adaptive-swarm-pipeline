@@ -76,52 +76,96 @@
 - **Risk:** duplicate writes, stuck locks, or lost checkpoints under a real crash.
 - **Exit criterion:** kill runner after write/before verify and after verify/before checkpoint; new process resumes safely; no duplicate file version.
 
-### P0-06 — Approval policy is inconsistent; approval must apply only to War Room sessions
+### P0-06 — Replace plan approval with conditional Usage approval
 
 - **Status:** open
-- **Priority rationale:** super-urgent product rule. Current behavior makes quick tasks require approval while some expensive paths bypass it; users cannot know when approval is actually required.
-- **Area:** approval / cost control
-- **Intended product rule (confirmed by owner):**
-  - **No approval** for the quick path: one bounded task, one coder + one reviewer, free model, small request/time budget, valid `verify_command`.
-  - **Approval required** only for a War Room session: multi-agent/long-running/expensive work (`--reviewer wave`, `--mode meeting`, multi-phase/overnight, paid model, or estimated cost/requests above the configured threshold).
-  - The dashboard’s **War Room tab is only a view**. In this rule, “War Room session” means the expensive multi-agent execution path, not the tab itself.
-- **Current inconsistent behavior:**
-  - `job.py --plan ...` requires an approved plan for **every** plan, including a quick one-coder task.
-  - `recipe_c.py --order ...` requires **no approval**, even when it runs `--reviewer wave` / `--mode meeting`.
-  - `.agents/SKILL.md` recommends `recipe_c.py --order ...` for existing Work Orders, so a skill-driven run can take either side of the rule accidentally.
-  - `--mode meeting` is a review mode, not an approval trigger.
-  - `--decision approve` is headless approval, not “no approval”.
-  - v2 `signoff` is an approval gate before `execute`; `Accept handoff` is a separate handoff acknowledgement, not the start/apply gate.
-- **Risk:**
-  - Approval fatigue: users click through quick tasks until approval becomes meaningless.
-  - Quota burn: an expensive wave/meeting can start without approval through the direct recipe path.
-  - False confidence: operators believe “everything is approved” when approval is path-dependent.
-  - Documentation contradicts itself about `--decision approve` versus `--wait --open`.
-- **Required law:**
+- **Priority rationale:** super-urgent product rule. Current behavior makes quick tasks require plan approval while expensive paths can bypass it. The owner’s intended rule is different and must become explicit.
+- **Area:** approval / cost control / UI
+- **Owner decision:**
+  - **Plan approval is removed as the default human gate.** The planner always runs automatically; a validated plan may start without a plan-approval click.
+  - Human approval is **only for quota/spend**. The trigger is an estimated request/cost threshold, not the existence of a plan.
+  - The approval UI lives in **Usage**, not Plan. It must show the plan summary, selected agents/models, estimated requests, estimated cost, wall-clock estimate and remaining budget.
+  - Approving Usage approves that exact plan + estimate; if the plan or estimate changes, approval is invalidated.
+- **Required rule:**
   ```text
-  approval_required =
+  usage_approval_required =
       mode == "meeting"
       OR reviewer == "wave"
       OR overnight/multi_phase
       OR paid_model
-      OR estimated_requests > threshold
-      OR estimated_cost > threshold
+      OR estimated_requests >= threshold
+      OR estimated_cost >= threshold
   ```
-  For the quick path:
+  Quick path:
   ```text
-  approval_required = false
-  still required: verify_command + budget cap + reviewer + rollback
+  usage_approval_required = false
+  auto-run with verify_command + budget cap + reviewer + rollback
   ```
-  If `approval_required` is true, every entry point must block before the first model call until an approval record exists. The approval must bind to the exact plan/work-order hash.
+  “War Room session” in this document means the expensive multi-agent execution path, not the dashboard tab. The Plan page is preview-only.
+- **Current inconsistent behavior:**
+  - `job.py --plan ...` requires an approved plan for every plan, including a quick task.
+  - `recipe_c.py --order ...` has no approval check, even for wave/meeting.
+  - `.agents/SKILL.md` recommends direct `recipe_c --order`, so skill-driven runs can accidentally take the no-approval path.
+  - `--decision approve` is headless plan approval, not usage approval.
+  - v2 `signoff` is currently a plan/hash approval before `execute`; it must be redefined as Usage approval or replaced by the Usage gate.
+  - `Accept handoff` is a separate end-of-run acknowledgement, not the start/apply gate.
+- **Risk:**
+  - Approval fatigue: users click through quick tasks until approval means nothing.
+  - Quota burn: an expensive wave/meeting starts without a spend check through the direct recipe path.
+  - False confidence: operators think every task passed a human gate.
+  - Duplicate gates: Plan approval and Usage approval can disagree; the Plan page and README already show contradictory commands.
 - **Exit criterion:**
-  - One shared `approval_policy` helper; `job.py`, `recipe_c.py`, dashboard API and v2 use it.
-  - Quick path runs end-to-end without approval, but cannot exceed its request/time budget.
-  - Wave/meeting/overnight/paid/over-threshold runs are blocked without approval, including when invoked directly through `recipe_c`.
-  - Audit events: `approval.required`, `approval.approved`, `approval.skipped` (with actor/reason).
-  - Tests cover: quick path no-approval, War Room approval required, direct recipe cannot bypass War Room approval, plan/work-order hash mismatch is rejected.
-  - README has a single approval matrix; no contradictory “first task” command.
-- **Threat-model note:** if the agent has unrestricted shell access, it can bypass workflow gates entirely. This policy is a workflow and cost-control rule, not an OS sandbox; a real boundary needs separate OS/user/container permissions or an external approval service.
-- **Related:** P1-13; `.agents/SKILL.md`, `.agents/recipe_c.py`, `.agents/job.py`, `.agents/v2/execution.py`, `README.md`.
+  - One shared `usage_approval_policy`; `job.py`, `recipe_c.py`, dashboard API and v2 consume it.
+  - Plan page is preview-only; no default Approve button there.
+  - Usage approval is triggered only by the rule above and is bound to `plan_hash + estimate_hash`.
+  - Quick path auto-runs and emits `approval.skipped` with reason `below_threshold`.
+  - Expensive path blocks before the first model call until `usage.approved` exists, including direct `recipe_c`.
+  - Approval screen shows plan, agents/models, estimated usage/cost, budget and rollback policy.
+  - Tests cover: quick auto-run, threshold trigger, paid trigger, meeting trigger, direct-recipe bypass blocked, plan-change invalidates approval.
+  - README has one approval matrix and no plan-approval instruction left.
+- **Threat-model note:** if the agent has unrestricted shell access, it can bypass workflow gates entirely. Usage approval is cost control, not an OS sandbox; a real boundary needs separate OS/user/container permissions or an external approval service.
+- **Related:** P0-07, P1-13; `.agents/SKILL.md`, `.agents/recipe_c.py`, `.agents/job.py`, `.agents/v2/execution.py`, `.agents/dashboard_ui.html`, `README.md`.
+
+### P0-07 — Four-tier execution/planner model, mandatory planner, and M2 tracking
+
+- **Status:** open
+- **Priority rationale:** the tiering is now the core product model; without it, approval, planner count and UI tracking cannot be implemented consistently.
+- **Area:** orchestration / UX
+- **Owner decision:** use four **execution tiers** (separate from the existing classifier `Level 0-3`, which describes task scope):
+  ```text
+  E1  coder only
+  E2  coder + 1 reviewer
+  E3  coder + reviewer + additional specialist reviewer(s)
+  E4  meeting (full multi-agent round-based review)
+  ```
+  Exact E3 roster is still to confirm (candidate roles: security, QA, perf, docs; choose by risk). E4 is the existing meeting mode with all four reviewer roles.
+- **Planner tiers:**
+  ```text
+  P1  1 planner   -> simple tasks; E1/E2; no debate
+  P2  2 planners  -> proposal + critique; E3
+  P3  3 planners  -> full council; E4 meeting
+  ```
+  Planner is **always invoked when the OpenCode skill handles a coding task**. There is no skill path that goes straight to `recipe_c` without a planner. Direct `recipe_c` remains an internal/developer tool, not a skill entry point.
+- **M2 tracking requirement:**
+  - Current M2 (coder + reviewer) does not have a dedicated process view; the full War Room is the only detailed UI and direct recipe runs may not produce dashboard state.
+  - Every tier must write the same baseline events: `tier.selected`, `planner.selected`, `coder.started`, `reviewer.started`, `verify.started`, `verify.passed/failed`, `apply.committed/rolled_back`.
+  - E2 gets a lightweight Run timeline (plan → coder → reviewer → verify → apply) in Usage/Activity/Chat, without the full War Room graph.
+  - E3/E4 use the full War Room graph and meeting transcript.
+  - It must be possible to follow an E2 run without opening War Room.
+- **Required behavior:**
+  - Classifier + risk/cost policy selects E1-E4; the user can override explicitly.
+  - E1/E2 do not require Usage approval unless the cost/request threshold fires.
+  - E3/E4 follow P0-06 Usage approval rules.
+  - Planner count follows the tier; E4 always uses P3.
+  - The dashboard shows the chosen tier and why it was chosen (`tier.reason`).
+- **Exit criterion:**
+  - One `tier_policy` and one `planner_policy` module, with deterministic rules and explicit override.
+  - Planner invocation is mandatory on the skill entry path; tests prove a skill task cannot bypass the planner.
+  - E1-E4 each have an end-to-end test and a UI state.
+  - E2 has a compact timeline visible outside War Room.
+  - Tier/planner selection is recorded in the ledger and visible in Usage.
+- **Open question:** whether E1 (coder only) is allowed in production or should be restricted to dry-run/read-only tasks. Product owner to confirm.
+- **Related:** P0-06, P1-13, P1-14; `.agents/classifier.py`, `.agents/planner.py`, `.agents/job.py`, `.agents/workers.py`, `.agents/dashboard_ui.html`.
 
 ---
 
@@ -242,24 +286,43 @@
   - When is it panel, wave, War Room or meeting?
   - Which command comes next after install, plan, approval, failure or quota exhaustion?
   - What is v1 versus v2, and which one should a beginner use?
-- **Command-flow gap found while documenting this:** `.agents/SKILL.md` tells the agent to run `python .agents/planner.py --goal "..." --submit` and then wait for approval. That command only writes the plan/token and prints a dashboard URL; it does **not** start the dashboard or wait. The canonical operational handoff must be documented as `planner.py`/`--out` followed by `job.py --plan ... --wait --open` (or a separately running dashboard), otherwise a new user receives a dead link and no run.
-- **README inconsistency:** `README.md` “First task” shows `--decision approve` (headless, bypasses the dashboard) while the dashboard section shows `--wait --open`. A beginner guide must choose one canonical path and clearly separate “interactive approval” from “headless approval”.
-- **Risk:** a new user can install the repository and still not know the safe sequence; they may skip sign-off, run meeting without four reviewers, misread standby agents as active, or not know how to recover from verify/reviewer/budget failures.
+- **Command-flow gap (current code):** `.agents/SKILL.md` still tells the agent to run `python .agents/planner.py --goal "..." --submit` and then wait for approval. Under P0-06 this changes: the planner always runs, a validated plan may auto-start, and only the conditional Usage gate can block. Also, current `--submit` only writes the plan/token and prints a URL; it does not start the dashboard or wait. The guide must describe the target flow, not the old plan-approval flow.
+- **README inconsistency:** `README.md` “First task” shows `--decision approve` (headless plan approval) while the dashboard section shows `--wait --open`. Both will be obsolete under P0-06; the guide must present the new Usage-approval rule instead.
+- **Risk:** a new user can install the repository and still not know the safe sequence; they may miss a Usage threshold, mistake E2 for the full War Room, run meeting without four reviewers, misread standby agents as active, or not know how to recover from verify/reviewer/budget failures.
 - **Required guide:** one `docs/OPERATOR_GUIDE.md` with a linear narrative and a decision tree:
   1. **Install:** clone or copy `.agents/` + `.opencode/`; Python/Git/OpenCode checks.
   2. **Connect models:** `opencode auth list`, `opencode models`, `scout --write --verify` (free-only default), explain `config.json`.
   3. **Health gate:** `preflight --live`; what PASS, cooldown, quota and unavailable mean.
   4. **Load into OpenCode:** where the skill lives, how discovery works, `sync_skill.py`, and what changes when the user names `adaptive-swarm-pipeline` explicitly versus asking a normal coding question.
-  5. **First safe run:** create/choose an order or plan; explain Level 0–3 and `verify_command`.
-  6. **Approval:** v1 `job.py --wait --open` dashboard/token flow; v2 `prepare → plan → signoff`; no approval means no apply.
-  7. **Execution trace:** route/model selection, coder draft, draft verify, reviewer gate, apply, machine verify, rollback/report; list files and ledger events a user can inspect.
-  8. **Modes:** default panel vs `--reviewer wave` vs `--mode meeting`; War Room is a view, not a mode; meeting is explicit and fail-closed.
+  5. **First safe run:** planner always runs; explain classifier Level 0–3 (task scope), execution tiers E1–E4, and `verify_command`.
+  6. **Approval:** plan preview is not an approval gate; only Usage approval is used, and only when the quota/cost threshold fires. Show the exact screen, estimate, and what happens when no approval is needed.
+  7. **Execution trace:** E1–E4, planner P1–P3, route/model selection, coder draft, draft verify, reviewer gate, apply, machine verify, rollback/report; list files and ledger events a user can inspect.
+  8. **Modes:** E1 coder-only, E2 coder + one reviewer, E3 coder + additional reviewer(s), E4 meeting; War Room is a view, not a mode; meeting is explicit and fail-closed.
   9. **Failure recovery:** quota/`ReviewerUnavailable`, verify failure, reviewer reject, budget stop, pause/resume/stop, stale plan, rollback and cleanup.
   10. **New situations:** new project, new model/provider, new task type, new skill, switching v1/v2, changing adaptive flags.
   11. **Daily checklist:** before run, during run, after run, and what evidence to keep.
 - **Style requirement:** beginner-readable, command-first, every command followed by expected output/state and “what to do if it fails”; include one complete worked example and one failure example.
 - **Exit criterion:** a person with no prior knowledge of this repository can follow the guide from a fresh project to a verified result without asking for help, and can explain when the dashboard, War Room and meeting should be used.
 - **Dependencies:** keep `docs/INSTALL.md` as the short setup reference; link both docs rather than duplicating commands.
+
+### P1-14 — Research repos are not drop-in skills; compatibility matrix
+
+- **Status:** open
+- **Area:** research integration / accuracy
+- **Owner question:** can the newly downloaded repos be used as skills for the 1 coder + 1 reviewer system (E2), and can they be used for meeting (E4)?
+- **Answer recorded:** **No, not as drop-in skills.** They are reference source trees, not installed OpenCode skills and not runtime dependencies. A concept can be used only after an adapter/test exists. Do not claim “the repo is usable” merely because it is cloned.
+- **Current compatibility matrix:**
+  | Repo / concept | E2 (1 coder + 1 reviewer) | E4 meeting | Current status |
+  |---|---|---|---|
+  | `aider` / repo map | concept can improve target-file selection; needs adapter | indirect planning context | local primitive exists; not a skill |
+  | `SWE-agent` / ACI | concept can improve read-only context; needs adapter | indirect reviewer context | local windowed ACI primitive; not wired to live coder loop |
+  | `mem0` / memory | concept can supply failure lessons; needs adapter | can share lessons across reviewers | local lesson store; not a skill |
+  | `letta-code` / tiered memory | concept can bound context; needs adapter | useful for long meeting contexts | local context-budget primitive; not a skill |
+  | `OpenHands` / event stream | baseline event schema; partial | event/replay observability | local event runtime; not a full integration |
+- **Important limitation:** the repos are not installed as `.opencode/skills/*`, and no benchmark proves they improve E2/E4. The repo map, ACI, lessons and event schema are **extracted ideas**, not the upstream projects.
+- **Risk:** a new operator may assume cloning the research repos makes the system more capable; it does not. Claiming compatibility without an adapter/test would be false confidence.
+- **Exit criterion:** for every adopted repo concept, one benchmark or adapter test showing where it is used (E2 or E4), and an explicit “not used” note for the rest. The operator guide must say “reference only” until then.
+- **Related:** P0-07, `docs/RESEARCH_BACKLOG.md`, `docs/ADAPTIVE_TOOLKIT.md`, `C:\Users\tuank\research\repos`.
 
 ---
 
@@ -372,9 +435,11 @@ When the repo is installed, inspect and record:
 4. **P1-05 + P1-06**: Spec Kit bridge + constitution/converge.
 5. **P1-09 + P1-11**: stop v1 planner from silently choosing paid models; lock plan state.
 6. **P1-07**: AgentRuntime interface for future CLIs.
-7. **P0-06**: enforce the War-Room-only approval policy across every entry point; quick one-coder path stays approval-free.
-8. **P1-13**: write the beginner end-to-end operator guide before inviting new users.
-9. **P2**: UI/notifications/release polish.
+7. **P0-06**: replace plan approval with conditional Usage approval across every entry point; quick path stays approval-free.
+8. **P0-07**: implement E1–E4, P1–P3 and E2 lightweight tracking.
+9. **P1-13**: write the beginner end-to-end operator guide before inviting new users.
+10. **P1-14**: publish the research-repo compatibility matrix; mark clones as reference-only.
+11. **P2**: UI/notifications/release polish.
 
 ## Decision log
 
@@ -383,4 +448,6 @@ When the repo is installed, inspect and record:
 - 2026-11-04: 9router is treated as a provider gateway; capability/cost metadata is a required gap, not a future nice-to-have.
 - 2026-11-05: Phase 0-6 adaptive modules landed with flags default off; shadow pilot passed. Live free-model execution is blocked by free-tier quota exhaustion, not a code failure.
 - 2026-11-06: Recorded P1-13: a new operator needs one end-to-end runbook covering install, OpenCode skill invocation, dashboard/War Room, meeting selection, approvals, execution trace and failure recovery.
-- 2026-11-06: Promoted approval inconsistency to **P0-06** after owner clarification. The intended rule is **approval only for War Room/expensive long sessions**, not for a quick one-coder + one-reviewer task. Current `job.py` over-gates quick tasks while direct `recipe_c` under-gates expensive ones; the rule must be explicit and enforced at every entry point.
+- 2026-11-06: Promoted approval inconsistency to **P0-06** after owner clarification. Plan approval is removed as the default human gate; the planner runs automatically. Only **Usage approval** for quota/cost is kept, conditionally triggered in the Usage tab. Current `job.py` over-gates quick tasks while direct `recipe_c` under-gates expensive ones; the new policy must be enforced at every entry point.
+- 2026-11-06: Recorded **P0-07**: four execution tiers (E1 coder-only, E2 coder+reviewer, E3 coder+additional reviewer(s), E4 meeting), three planner levels (P1=1, P2=2, P3=3), mandatory planner on skill entry, and lightweight E2 run tracking outside War Room.
+- 2026-11-06: Recorded **P1-14**: downloaded research repos are reference-only, not drop-in skills; E2/E4 compatibility requires an adapter/benchmark and must not be claimed prematurely.
