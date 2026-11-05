@@ -1,6 +1,6 @@
 # Open Problems — Adaptive Swarm Pipeline
 
-> Last updated: 2026-11-04
+> Last updated: 2026-11-06
 > Current release: `v2.1.0` (opt-in; `v1.0.5` remains default)
 > Purpose: capture known gaps now, triage them once, and fix them in batches
 > instead of scattering fixes through unrelated sessions.
@@ -185,6 +185,33 @@
 - **Exit criterion:** a Spec Kit-generated `tasks.yaml` becomes a signed v2 plan without bypassing any safety gate.
 - **Reference:** `docs/SWARM_V2.1_SPEC.md`, `docs/CONSTITUTION.md`.
 
+### P1-13 — Missing end-to-end operator guide for a new user
+
+- **Status:** open
+- **Area:** onboarding / documentation
+- **Evidence:** `docs/INSTALL.md` explains setup and individual commands, but there is no single runbook that walks a new operator from “nothing installed” to “task finished safely”. Current questions include:
+  - When does the dashboard open?
+  - What exactly happens when a task is assigned through the OpenCode skill?
+  - When is it panel, wave, War Room or meeting?
+  - Which command comes next after install, plan, approval, failure or quota exhaustion?
+  - What is v1 versus v2, and which one should a beginner use?
+- **Risk:** a new user can install the repository and still not know the safe sequence; they may skip sign-off, run meeting without four reviewers, misread standby agents as active, or not know how to recover from verify/reviewer/budget failures.
+- **Required guide:** one `docs/OPERATOR_GUIDE.md` with a linear narrative and a decision tree:
+  1. **Install:** clone or copy `.agents/` + `.opencode/`; Python/Git/OpenCode checks.
+  2. **Connect models:** `opencode auth list`, `opencode models`, `scout --write --verify` (free-only default), explain `config.json`.
+  3. **Health gate:** `preflight --live`; what PASS, cooldown, quota and unavailable mean.
+  4. **Load into OpenCode:** where the skill lives, how discovery works, `sync_skill.py`, and what changes when the user names `adaptive-swarm-pipeline` explicitly versus asking a normal coding question.
+  5. **First safe run:** create/choose an order or plan; explain Level 0–3 and `verify_command`.
+  6. **Approval:** v1 `job.py --wait --open` dashboard/token flow; v2 `prepare → plan → signoff`; no approval means no apply.
+  7. **Execution trace:** route/model selection, coder draft, draft verify, reviewer gate, apply, machine verify, rollback/report; list files and ledger events a user can inspect.
+  8. **Modes:** default panel vs `--reviewer wave` vs `--mode meeting`; War Room is a view, not a mode; meeting is explicit and fail-closed.
+  9. **Failure recovery:** quota/`ReviewerUnavailable`, verify failure, reviewer reject, budget stop, pause/resume/stop, stale plan, rollback and cleanup.
+  10. **New situations:** new project, new model/provider, new task type, new skill, switching v1/v2, changing adaptive flags.
+  11. **Daily checklist:** before run, during run, after run, and what evidence to keep.
+- **Style requirement:** beginner-readable, command-first, every command followed by expected output/state and “what to do if it fails”; include one complete worked example and one failure example.
+- **Exit criterion:** a person with no prior knowledge of this repository can follow the guide from a fresh project to a verified result without asking for help, and can explain when the dashboard, War Room and meeting should be used.
+- **Dependencies:** keep `docs/INSTALL.md` as the short setup reference; link both docs rather than duplicating commands.
+
 ---
 
 ## P2 - polish / product experience
@@ -227,6 +254,7 @@
 - **Area:** onboarding
 - **Evidence:** zip excludes `config.json`, as intended.
 - **Need:** first-run wizard/doctor that explains `scout`, provider auth, 9router, and expected free/paid state.
+- **Related:** the narrative runbook gap is tracked in **P1-13**.
 
 ### P2-08 — live usage/cost dashboard
 
@@ -295,7 +323,8 @@ When the repo is installed, inspect and record:
 4. **P1-05 + P1-06**: Spec Kit bridge + constitution/converge.
 5. **P1-09 + P1-11**: stop v1 planner from silently choosing paid models; lock plan state.
 6. **P1-07**: AgentRuntime interface for future CLIs.
-7. **P2**: UI/notifications/release polish.
+7. **P1-13**: write the beginner end-to-end operator guide before inviting new users.
+8. **P2**: UI/notifications/release polish.
 
 ## Decision log
 
@@ -303,3 +332,4 @@ When the repo is installed, inspect and record:
 - 2026-11-04: Spec Kit is a process/artifact layer, not a replacement for v2 worktree/budget/verify.
 - 2026-11-04: 9router is treated as a provider gateway; capability/cost metadata is a required gap, not a future nice-to-have.
 - 2026-11-05: Phase 0-6 adaptive modules landed with flags default off; shadow pilot passed. Live free-model execution is blocked by free-tier quota exhaustion, not a code failure.
+- 2026-11-06: Recorded P1-13: a new operator needs one end-to-end runbook covering install, OpenCode skill invocation, dashboard/War Room, meeting selection, approvals, execution trace and failure recovery.
