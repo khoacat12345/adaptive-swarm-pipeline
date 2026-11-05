@@ -250,7 +250,7 @@
 
 ### P2-11 - Adaptive Phase 0-6 integration status
 
-- **Status:** implemented + tested; partial live runtime wiring
+- **Status:** implemented + tested; shadow pilot passed; live wiring/pilot pending
 - **Commits:** `29002e8`, `0892f49`, `8c57b93`, `85bc3b2`, `102b612`, `d6631d5`
 - **Implemented:**
   - feature flags (`off|shadow|on`), default off
@@ -268,6 +268,7 @@
   - ACI submit gate/tool bundles are deferred
   - macOS CI runner has been queued/cancelled
 - **Tests (local):** 34 unittest discover; Adaptive 42/42; M1 43/43; M2 38/38; M3 24/24; M5 14/14; P0 15/15; Phase 4 full 36/36; Phase 6A 72/72; skill 16/16.
+- **Shadow pilot:** PASS with all flags `shadow`; see [`SHADOW_PILOT_REPORT.md`](SHADOW_PILOT_REPORT.md).
 - **Safety:** no changes to `safe_writer`, worktree isolation, budget caps or `verify_command`; ACI has no write path.
 
 ---

@@ -36,6 +36,7 @@ next fix batches: [`docs/OPEN_PROBLEMS.md`](docs/OPEN_PROBLEMS.md). Research
 shortlist: [`docs/RESEARCH_BACKLOG.md`](docs/RESEARCH_BACKLOG.md). Adaptive
 primitives: [`docs/ADAPTIVE_TOOLKIT.md`](docs/ADAPTIVE_TOOLKIT.md). Integration
 plan: [`docs/SKILL_INTEGRATION_PLAN.md`](docs/SKILL_INTEGRATION_PLAN.md).
+Shadow pilot: [`docs/SHADOW_PILOT_REPORT.md`](docs/SHADOW_PILOT_REPORT.md).
 
 ## Why
 
