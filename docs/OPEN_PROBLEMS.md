@@ -305,24 +305,40 @@
 - **Exit criterion:** a person with no prior knowledge of this repository can follow the guide from a fresh project to a verified result without asking for help, and can explain when the dashboard, War Room and meeting should be used.
 - **Dependencies:** keep `docs/INSTALL.md` as the short setup reference; link both docs rather than duplicating commands.
 
-### P1-14 — Research repos are not drop-in skills; compatibility matrix
+### P1-14 — Extracted capabilities are not uniformly usable across E1–E4
 
 - **Status:** open
-- **Area:** research integration / accuracy
-- **Owner question:** can the newly downloaded repos be used as skills for the 1 coder + 1 reviewer system (E2), and can they be used for meeting (E4)?
-- **Answer recorded:** **No, not as drop-in skills.** They are reference source trees, not installed OpenCode skills and not runtime dependencies. A concept can be used only after an adapter/test exists. Do not claim “the repo is usable” merely because it is cloned.
-- **Current compatibility matrix:**
-  | Repo / concept | E2 (1 coder + 1 reviewer) | E4 meeting | Current status |
-  |---|---|---|---|
-  | `aider` / repo map | concept can improve target-file selection; needs adapter | indirect planning context | local primitive exists; not a skill |
-  | `SWE-agent` / ACI | concept can improve read-only context; needs adapter | indirect reviewer context | local windowed ACI primitive; not wired to live coder loop |
-  | `mem0` / memory | concept can supply failure lessons; needs adapter | can share lessons across reviewers | local lesson store; not a skill |
-  | `letta-code` / tiered memory | concept can bound context; needs adapter | useful for long meeting contexts | local context-budget primitive; not a skill |
-  | `OpenHands` / event stream | baseline event schema; partial | event/replay observability | local event runtime; not a full integration |
-- **Important limitation:** the repos are not installed as `.opencode/skills/*`, and no benchmark proves they improve E2/E4. The repo map, ACI, lessons and event schema are **extracted ideas**, not the upstream projects.
-- **Risk:** a new operator may assume cloning the research repos makes the system more capable; it does not. Claiming compatibility without an adapter/test would be false confidence.
-- **Exit criterion:** for every adopted repo concept, one benchmark or adapter test showing where it is used (E2 or E4), and an explicit “not used” note for the rest. The operator guide must say “reference only” until then.
-- **Related:** P0-07, `docs/RESEARCH_BACKLOG.md`, `docs/ADAPTIVE_TOOLKIT.md`, `C:\Users\tuank\research\repos`.
+- **Area:** research integration / capability wiring
+- **Owner question:** forget whether the upstream repos are usable. The real question is: the **skills/ideas extracted from those repos and put into our skill** — are they usable now, and can the coder, reviewer and meeting all use them across E1–E4?
+- **Answer recorded:** **Not yet uniformly.**
+  - The upstream repos are reference-only.
+  - The extracted primitives are implemented at different levels.
+  - E1–E4 does not exist as a runtime yet; current code still has v1 panel/wave/meeting plus a separate v2 planning/execution path.
+  - A shared `SKILL.md` does **not** mean every runtime can use every capability. The primitives are split across v1 and v2.
+- **Current capability matrix:** (E1–E4 are target tiers, not implemented paths)
+  | Extracted capability | Source idea | Current wiring | Coder can use? | Reviewer can use? | Meeting can use? | Verdict |
+  |---|---|---|---|---|---|---|
+  | Repo map | aider | v2 `planning.py` prompt, `REPO_MAP=on`; not v1 planner | indirect only if planner uses v2 | indirect through plan | no (v1 meeting path) | **partial** |
+  | Read-only ACI | SWE-agent | v2 `execution.py` validation + CLI; not coder tool loop | no, not wired into coder context | no, only post-edit validation | no | **validation only** |
+  | Failure lessons | mem0 | v2 planning hints + v2 execution capture; not v1 | indirect through plan | indirect through plan | no | **partial** |
+  | Memory budget | letta-code | module/CLI; not every live runner path | no | no | no | **not live** |
+  | Event IDs/pagination | OpenHands | event runtime; not every runner | no | no | partial observability | **partial** |
+  | Speaker selection | AutoGen concept | tested primitive only | no | no | not wired | **not wired** |
+- **Why the tiers do not automatically inherit them:**
+  - E1/E2 as currently imagined would use the v1 planner/recipe path, which does not load v2 repo-map/lessons.
+  - E4 meeting uses the v1 meeting path, which does not load the v2 planning/ACI primitives.
+  - v2 execution always uses four reviewers; it is not the E1/E2 path.
+  - There is no single runtime that all four tiers share today.
+- **Required work:**
+  1. Choose one runtime for E1–E4 (recommended: v2) or build a bridge from v1 meeting to the v2 capabilities.
+  2. Add a capability registry with explicit `wired_in: [E1, E2, E3, E4]` and `usable_by: [coder, reviewer, meeting]`.
+  3. Wire repo map + lessons into the planner used by every tier (planner is mandatory on skill entry).
+  4. Wire ACI read-only context into the coder prompt/tool loop; keep edit validation as a separate execution gate.
+  5. Wire memory/event runtime into all live runners.
+  6. Only advertise a capability in `SKILL.md` for tiers where it is wired and tested.
+- **Exit criterion:** every claimed capability in every claimed tier has an adapter test or benchmark; a capability that is not wired is explicitly listed as unavailable. The operator guide must say “reference-only” for the upstream repos and “partial” for the extracted primitives.
+- **Risk:** claiming “the skill works for E1–E4” today would be false. The current status is **partial v2 wiring, no unified tier runtime**.
+- **Related:** P0-07, `docs/RESEARCH_BACKLOG.md`, `docs/ADAPTIVE_TOOLKIT.md`, `docs/SHADOW_PILOT_REPORT.md`, `C:\Users\tuank\research\repos`.
 
 ---
 
@@ -438,7 +454,7 @@ When the repo is installed, inspect and record:
 7. **P0-06**: replace plan approval with conditional Usage approval across every entry point; quick path stays approval-free.
 8. **P0-07**: implement E1–E4, P1–P3 and E2 lightweight tracking.
 9. **P1-13**: write the beginner end-to-end operator guide before inviting new users.
-10. **P1-14**: publish the research-repo compatibility matrix; mark clones as reference-only.
+10. **P1-14**: publish the extracted-capability × E1–E4 matrix; wire only what is proven, and mark unwired capabilities unavailable.
 11. **P2**: UI/notifications/release polish.
 
 ## Decision log
@@ -450,4 +466,4 @@ When the repo is installed, inspect and record:
 - 2026-11-06: Recorded P1-13: a new operator needs one end-to-end runbook covering install, OpenCode skill invocation, dashboard/War Room, meeting selection, approvals, execution trace and failure recovery.
 - 2026-11-06: Promoted approval inconsistency to **P0-06** after owner clarification. Plan approval is removed as the default human gate; the planner runs automatically. Only **Usage approval** for quota/cost is kept, conditionally triggered in the Usage tab. Current `job.py` over-gates quick tasks while direct `recipe_c` under-gates expensive ones; the new policy must be enforced at every entry point.
 - 2026-11-06: Recorded **P0-07**: four execution tiers (E1 coder-only, E2 coder+reviewer, E3 coder+additional reviewer(s), E4 meeting), three planner levels (P1=1, P2=2, P3=3), mandatory planner on skill entry, and lightweight E2 run tracking outside War Room.
-- 2026-11-06: Recorded **P1-14**: downloaded research repos are reference-only, not drop-in skills; E2/E4 compatibility requires an adapter/benchmark and must not be claimed prematurely.
+- 2026-11-06: Corrected **P1-14**: the question is not whether the upstream repos are drop-in skills, but whether the **extracted capabilities** (repo map, ACI, lessons, memory, events, speaker selection) are wired for coder, reviewer and meeting across E1–E4. Current answer: partial v2 wiring, no unified tier runtime, and meeting does not inherit v2 planning/ACI.
