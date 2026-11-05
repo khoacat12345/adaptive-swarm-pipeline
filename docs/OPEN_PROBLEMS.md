@@ -214,6 +214,26 @@
 - **Exit criterion:** a person with no prior knowledge of this repository can follow the guide from a fresh project to a verified result without asking for help, and can explain when the dashboard, War Room and meeting should be used.
 - **Dependencies:** keep `docs/INSTALL.md` as the short setup reference; link both docs rather than duplicating commands.
 
+### P1-14 — Approval is path-dependent; direct recipe/skill path bypasses plan approval
+
+- **Status:** open
+- **Area:** safety / approval gate
+- **Evidence:**
+  - `job.py` checks `plan_decision.json == approved` before `run_job`; the normal plan workflow requires approval.
+  - `recipe_c.py --order order.json` has **no approval check**. It validates the Work Order, runs coder/reviewer/verify, and can apply through `safe_writer` immediately.
+  - `.agents/SKILL.md` tells the agent to use `recipe_c.py --order order.json` for an existing Work Order, so a skill-driven task can take the no-approval path.
+  - `--decision approve` and v2 `signoff` are still explicit approvals, but the agent itself can invoke them when it has shell access; a local token is not a separate human identity.
+  - Meeting is orthogonal: it is a review mode, not the approval gate. A direct `recipe_c --mode meeting` also bypasses plan approval.
+- **Risk:** “approve before write” is not a universal invariant. An operator may believe every task is approved, while a direct recipe/skill invocation writes after review/verify without any human pre-approval. This is especially dangerous for agent-driven runs.
+- **Threat-model note:** if the agent has unrestricted shell access, it can also call `safe_writer` or edit files directly. Approval artifacts enforce workflow discipline, not an adversarial sandbox. A real security boundary needs OS/user/container isolation or an approval service outside the agent.
+- **Exit criterion:**
+  - Every non-`--dry-run` apply path requires an approval record bound to the plan hash **or** Work Order hash.
+  - Direct `recipe_c` requires an explicit approval flag/token (or a clearly named `--auto-approve` with actor/reason audit) instead of silently running.
+  - Add tests for `job.py`, direct `recipe_c`, dashboard API, and v2 execute/signoff paths.
+  - README/operator guide contains an approval matrix: which entry point requires approval, and which is intentionally headless.
+- **Suggested first fix:** add a shared `approval_gate` helper used by `recipe_c` and `job.py`; default deny for direct apply, with an audited explicit override for tests/CI.
+- **Related:** P1-13; `.agents/SKILL.md`, `.agents/recipe_c.py`, `.agents/job.py`, `.agents/v2/execution.py`.
+
 ---
 
 ## P2 - polish / product experience
@@ -325,8 +345,9 @@ When the repo is installed, inspect and record:
 4. **P1-05 + P1-06**: Spec Kit bridge + constitution/converge.
 5. **P1-09 + P1-11**: stop v1 planner from silently choosing paid models; lock plan state.
 6. **P1-07**: AgentRuntime interface for future CLIs.
-7. **P1-13**: write the beginner end-to-end operator guide before inviting new users.
-8. **P2**: UI/notifications/release polish.
+7. **P1-14**: enforce approval on every non-dry-run apply path, especially direct `recipe_c`/skill invocation.
+8. **P1-13**: write the beginner end-to-end operator guide before inviting new users.
+9. **P2**: UI/notifications/release polish.
 
 ## Decision log
 
@@ -335,3 +356,4 @@ When the repo is installed, inspect and record:
 - 2026-11-04: 9router is treated as a provider gateway; capability/cost metadata is a required gap, not a future nice-to-have.
 - 2026-11-05: Phase 0-6 adaptive modules landed with flags default off; shadow pilot passed. Live free-model execution is blocked by free-tier quota exhaustion, not a code failure.
 - 2026-11-06: Recorded P1-13: a new operator needs one end-to-end runbook covering install, OpenCode skill invocation, dashboard/War Room, meeting selection, approvals, execution trace and failure recovery.
+- 2026-11-06: Recorded P1-14: approval is path-dependent. `job.py` requires an approved plan, but direct `recipe_c --order` and the skill’s direct-order path can apply without plan approval; meeting is not the approval gate.
