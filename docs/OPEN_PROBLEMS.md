@@ -269,6 +269,7 @@
   - macOS CI runner has been queued/cancelled
 - **Tests (local):** 34 unittest discover; Adaptive 42/42; M1 43/43; M2 38/38; M3 24/24; M5 14/14; P0 15/15; Phase 4 full 36/36; Phase 6A 72/72; skill 16/16.
 - **Shadow pilot:** PASS with all flags `shadow`; see [`SHADOW_PILOT_REPORT.md`](SHADOW_PILOT_REPORT.md).
+- **Live free-model pilot:** planning PASS; execution blocked by free-tier quota exhaustion; see [`LIVE_PILOT_REPORT.md`](LIVE_PILOT_REPORT.md).
 - **Safety:** no changes to `safe_writer`, worktree isolation, budget caps or `verify_command`; ACI has no write path.
 
 ---
@@ -301,4 +302,4 @@ When the repo is installed, inspect and record:
 - 2026-11-04: v2.1.0 packaged as opt-in; v1.0.5 remains default until P0-01 and P1-01 pass.
 - 2026-11-04: Spec Kit is a process/artifact layer, not a replacement for v2 worktree/budget/verify.
 - 2026-11-04: 9router is treated as a provider gateway; capability/cost metadata is a required gap, not a future nice-to-have.
-- 2026-11-05: Phase 0-6 adaptive modules landed with flags default off; live shadow pilot still required before enabling `on`.
+- 2026-11-05: Phase 0-6 adaptive modules landed with flags default off; shadow pilot passed. Live free-model execution is blocked by free-tier quota exhaustion, not a code failure.

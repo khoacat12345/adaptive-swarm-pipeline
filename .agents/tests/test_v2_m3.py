@@ -28,6 +28,7 @@ from v2.errors import (  # noqa: E402
     CrossFamilyError,
     ExecutionError,
     NoProgressError,
+    ReviewerUnavailable,
     SecurityVeto,
     TestIntegrityError,
 )
@@ -450,6 +451,21 @@ def test_adapters(checks: Checks) -> None:
                      finding["verdict"] == "reject" and finding["severity"] == "blocker")
         checks.check("m3.5: reviewer evidence is preserved",
                      finding["evidence"] == ["injection in diff"])
+        class _ErrorReviewer:
+            def review(self, order, *, diff, new_content, old_content, level, sink):
+                return {"verdict": "error", "reasons": ["quota reached"]}
+        reviewer.reviewer = _ErrorReviewer()
+        unavailable = False
+        try:
+            reviewer.review(
+                "security", diff="diff",
+                work_order={"id": "S1", "objective": "x", "verify_command": "py",
+                            "target_files": ["src.py"], "level": 1},
+                phase={"id": "P1"},
+            )
+        except ReviewerUnavailable:
+            unavailable = True
+        checks.check("m3.5: reviewer infrastructure error is not a security veto", unavailable)
     finally:
         rmtree(TEMP_ROOT / "adapter-sandbox")
         rmtree(root)

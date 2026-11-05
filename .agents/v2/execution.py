@@ -24,6 +24,7 @@ from .errors import (
     CrossFamilyError,
     ExecutionError,
     NoProgressError,
+    ReviewerUnavailable,
     SecurityVeto,
     TestIntegrityError,
 )
@@ -553,6 +554,17 @@ class ExecutionEngine:
                             }
                         )
                         break
+                    except ReviewerUnavailable as exc:
+                        if tx is not None and getattr(tx, "state", "") == "open":
+                            try:
+                                tx.rollback("reviewer unavailable")
+                            except Exception:
+                                pass
+                        try:
+                            self.runner.pause(run_id, reason=f"reviewer unavailable: {str(exc)[:300]}")
+                        except Exception:
+                            pass
+                        raise
                     except (SecurityVeto, TestIntegrityError, CrossFamilyError, NoProgressError) as exc:
                         self._record_lesson(
                             kind=exc.code, error=str(exc),

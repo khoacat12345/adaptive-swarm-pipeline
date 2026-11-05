@@ -89,3 +89,7 @@ class SecurityVeto(ExecutionError):
 
 class NoProgressError(ExecutionError):
     code = "NO_PROGRESS"
+
+
+class ReviewerUnavailable(ExecutionError):
+    code = "REVIEWER_UNAVAILABLE"

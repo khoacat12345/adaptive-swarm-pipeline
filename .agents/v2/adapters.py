@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from .errors import ExecutionError
+from .errors import ExecutionError, ReviewerUnavailable
 from .execution import ExecutionSeat, model_family
 from .models import is_free, select_free_seats, validate_explicit
 
@@ -155,6 +155,11 @@ class WorkersReviewerAdapter:
             raise ExecutionError(f"reviewer {role} failed: {str(exc)[:500]}") from exc
         verdict = str(payload.get("verdict") or "error").lower()
         reasons = [str(item) for item in (payload.get("reasons") or [])]
+        if verdict == "error":
+            raise ReviewerUnavailable(
+                f"reviewer {role} infrastructure failure: "
+                + "; ".join(reasons)[:500]
+            )
         if verdict not in {"approve", "reject"}:
             verdict = "reject"
         if verdict == "reject":
