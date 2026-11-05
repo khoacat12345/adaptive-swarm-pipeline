@@ -196,6 +196,7 @@
   - Which command comes next after install, plan, approval, failure or quota exhaustion?
   - What is v1 versus v2, and which one should a beginner use?
 - **Command-flow gap found while documenting this:** `.agents/SKILL.md` tells the agent to run `python .agents/planner.py --goal "..." --submit` and then wait for approval. That command only writes the plan/token and prints a dashboard URL; it does **not** start the dashboard or wait. The canonical operational handoff must be documented as `planner.py`/`--out` followed by `job.py --plan ... --wait --open` (or a separately running dashboard), otherwise a new user receives a dead link and no run.
+- **README inconsistency:** `README.md` “First task” shows `--decision approve` (headless, bypasses the dashboard) while the dashboard section shows `--wait --open`. A beginner guide must choose one canonical path and clearly separate “interactive approval” from “headless approval”.
 - **Risk:** a new user can install the repository and still not know the safe sequence; they may skip sign-off, run meeting without four reviewers, misread standby agents as active, or not know how to recover from verify/reviewer/budget failures.
 - **Required guide:** one `docs/OPERATOR_GUIDE.md` with a linear narrative and a decision tree:
   1. **Install:** clone or copy `.agents/` + `.opencode/`; Python/Git/OpenCode checks.
