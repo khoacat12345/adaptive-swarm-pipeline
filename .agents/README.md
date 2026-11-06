@@ -106,6 +106,16 @@ python3 .agents/v2/run.py execute --run-id v2_... --free
 name. The `/v2` page shows **Approve Usage**. `Accept handoff` remains a separate
 end-of-run acknowledgement.
 
+## Soak / overnight
+
+```bash
+python3 .agents/soak_runner.py --mode fake --hours 8 --interval 60 --keep-awake
+python3 .agents/soak_runner.py --mode live --hours 8 --interval 60 --keep-awake
+```
+
+Heartbeats append to `docs/SOAK_LOG.md`. Fake mode exercises the state machine
+without model quota; live mode uses the same free seats and Usage gate.
+
 ## Observe
 
 ```bash

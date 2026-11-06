@@ -66,6 +66,17 @@ def provider_status(config: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
+def _tool_ok(entry: Mapping[str, Any]) -> bool:
+    """A known tooling score below 0.5 is not eligible for agentic seats."""
+    caps = entry.get("capabilities")
+    if not isinstance(caps, Mapping) or caps.get("tooling") is None:
+        return True
+    try:
+        return float(caps.get("tooling")) >= 0.5
+    except (TypeError, ValueError):
+        return True
+
+
 def _candidate_models(
     config: Mapping[str, Any],
     *,
@@ -79,6 +90,7 @@ def _candidate_models(
         if is_usable(str(entry.get("id") or ""), config)
         and (not free_only or entry.get("is_free") or entry.get("cost_tier") == "free")
         and str(entry.get("family") or "unknown") not in exclude_families
+        and _tool_ok(entry)
     ]
 
     def score(entry: Mapping[str, Any]) -> tuple:

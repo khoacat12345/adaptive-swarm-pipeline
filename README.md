@@ -216,6 +216,16 @@ set SWARM_WAVE_ROLES=security=opencode/deepseek-v4.1-flash-free,qa=opencode/deep
 python .agents/job.py --plan scratch/swarm_demo/plan_wave.json --root . --reviewer wave --model opencode/deepseek-v4.1-flash-free --decision approve  # headless Usage approval
 ```
 
+## Soak / overnight
+
+```bash
+python .agents/soak_runner.py --mode fake --hours 8 --interval 60 --keep-awake
+python .agents/soak_runner.py --mode live --hours 8 --interval 60 --keep-awake
+```
+
+Heartbeats append to `docs/SOAK_LOG.md`. Fake mode exercises the state machine
+without model quota; live mode uses the same free seats and Usage gate.
+
 ## Notifications (one-way)
 
 Create `.agents/notify.json`:

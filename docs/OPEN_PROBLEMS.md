@@ -44,9 +44,10 @@
 
 ### P0-02 — actual spend/cost is not reconciled
 
-- **Status:** in progress — `spend_reconcile.py` + tests landed; per-call hook still pending
+- **Status:** resolved — per-call reconciliation is wired into v2 `_call`
 - **Area:** budget/cost
-- **Batch 2 progress (2026-11-06):** added before/after snapshots, `Reconciler`, over-budget detection and an OpenCode DB source adapter. `test_cost_reconciliation.py`: 7/7 PASS. The live execution loop still needs to call it after every provider call.
+- **Batch 2 progress (2026-11-06):** added before/after snapshots, `Reconciler`, over-budget detection and an OpenCode DB source adapter. `test_cost_reconciliation.py`: 7/7 PASS.
+- **Deep-wiring evidence (2026-11-07):** `ExecutionEngine._call()` snapshots usage before/after every provider call, settles actual cost/tokens into `BudgetController`, and stops the run on overrun. Paid seats are blocked when the actual usage source is unavailable.
 - **Evidence:** `ExecutionSeat.cost_usd` is an estimate; `BudgetController` settles the estimated cost, not measured provider billing. `pricing` is `null` for many catalog entries.
 - **Risk:** a paid run can stay under the estimated budget while actual provider spend is higher.
 - **Exit criterion:** after each call, actual tokens/cost are read from OpenCode stats or 9router usage, compared with the reservation, and an overrun stops the run before the next call.
@@ -65,9 +66,10 @@
 
 ### P0-04 — live paid-model guard is only an estimate gate
 
-- **Status:** in progress — pricing/reconcile primitives landed; hard provider cap still required
+- **Status:** resolved — actual usage settlement stops paid overruns in v2
 - **Area:** cost safety
-- **Batch 2 progress (2026-11-06):** `model_registry.py` exposes pricing/health/tool metadata; `spend_reconcile.py` computes actual-vs-estimate deltas and over-budget flags. Hook into every provider call remains pending.
+- **Batch 2 progress (2026-11-06):** `model_registry.py` exposes pricing/health/tool metadata; `spend_reconcile.py` computes actual-vs-estimate deltas and over-budget flags.
+- **Deep-wiring evidence (2026-11-07):** `_call` passes actual cost into `BudgetController.settle`; `BudgetOverrun` sets `stop_reason=budget_overrun` before the next call. Paid seats fail closed if the usage source is unavailable.
 - **Evidence:** paid models are blocked when `cost_usd == 0`; with `--paid-cost N`, each call reserves `N` but actual usage is not verified.
 - **Risk:** a wrong `N` under-reserves.
 - **Exit criterion:** either real usage settlement (P0-02) or a hard provider-level spend cap enforced at 9router/gateway.
@@ -196,16 +198,18 @@
 
 ### P1-01 — 8–10 hour soak not executed
 
-- **Status:** open
+- **Status:** in progress — 8-hour soak runner restarted 2026-11-07 00:23 (PID 6236)
 - **Area:** M5 soak
+- **Soak evidence:** `.agents/soak_runner.py` started in background (`--mode fake --hours 8 --interval 60 --keep-awake`), heartbeat in `docs/SOAK_LOG.md`. Live pilot remains separately proven. Tool: [`../.agents/soak_runner.py`](../.agents/soak_runner.py).
 - **Evidence:** M5 uses a multi-phase synthetic soak and fake clock; no wall-clock long run.
 - **Risk:** memory/disk/log growth, sleep/resume, auth expiry and quota drift are untested at night.
 - **Exit criterion:** one night run with phase budget caps, periodic heartbeat, disk/log checks and a morning handoff report.
 
 ### P1-02 — Windows sleep/lock/session behavior
 
-- **Status:** open
+- **Status:** in progress — soak runner uses Windows SetThreadExecutionState keep-awake; 8h observation pending
 - **Area:** overnight reliability
+- **Soak evidence:** start command used `--keep-awake`; log in `docs/SOAK_LOG.md`. A physical lock/sleep test still needs operator observation.
 - **Evidence:** worktree/verify are tested on Windows in CI; active overnight sleep/power policy is not.
 - **Risk:** laptop sleeps, OpenCode session dies, or network drops at 03:00.
 - **Exit criterion:** documented power policy + resume test; runner pauses safely or prevents sleep explicitly.

@@ -356,15 +356,44 @@ class ExecutionEngine:
             cost_usd=cost,
             repair=repair,
         )
+        settled = False
         try:
+            if seat.is_free:
+                result = fn()
+                budget.settle(reservation, requests=1, cost_usd=0.0,
+                              cost_confidence="high")
+                settled = True
+                return result
+            import spend_reconcile
+            before = spend_reconcile.snapshot_from_quota(self.runner.root)
+            if before.source == "unavailable":
+                raise BudgetBlocked(
+                    f"paid model requires an actual usage source: {seat.model}"
+                )
             result = fn()
-            budget.settle(reservation, requests=1, cost_usd=cost)
+            after = spend_reconcile.snapshot_from_quota(self.runner.root)
+            reconciled = spend_reconcile.reconcile(
+                before, after, estimated_cost_usd=cost,
+                max_cost_usd=max(cost, float(seat.cost_usd)),
+            )
+            actual_cost = reconciled.actual_cost_usd
+            if reconciled.over_budget:
+                budget.stop(
+                    f"actual spend exceeded reservation for {seat.model}: "
+                    f"{actual_cost} > {cost}"
+                )
+            budget.settle(
+                reservation, requests=1, cost_usd=actual_cost,
+                cost_confidence="high",
+            )
+            settled = True
             return result
         except Exception:
-            try:
-                budget.settle(reservation, requests=1, cost_usd=cost)
-            except Exception:
-                pass
+            if not settled:
+                try:
+                    budget.settle(reservation, requests=1, cost_usd=cost)
+                except Exception:
+                    pass
             raise
 
     # ------------------------------------------------------------------
