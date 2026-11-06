@@ -78,7 +78,8 @@
 
 ### P0-06 — Replace plan approval with conditional Usage approval
 
-- **Status:** open
+- **Status:** open — implementation plan ready
+- **Plan:** [`PLAN_P0_06_USAGE_APPROVAL.md`](PLAN_P0_06_USAGE_APPROVAL.md)
 - **Priority rationale:** super-urgent product rule. Current behavior makes quick tasks require plan approval while expensive paths can bypass it. The owner’s intended rule is different and must become explicit.
 - **Area:** approval / cost control / UI
 - **Owner decision:**
