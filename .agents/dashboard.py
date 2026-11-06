@@ -418,6 +418,32 @@ def make_handler(root: Path, ledger: Path):
                 elif route == "/api/plan":
                     import job as job_module
                     self._json(job_module.read_plan_state(root))
+                elif route == "/api/usage/status":
+                    import approval_policy
+                    import job as job_module
+                    query = parse_qs(parsed.query)
+                    reviewer = (query.get("reviewer") or ["heuristic"])[0]
+                    mode = (query.get("mode") or ["panel"])[0]
+                    try:
+                        plan = json.loads(
+                            job_module.plan_path(root).read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        self._json({"error": "no plan submitted"}, 404)
+                        return
+                    try:
+                        decision = job_module.usage_decision(
+                            root, plan, reviewer=reviewer, mode=mode)
+                        status = approval_policy.approval_status(
+                            job_module.usage_approval_path(root), decision)
+                        self._json({
+                            "plan": plan,
+                            "reviewer": reviewer,
+                            "mode": mode,
+                            "decision": decision.as_dict(),
+                            "status": status,
+                        })
+                    except Exception as exc:  # noqa: BLE001
+                        self._json({"error": str(exc)[:400]}, 400)
                 elif route == "/api/plan/md":
                     import job as job_module
                     import plan_md
@@ -542,6 +568,32 @@ def make_handler(root: Path, ledger: Path):
                         self._json({"error": str(exc)}, 409)
                     except Exception as exc:  # noqa: BLE001
                         self._json({"error": str(exc)[:300]}, 400)
+                elif route == "/api/usage/decision":
+                    import job as job_module
+                    decision = str(payload.get("decision") or "").lower()
+                    try:
+                        if decision == "approve":
+                            result = job_module.approve_usage(
+                                root, str(payload.get("token") or ""),
+                                reviewer=str(payload.get("reviewer") or "heuristic"),
+                                mode=str(payload.get("mode") or "panel"),
+                                model=payload.get("model") or None,
+                                approved_by="dashboard-user",
+                            )
+                        elif decision == "reject":
+                            result = job_module.reject_usage(
+                                root, str(payload.get("token") or ""),
+                                reason=str(payload.get("reason") or "dashboard reject"),
+                            )
+                        else:
+                            raise ValueError("decision must be approve or reject")
+                    except PermissionError as exc:
+                        self._json({"error": str(exc)}, 403)
+                        return
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 400)
+                        return
+                    self._json(result)
                 elif route == "/api/plan/decision":
                     import job as job_module
                     try:
@@ -562,7 +614,8 @@ def make_handler(root: Path, ledger: Path):
                             root, token=str(payload.get("token") or ""),
                             reviewer=str(payload.get("reviewer") or "heuristic"),
                             model=payload.get("model") or None,
-                            coder=str(payload.get("coder") or "agentic"))
+                            coder=str(payload.get("coder") or "agentic"),
+                            mode=str(payload.get("mode") or "panel"))
                     except PermissionError as exc:
                         self._json({"error": str(exc)}, 403)
                         return

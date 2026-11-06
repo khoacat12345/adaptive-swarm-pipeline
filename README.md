@@ -102,17 +102,22 @@ Full cross-platform setup, optional skill discovery, dashboard and MCP notes:
 ### First task
 
 ```bash
-python3 .agents/recipe_c.py --order scratch/swarm_demo/order.json --route --json
+python3 .agents/planner.py --goal "fix the failing add() test" --out .agents/tmp/auto_plan.json
+python3 .agents/job.py --plan .agents/tmp/auto_plan.json
 ```
 
-Panel mode is the default. Meeting mode is opt-in:
+A quick plan with one coder + one reviewer runs without a plan-approval click.
+When the policy estimates a wave/meeting/overnight/paid run, it opens the
+**Usage** gate instead:
 
 ```bash
-python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --decision approve
+python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --wait --open
 ```
 
 `--mode meeting` requires `--reviewer wave`; it adds independent Round 1 plus at
-most one targeted rebuttal and a machine re-verify before Lead applies.
+most one targeted rebuttal and a machine re-verify before Lead applies. Approval
+is for quota/cost, not for the existence of a plan. See
+[`docs/PLAN_P0_06_USAGE_APPROVAL.md`](docs/PLAN_P0_06_USAGE_APPROVAL.md).
 
 ### Health & cost preflight
 
@@ -207,7 +212,7 @@ Free dry-run (same free model for all four roles, $0):
 
 ```cmd
 set SWARM_WAVE_ROLES=security=opencode/deepseek-v4.1-flash-free,qa=opencode/deepseek-v4.1-flash-free,perf=opencode/deepseek-v4.1-flash-free,docs=opencode/deepseek-v4.1-flash-free
-python .agents/job.py --plan scratch/swarm_demo/plan_wave.json --root . --reviewer wave --model opencode/deepseek-v4.1-flash-free --decision approve
+python .agents/job.py --plan scratch/swarm_demo/plan_wave.json --root . --reviewer wave --model opencode/deepseek-v4.1-flash-free --decision approve  # headless Usage approval
 ```
 
 ## Notifications (one-way)
@@ -242,7 +247,7 @@ python .agents/tests/test_phase4.py       # observation layer
 python .agents/tests/test_level3.py       # multi-file transaction + regressions
 python .agents/tests/test_phase5.py        # router + fallback reviewer + regressions
 python .agents/tests/test_quota.py         # quota math + quota-aware routing
-python .agents/tests/test_phase6.py        # plan approval + job executor
+python .agents/tests/test_phase6.py        # Usage approval + job executor
 python .agents/tests/test_planner.py       # goal -> plan + webhook notifications
 python .agents/tests/test_wave.py          # 4 parallel reviewers + fail-closed budget
 python .agents/tests/test_preflight.py     # health/cost preflight gate
@@ -269,7 +274,7 @@ Hard model-selection tasks live in `.agents/tests/hard_tasks.py`; see
 | `.agents/safe_writer.py` | backup, atomic write, transaction, journal, rollback |
 | `.agents/router.py` | work-type router (W0-W8) with cross-family chains |
 | `.agents/quota.py` | real spend from `opencode stats` (shared + per-model caps) |
-| `.agents/job.py` | plan approval, state/control, sequential executor |
+| `.agents/job.py` | Usage approval, state/control, sequential executor |
 | `.agents/planner.py` | goal -> plan.json (W4 planner) |
 | `.agents/notify.py` | one-way Discord/Telegram/generic webhooks |
 | `.agents/telegram_bot.py` | two-way Telegram control (/approve, /pause, /say) |

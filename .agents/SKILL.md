@@ -11,10 +11,11 @@ anything else; this file only exists so OpenCode can discover the skill.
    - **DO NOT** answer with conversational promises without invoking tools.
 
 2. **MANDATORY TERMINAL INVOCATION**:
-   You MUST immediately run the pipeline via bash/powershell tool:
+   The planner always runs for a coding task. Do not use a plan-approval click:
    - For a natural language task / new feature:
      ```bash
-     python .agents/planner.py --goal "<User's exact task>" --submit
+     python .agents/planner.py --goal "<User's exact task>" --out .agents/tmp/auto_plan.json
+     python .agents/job.py --plan .agents/tmp/auto_plan.json
      ```
    - For an existing Work Order file:
      ```bash
@@ -26,9 +27,17 @@ anything else; this file only exists so OpenCode can discover the skill.
      ```
 
 3. **WORKFLOW EXECUTION**:
-   - Execute `python .agents/planner.py --goal "..." --submit` via your shell tool.
-   - Capture the terminal output, return the approval dashboard URL to the user, and wait for human sign-off.
-   - All code writes MUST go through the swarm pipeline (`safe_writer`) and pass `verify_command`.
+   - A quick plan (one coder + one reviewer, below the Usage threshold) may run
+     automatically. Do not invent a plan-approval step.
+   - A wave, meeting, overnight/multi-phase, paid, or over-threshold run requires
+     **Usage approval** before any model call:
+     ```bash
+     python .agents/job.py --plan .agents/tmp/auto_plan.json --wait --open
+     ```
+   - Direct `recipe_c` is not a bypass: expensive direct runs are blocked unless
+     a valid Usage approval exists.
+   - All code writes MUST go through the swarm pipeline (`safe_writer`) and pass
+     `verify_command`.
 
 Quick reference:
 

@@ -78,8 +78,15 @@
 
 ### P0-06 — Replace plan approval with conditional Usage approval
 
-- **Status:** open — implementation plan ready
+- **Status:** in progress — v1 core + Usage UI implemented; v2 gate and final docs follow-up
 - **Plan:** [`PLAN_P0_06_USAGE_APPROVAL.md`](PLAN_P0_06_USAGE_APPROVAL.md)
+- **Progress (2026-11-06):**
+  - Added shared `.agents/approval_policy.py` (estimate, policy, hash-bound approval record).
+  - `job.py` now auto-runs quick plans and gates expensive plans on Usage approval.
+  - `recipe_c --order` now blocks expensive direct runs without a Usage approval.
+  - Dashboard Usage API/UI added; Plan page is preview-only.
+  - Tests: approval policy 28/28; usage gate 1/1; Phase 6A 79/79; wave 32/32; meeting UI 31/31; preflight 38/38; skill 16/16.
+  - README/INSTALL/SKILL updated for the new flow.
 - **Priority rationale:** super-urgent product rule. Current behavior makes quick tasks require plan approval while expensive paths can bypass it. The owner’s intended rule is different and must become explicit.
 - **Area:** approval / cost control / UI
 - **Owner decision:**

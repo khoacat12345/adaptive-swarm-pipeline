@@ -2669,6 +2669,9 @@
 
       <!-- USAGE -->
       <section class="view" id="view-quota">
+        <div class="card" id="usageApprovalCard" style="margin-bottom:14px">
+          <div id="usageApproval" class="muted">Loading usage gate...</div>
+        </div>
         <div class="grid g3" id="spendCards"></div>
         <div class="card" id="limitCard" style="margin-top:14px"></div>
         <div class="card" style="margin-top:14px">
@@ -2831,6 +2834,7 @@
       chatFilter: 'all', overviewTab: 'warroom', hourlyMode: 'cost', teamData: null, replayIndex: null, replayTimer: null, pageSig: {},
       meetingRound: 'all', stream: null, streamRun: null, streamHealthy: false, streamRefreshTimer: null,
       token: new URLSearchParams(location.search).get('token') || '', sessionToken: '',
+      usageGate: { reviewer: 'heuristic', mode: 'panel' }, usageApproval: null,
       lastQuota: 0, sig: {}
     };
     // Optional deep-link/test hook: ?follow=1 opens Chat at the newest event.
@@ -3430,11 +3434,10 @@
       const waves = dependencyWaves(subs);
       const mdName = String(plan.job_id || 'plan').replace(/[^A-Za-z0-9._-]+/g, '_') + '.md';
       const mdPath = '.agents/tmp/plans/' + mdName;
-      const actions = pending ? `<div class="row" style="margin-bottom:12px">
-      <button class="btn primary" onclick="decide('approve', true)">Approve &amp; Run</button>
-      <button class="btn ghost" onclick="decide('approve')">Approve only</button>
-      <button class="btn bad" onclick="decide('reject')">Reject</button>
-      <span class="muted" style="font-size:10.5px">Default is heuristic (0 reviewer requests). Choose wave in War room for 5 agents. Approve only records the decision.</span></div>` : '';
+      const actions = `<div class="row" style="margin-bottom:12px">
+      <span class="chip ok">Plan preview</span>
+      <span class="muted" style="font-size:10.5px">No plan approval here. A validated plan may run automatically; only expensive runs need Usage approval.</span>
+      <button class="btn ghost" onclick="switchView('quota')">Open Usage gate</button></div>`;
       const runAction = jobState.phase !== 'done' && (
         ['approved', 'stopped'].includes(decision.status) ||
         ['approved', 'stopped'].includes(jobState.phase))
@@ -3743,9 +3746,9 @@
       <button class="btn ghost" onclick="setOverviewTab('verify')">Verify</button>
     </div></div>
 
-  ${['approved', 'stopped'].includes(phase) ? `<div class="card" style="margin-bottom:12px;border-color:#0b6d96;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+  ${['approved', 'stopped', 'awaiting_approval'].includes(phase) ? `<div class="card" style="margin-bottom:12px;border-color:#0b6d96;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
     <div><b>Ready to run</b>
-      <div class="muted" style="font-size:11px">The plan is ${esc(phase)}. Pick reviewer/coder mode and start the job; progress appears here within a few seconds.</div></div>
+      <div class="muted" style="font-size:11px">Plan preview is complete. Pick reviewer/coder mode; expensive runs need Usage approval first.</div></div>
     <div class="row">
       <select id="runCoder" class="btn ghost" style="padding:7px 8px"
         title="agentic uses a multi-turn tool loop; opencode uses one-shot patch (fewer requests)">
@@ -3758,6 +3761,7 @@
         <option value="wave">wave · 5 agents (4 extra requests)</option>
         <option value="none">none</option>
       </select>
+      <button class="btn ghost" onclick="switchView('quota')">Usage gate</button>
       <button class="btn primary" onclick="runJob(this)">Run job</button>
     </div>
   </div>` : ''}
@@ -4151,7 +4155,7 @@
       if (!plan) {
         actions.push(`<button class="btn primary" onclick="document.getElementById('goal').focus()">Plan a goal</button>`);
       } else if (status === 'pending') {
-        actions.push(`<button class="btn primary" onclick="decide('approve', true)">Approve &amp; Run</button>`);
+        actions.push(`<button class="btn primary" onclick="switchView('quota')">Open Usage gate</button>`);
         actions.push(`<button class="btn ghost" onclick="switchView('plan')">Open plan</button>`);
       } else if (['approved', 'stopped'].includes(phase)) {
         actions.push(`<button class="btn primary" onclick="setOverviewTab('warroom')">Run job</button>`);
@@ -4691,6 +4695,7 @@
     }
 
     function renderUsage() {
+      refreshUsageApproval();
       const quota = state.quota || {};
       const spend = quota.spend || {};
       const today = spend.calendar_today || {};
@@ -4802,6 +4807,102 @@
       <td class="mono">${fmtMs(item.duration_ms)}</td>
       <td class="mono">$${(item.cost || 0).toFixed(4)}</td>
     </tr>`).join('')}</tbody></table>`;
+    }
+
+    async function refreshUsageApproval() {
+      const box = $('#usageApproval');
+      if (!box) return;
+      const gate = state.usageGate || { reviewer: 'heuristic', mode: 'panel' };
+      const params = new URLSearchParams({ reviewer: gate.reviewer, mode: gate.mode });
+      try {
+        const data = await api('/api/usage/status?' + params.toString());
+        state.usageApproval = data;
+        renderUsageApproval(data);
+      } catch (error) {
+        box.innerHTML = `<div class="spread"><b>Usage approval</b>
+          <span class="pill">no plan</span></div>
+          <p class="muted" style="margin:8px 0 0">${esc(error.message)}</p>`;
+      }
+    }
+
+    function setUsageGate(reviewer, mode) {
+      if (mode === 'meeting' && reviewer !== 'wave') reviewer = 'wave';
+      state.usageGate = { reviewer, mode };
+      const runSelect = document.getElementById('runReviewer');
+      if (runSelect) runSelect.value = reviewer;
+      refreshUsageApproval();
+    }
+
+    function renderUsageApproval(data) {
+      const box = $('#usageApproval');
+      if (!box) return;
+      const gate = state.usageGate || { reviewer: 'heuristic', mode: 'panel' };
+      const decision = data.decision || {};
+      const status = (data.status || {}).status || (decision.required ? 'awaiting' : 'not_required');
+      const estimate = decision.estimate || {};
+      const plan = data.plan || {};
+      const reasons = (decision.reasons || []).join(', ');
+      const models = (estimate.models || []).map((item) => String(item).split('/').pop());
+      const selected = (value, current) => value === current ? ' selected' : '';
+      const statusPill = status === 'approved' ? 'ok'
+        : status === 'awaiting' ? 'warn'
+          : status === 'not_required' ? 'ok' : 'bad';
+      const cost = estimate.cost_usd == null ? 'unknown' : `$${Number(estimate.cost_usd).toFixed(2)}`;
+      const actions = decision.required && status === 'awaiting'
+        ? `<div class="row" style="margin-top:10px">
+             <button class="btn primary" onclick="decideUsage('approve')">Approve Usage</button>
+             <button class="btn bad" onclick="decideUsage('reject')">Reject</button>
+             <span class="muted" style="font-size:10.5px">Approval binds to this plan + estimate.</span>
+           </div>`
+        : decision.required && status === 'approved'
+          ? `<p class="muted" style="margin:8px 0 0">Approved. The waiting job can start; plan/estimate changes invalidate this approval.</p>`
+          : decision.required
+            ? `<p class="muted" style="margin:8px 0 0">Usage approval is ${esc(status)}. Review the reason and approve again.</p>`
+            : `<p class="muted" style="margin:8px 0 0">Quick path: no Usage approval needed. Verify, reviewer and budget caps still apply.</p>`;
+      box.innerHTML = `<div class="spread">
+          <div><h2 style="margin:0">Usage approval</h2>
+          <span class="muted" style="font-size:10.5px">${esc(plan.job_id || 'no plan')} ·
+          ${esc((plan.subtasks || []).length)} subtask(s)</span></div>
+          <span class="pill ${statusPill}">${esc(status)}</span>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <select id="usageReviewer" class="btn ghost" style="padding:7px 8px"
+            onchange="setUsageGate(this.value, document.getElementById('usageMode').value)">
+            <option value="heuristic"${selected('heuristic', gate.reviewer)}>quick · 1 reviewer</option>
+            <option value="wave"${selected('wave', gate.reviewer)}>wave · 5 agents</option>
+            <option value="none"${selected('none', gate.reviewer)}>no reviewer</option>
+          </select>
+          <select id="usageMode" class="btn ghost" style="padding:7px 8px"
+            onchange="setUsageGate(document.getElementById('usageReviewer').value, this.value)">
+            <option value="panel"${selected('panel', gate.mode)}>panel</option>
+            <option value="meeting"${selected('meeting', gate.mode)}>meeting</option>
+          </select>
+          <span class="muted" style="font-size:10.5px">${esc(reasons || 'below threshold')}</span>
+        </div>
+        <div class="statgrid" style="margin-top:10px">
+          ${statCard('Requests', estimate.requests == null ? '-' : estimate.requests, 'estimated')}
+          ${statCard('Cost', cost, estimate.confidence || 'estimate')}
+          ${statCard('Wall time', estimate.wall_seconds == null ? '-' : estimate.wall_seconds + 's', 'estimated')}
+          ${statCard('Models', models.length ? models.join(', ') : '-', 'route')}
+        </div>${actions}`;
+    }
+
+    async function decideUsage(kind) {
+      const gate = state.usageGate || { reviewer: 'heuristic', mode: 'panel' };
+      try {
+        await api('/api/usage/decision', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision: kind, token: authToken(),
+            reviewer: gate.reviewer, mode: gate.mode })
+        });
+        toast('Usage ' + kind + 'd');
+        await refreshAll();
+        await refreshUsageApproval();
+      } catch (error) {
+        toast(error.message === 'token khong dung'
+          ? 'Control token expired. Open the fresh dashboard link from job.py --open.'
+          : error.message);
+      }
     }
 
     function showHourTip(ev, hour) {
@@ -4931,11 +5032,13 @@
       const reviewer = select ? select.value : 'heuristic';
       const coderSelect = $('#runCoder');
       const coder = coderSelect ? coderSelect.value : 'agentic';
+      const gate = state.usageGate || {};
+      const mode = gate.reviewer === reviewer && gate.mode ? gate.mode : 'panel';
       if (button) { button.disabled = true; button.textContent = 'Starting...'; }
       try {
         const data = await api('/api/run', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: authToken(), reviewer, coder })
+          body: JSON.stringify({ token: authToken(), reviewer, coder, mode })
         });
         toast('Run started · pid ' + data.pid + ' · ' + reviewer);
         state.pageSig = {};

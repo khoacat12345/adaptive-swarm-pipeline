@@ -90,23 +90,29 @@ copy and do not edit both.
 
 ## Run
 
-Panel mode is the default and preserves the original behavior:
+Plan approval is no longer a default step. A quick one-coder + one-reviewer run
+starts automatically. Only a wave/meeting/overnight/paid or over-threshold run
+asks for **Usage approval**:
 
 ```bash
-python3 .agents/job.py --plan plan.json --mode panel --reviewer wave --decision approve
+# quick path: no plan approval
+python3 .agents/job.py --plan plan.json
+
+# expensive path: show the Usage gate and wait for approval
+python3 .agents/job.py --plan plan.json --mode panel --reviewer wave --wait --open
 ```
 
 Meeting mode adds independent Round 1 plus at most one targeted rebuttal:
 
 ```bash
-python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --decision approve
+python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --wait --open
 ```
 
 `--mode meeting` requires `--reviewer wave` and all four reviewer roles
 (`security`, `qa`, `perf`, `docs`). The preflight gate checks routes/auth and
 provider health before any model is called; if a required reviewer is
 unavailable, the meeting aborts and nothing is applied. Paid models are opt-in
-with `scout --write --allow-paid`.
+with `scout --write --allow-paid`. See `docs/PLAN_P0_06_USAGE_APPROVAL.md`.
 
 ## Dashboard
 

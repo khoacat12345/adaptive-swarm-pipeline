@@ -176,12 +176,15 @@ def test_approval(checks: Checks) -> None:
     checks.check("plan-md: day du phase + verify",
                  "## Execution phases" in markdown and "verify" in markdown.lower()
                  and "## Verification contract" in markdown, markdown[:200])
+    quick = job.usage_decision(root)
+    checks.check("usage: quick path khong can approve", quick.required is False,
+                 quick.as_dict())
     try:
-        job.start_run(root, token="tok123")
+        job.start_run(root, token="tok123", reviewer="wave")
         blocked = False
     except ValueError:
         blocked = True
-    checks.check("run: chua approve bi chan", blocked)
+    checks.check("run: wave chua usage approve bi chan", blocked)
     checks.check("run: mac dinh heuristic",
                  inspect.signature(job.start_run).parameters["reviewer"].default == "heuristic")
     checks.check("run: mac dinh agentic",
@@ -409,6 +412,35 @@ def test_dashboard_api(checks: Checks) -> None:
                     return response.status, json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:
                 return exc.code, json.loads(exc.read().decode("utf-8"))
+
+        with urllib.request.urlopen(
+                base + "/api/usage/status?reviewer=heuristic&mode=panel",
+                timeout=5) as response:
+            quick_usage = json.loads(response.read().decode("utf-8"))
+        checks.check("dashboard: quick usage not required",
+                     (quick_usage.get("decision") or {}).get("required") is False,
+                     quick_usage)
+
+        with urllib.request.urlopen(
+                base + "/api/usage/status?reviewer=wave&mode=panel",
+                timeout=5) as response:
+            wave_usage = json.loads(response.read().decode("utf-8"))
+        checks.check("dashboard: wave usage required",
+                     (wave_usage.get("decision") or {}).get("required") is True,
+                     wave_usage)
+        checks.check("dashboard: wave usage awaiting",
+                     (wave_usage.get("status") or {}).get("status") == "awaiting",
+                     wave_usage)
+
+        status, body = post({"decision": "approve", "token": "sai"},
+                            "/api/usage/decision")
+        checks.check("dashboard: usage sai token -> 403", status == 403, status)
+        status, body = post({"decision": "approve", "token": "dash-token",
+                             "reviewer": "wave", "mode": "panel"},
+                            "/api/usage/decision")
+        checks.check("dashboard: usage approve -> 200", status == 200, body)
+        checks.check("dashboard: usage record exists",
+                     bool(job.read_usage_approval(root)), body)
 
         status, _ = post({"decision": "approve", "token": "sai"})
         checks.check("dashboard: sai token -> 403", status == 403, status)

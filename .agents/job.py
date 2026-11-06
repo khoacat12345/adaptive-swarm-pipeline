@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Phase 6A - Job plan + duyet tren dashboard + chay tuan tu.
+"""Phase 6A - Job plan + Usage approval + chay tuan tu.
 
-Luong:
-    job.py --plan plan.json --submit --wait
-      -> ghi .agents/tmp/plan.json + plan_decision.json (pending) + token
-      -> in URL dashboard kem token
-      -> cho nguoi dung bam Duyet/Tu choi tren 127.0.0.1
-      -> approved: chay tung subtask (moi subtask 1 Work Order + 1 transaction)
-      -> rejected/timeout: khong ghi gi
+Luong P0-06:
+    job.py --plan plan.json
+      -> validate + estimate Usage
+      -> quick path: chay ngay, khong can plan approval
+      -> expensive path: cho Usage approval (dashboard/CLI) roi moi chay
+      -> moi subtask: 1 Work Order + 1 transaction
+      -> rejected/expired: khong ghi gi
 
 Moi subtask tu duoc router W0-W8 chon model theo loai viec + quota that.
 
@@ -44,6 +44,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+import approval_policy               # noqa: E402
 import ledger                        # noqa: E402
 import notify                        # noqa: E402
 import recipe_c                      # noqa: E402
@@ -74,6 +75,129 @@ def token_path(root) -> Path:
     return _dir(root) / "plan_token.txt"
 
 
+def usage_approval_path(root) -> Path:
+    return _dir(root) / approval_policy.APPROVAL_FILENAME
+
+
+def _policy_models(root, reviewer: str = "heuristic",
+                   mode: str = "panel", model: str | None = None) -> list[str]:
+    """Collect only the models that may be called on this path."""
+    if model:
+        return [str(model)]
+    models: list[str] = []
+    try:
+        config = json.loads((Path(root).resolve() / ".agents" / "config.json")
+                            .read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        config = {}
+    roles = config.get("roles") or {}
+    coder = roles.get("coder") or {}
+    coder_chain = coder.get("chain") or []
+    primary = coder.get("primary") or (coder_chain[0] if coder_chain else None)
+    if primary:
+        models.append(str(primary))
+    if str(reviewer or "").lower() == "llm":
+        reviewer_role = roles.get("reviewer") or {}
+        reviewer_chain = reviewer_role.get("chain") or []
+        reviewer_primary = (reviewer_role.get("primary")
+                            or (reviewer_chain[0] if reviewer_chain else None))
+        if reviewer_primary:
+            models.append(str(reviewer_primary))
+    if str(reviewer or "").lower() in {"wave", "meeting"} or \
+            str(mode or "").lower() == "meeting":
+        models.extend(str(item) for item in workers.WAVE_ROLES.values() if item)
+    return list(dict.fromkeys(models))
+
+
+def usage_decision(root, plan: dict | None = None, *,
+                   reviewer: str = "heuristic", mode: str = "panel",
+                   model: str | None = None) -> approval_policy.UsageDecision:
+    if plan is None:
+        plan = json.loads(plan_path(root).read_text(encoding="utf-8"))
+    return approval_policy.evaluate(
+        plan,
+        mode=mode,
+        reviewer=reviewer,
+        models=_policy_models(root, reviewer=reviewer, mode=mode, model=model),
+        root=root,
+    )
+
+
+def read_usage_approval(root) -> dict:
+    try:
+        return approval_policy.read_approval(usage_approval_path(root))
+    except approval_policy.ApprovalInvalid:
+        return {}
+
+
+def approve_usage(root, token: str, *, reviewer: str = "heuristic",
+                  mode: str = "panel", model: str | None = None,
+                  approved_by: str = "local-user") -> dict:
+    """Create the P0-06 Usage approval after the caller has seen the estimate."""
+    _require_token(root, token)
+    decision = usage_decision(root, reviewer=reviewer, mode=mode, model=model)
+    if not decision.required:
+        return {"status": "not_required", "decision": decision.as_dict()}
+    record = approval_policy.create_approval(
+        usage_approval_path(root), decision, approved_by=approved_by,
+    )
+    ledger.append_event(
+        "usage.approved", run_id=f"job_{_current_job_id(root)}",
+        result={"status": "pass"},
+        data={"plan_hash": decision.plan_hash,
+              "estimate_hash": decision.estimate_hash,
+              "reasons": list(decision.reasons),
+              "approved_by": approved_by,
+              "estimate": decision.estimate.as_dict()},
+        root=root,
+    )
+    return {"status": "approved", "record": record,
+            "decision": decision.as_dict()}
+
+
+def reject_usage(root, token: str, *, reason: str = "usage rejected") -> dict:
+    _require_token(root, token)
+    path = usage_approval_path(root)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    decision = read_plan_state(root).get("decision") or {}
+    if decision:
+        decision = {**decision, "status": "rejected", "at": ledger.utc_now_iso(),
+                    "reason": str(reason)[:300]}
+        _write_json(decision_path(root), decision)
+    ledger.append_event(
+        "usage.rejected", run_id=f"job_{_current_job_id(root)}",
+        result={"status": "fail"},
+        data={"reason": str(reason)[:300]}, root=root,
+    )
+    return {"status": "rejected", "reason": str(reason)}
+
+
+def _current_job_id(root) -> str:
+    try:
+        return str((json.loads(plan_path(root).read_text(encoding="utf-8"))
+                    or {}).get("job_id") or "unknown")
+    except (OSError, json.JSONDecodeError):
+        return "unknown"
+
+
+def wait_for_usage_approval(root, decision, *, timeout: float = DEFAULT_TIMEOUT,
+                            poll: float = 1.0) -> str:
+    if not decision.required:
+        return "not_required"
+    deadline = time.time() + max(1.0, float(timeout))
+    while time.time() < deadline:
+        status = approval_policy.approval_status(
+            usage_approval_path(root), decision
+        )["status"]
+        if status in ("approved", "expired", "invalid"):
+            return status
+        time.sleep(poll)
+    return "timeout"
+
+
 def state_path(root) -> Path:
     return _dir(root) / "job_state.json"
 
@@ -98,6 +222,7 @@ def read_plan_state(root) -> dict:
         state["decision"] = json.loads(decision_path(root).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         pass
+    state["usage"] = read_usage_approval(root)
     return state
 
 
@@ -380,6 +505,10 @@ def submit_plan(plan: dict, root, *, token: str | None = None, source: str | Non
                 raise ValueError("a job is running; use --force to replace it")
         _write_json(plan_path(root), plan)
         token_path(root).write_text(token, encoding="utf-8")
+        try:
+            usage_approval_path(root).unlink()
+        except FileNotFoundError:
+            pass
         _write_json(decision_path(root),
                     {"status": "pending", "at": ledger.utc_now_iso()})
         write_control(root, dict(DEFAULT_CONTROL))
@@ -469,15 +598,19 @@ def start_run(root, *, token: str, reviewer: str = "heuristic",
         state = read_state(root)
         if state.get("phase") in ("running", "paused"):
             raise ValueError("a job is already running")
-        decision = (read_plan_state(root).get("decision") or {}).get("status")
-        if decision != "approved":
-            raise ValueError("plan is not approved")
         try:
             plan = json.loads(plan_path(root).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError("no readable plan to resume") from exc
         if not isinstance(plan, dict) or not plan.get("subtasks"):
             raise ValueError("no readable plan to resume")
+        usage = usage_decision(root, plan, reviewer=reviewer, mode=mode,
+                               model=model)
+        if usage.required:
+            try:
+                approval_policy.assert_approval(usage_approval_path(root), usage)
+            except approval_policy.ApprovalError as exc:
+                raise ValueError(str(exc)) from exc
         out_dir = _dir(root)
         out_dir.mkdir(parents=True, exist_ok=True)
         log_path = out_dir / ("run_" + time.strftime("%Y%m%d-%H%M%S") + ".log")
@@ -743,12 +876,13 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Job plan + duyet dashboard + chay tuan tu.")
     parser.add_argument("--plan", default=None)
     parser.add_argument("--resume", action="store_true",
-                        help="chay plan da duoc approve trong tmp/plan.json (khong submit lai)")
+                        help="chay plan da luu trong tmp/plan.json (khong submit lai)")
     parser.add_argument("--root", default=".")
     parser.add_argument("--token", default=None, help="token co dinh (mac dinh: random)")
     parser.add_argument("--decision", choices=("approve", "reject"), default=None,
-                        help="duyet ngay tren CLI (headless), bo qua dashboard")
-    parser.add_argument("--wait", action="store_true", help="cho dashboard duyet")
+                        help="approve/reject Usage ngay tren CLI (headless)")
+    parser.add_argument("--wait", action="store_true",
+                        help="cho Usage approval tren dashboard (chi khi can)")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--allow-escalate", action="store_true")
@@ -796,6 +930,18 @@ def main(argv=None) -> int:
         return 2
     url = f"http://127.0.0.1:{args.port}/?token={info['token']}"
     print(f"dashboard: {url}")
+    try:
+        usage = usage_decision(args.root, plan, reviewer=args.reviewer,
+                               mode=args.mode, model=args.model)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"cannot evaluate usage: {exc}")
+        return 2
+    print(f"usage approval: {'required' if usage.required else 'not required'}"
+          + (f" ({', '.join(usage.reasons)})" if usage.required else ""))
+    if usage.required:
+        print(f"estimate: {usage.estimate.requests} request(s), "
+              f"${usage.estimate.cost_usd if usage.estimate.cost_usd is not None else 'unknown'}, "
+              f"~{usage.estimate.wall_seconds}s")
 
     server = None
     if args.open:
@@ -807,19 +953,41 @@ def main(argv=None) -> int:
             pass
 
     try:
-        if args.decision:
-            decide(args.root, args.decision, token=info["token"])
-        elif args.wait:
-            print("waiting for approval on the dashboard...")
-            result = wait_for_decision(args.root, timeout=args.timeout)
-            if result != "approved":
-                print(f"NOT RUNNING: {result}")
+        if usage.required:
+            if args.decision == "approve":
+                approved = approve_usage(
+                    args.root, info["token"], reviewer=args.reviewer,
+                    mode=args.mode, model=args.model, approved_by="cli",
+                )
+                print(f"usage approval: {approved['status']}")
+            elif args.decision == "reject":
+                reject_usage(args.root, info["token"])
+                print("usage approval: rejected")
                 return 2
-
-        state = read_plan_state(args.root)
-        if (state.get("decision") or {}).get("status") != "approved":
-            print("plan is not approved (use --wait or --decision approve)")
-            return 2
+            elif args.wait:
+                print("waiting for Usage approval on the dashboard...")
+                result = wait_for_usage_approval(
+                    args.root, usage, timeout=args.timeout,
+                )
+                if result != "approved":
+                    print(f"NOT RUNNING: {result}")
+                    return 2
+            else:
+                print("usage approval required: use --wait or --decision approve")
+                return 2
+            try:
+                approval_policy.assert_approval(usage_approval_path(args.root), usage)
+            except approval_policy.ApprovalError as exc:
+                print(f"NOT RUNNING: {exc}")
+                return 2
+        else:
+            ledger.append_event(
+                "approval.skipped", run_id=f"job_{info['job_id']}",
+                result={"status": "info"},
+                data={"reason": "below_threshold",
+                      "decision": usage.as_dict()},
+                root=args.root,
+            )
 
         report = run_job(plan, root=args.root, allow_escalate=args.allow_escalate,
                          force=args.force, dry_run=args.dry_run,

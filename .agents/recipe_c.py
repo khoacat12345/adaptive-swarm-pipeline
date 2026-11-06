@@ -28,6 +28,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import approval_policy
 import format_ladder
 import clarify
 import ledger
@@ -1205,6 +1206,37 @@ def _diff(old: str, new: str, path: str) -> str:
 
 
 # --------------------------------------------------------------------------
+def _usage_plan(order, order_data: dict) -> dict:
+    """Represent one Work Order as a one-subtask plan for the shared policy."""
+    subtask = dict(order_data or {})
+    subtask["id"] = order.task_id
+    subtask.setdefault("max_rounds", order.max_rounds)
+    return {
+        "job_id": order.task_id,
+        "objective": order.objective,
+        "subtasks": [subtask],
+    }
+
+
+def _usage_models(args) -> list[str]:
+    models: list[str] = []
+    if args.model:
+        models.append(str(args.model))
+    else:
+        try:
+            models.append(_chain_from_config("coder")[0])
+        except SystemExit:
+            pass
+    if str(args.reviewer).lower() in {"wave", "meeting"} or args.mode == "meeting":
+        models.extend(str(item) for item in workers.WAVE_ROLES.values())
+    elif str(args.reviewer).lower() == "llm":
+        try:
+            models.append(_chain_from_config("reviewer")[0])
+        except SystemExit:
+            pass
+    return list(dict.fromkeys(models))
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(description="Recipe C runner.")
@@ -1233,11 +1265,42 @@ def main(argv: list[str] | None = None) -> int:
                         help="van chay du router bao het quota")
     parser.add_argument("--allow-escalate", action="store_true",
                         help="cho phep nang len escalate du quota khong that su doi dao")
+    parser.add_argument("--usage-approval", default=None,
+                        help="path to an existing Usage approval JSON")
+    parser.add_argument("--usage-approve", action="store_true",
+                        help="create an explicit CLI Usage approval when required")
     args = parser.parse_args(argv)
 
     order_data = json.loads(Path(args.order).read_text(encoding="utf-8"))
     order = work_order_module.WorkOrder.from_dict(order_data)
     order.validate()
+
+    # P0-06: do not let an expensive direct run bypass the Usage gate.
+    usage = approval_policy.evaluate(
+        _usage_plan(order, order_data),
+        mode=args.mode,
+        reviewer=args.reviewer,
+        models=_usage_models(args),
+        root=args.root,
+    )
+    if usage.required:
+        approval_file = (Path(args.usage_approval) if args.usage_approval
+                         else approval_policy.approval_path(args.root))
+        if args.usage_approve:
+            approval_policy.create_approval(
+                approval_file, usage, approved_by="cli",
+            )
+        try:
+            approval_policy.assert_approval(approval_file, usage)
+        except approval_policy.ApprovalError as exc:
+            print(f"Usage approval required: {exc}", file=sys.stderr)
+            print(f"estimate: {usage.estimate.as_dict()}", file=sys.stderr)
+            print("Approve in the dashboard Usage tab, or pass "
+                  "--usage-approve for an explicit headless approval.",
+                  file=sys.stderr)
+            return 3
+    else:
+        print("usage approval: not required", file=sys.stderr)
 
     # Read-only preflight: never start a wave/meeting with unavailable models.
     if args.mode == "meeting" or args.reviewer == "wave":
