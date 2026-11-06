@@ -100,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
     adaptive_lessons.add_argument("--query", default="")
     adaptive_lessons.add_argument("--file", action="append", default=[])
 
+    converge = sub.add_parser("converge")
+    converge.add_argument("--run-id", required=True)
+
     handoff = sub.add_parser("handoff")
     handoff.add_argument("--run-id", required=True)
     handoff.add_argument("--report", default=None)
@@ -264,6 +267,22 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
         return 0
+
+    if args.command == "converge":
+        from v2.converge import converge, evidence_from_ledger
+
+        store = runner.load(args.run_id)
+        plan_path = store.run_dir / "plan.json"
+        if not plan_path.exists():
+            raise SystemExit("run has no plan")
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        workspace = runner.workspace(args.run_id)
+        result = converge(
+            runner.root, plan, worktree=workspace.path,
+            test_evidence=evidence_from_ledger(store.read_events()),
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 1
 
     if args.command == "handoff":
         result = runner.handoff(args.run_id, report=args.report)

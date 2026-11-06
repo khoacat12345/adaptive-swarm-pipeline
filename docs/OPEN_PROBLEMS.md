@@ -225,27 +225,24 @@
 
 ### P1-05 - Spec Kit bridge is partially implemented
 
-- **Status:** in progress (P0 bridge landed; real Spec Kit pilot pending)
+- **Status:** in progress — real my-project bridge pilot passed; signed execution not run because my-project is not a Git worktree
 - **Area:** process/integration
-- **Evidence:** local `C:\Users\tuank\my-project` has Spec Kit 1.3.0 with the `opencode` integration. `v2/tasks.py` and `v2/speckit_bridge.py` now convert canonical `tasks.yaml` to a validated plan.
-- **Needed:** run one real Spec Kit feature through the bridge, then execute the signed plan.
+- **Batch 4 progress (2026-11-06):** created `C:\Users\tuank\my-project\specs\000-p0-06-pilot` with spec.md + plan.md + tasks.yaml; `bridge_spec_kit()` produced a valid `MasterPlan.json` with phase `P1`.
+- **Needed:** put the feature in a Git worktree and run sign-off/execution.
 - **Exit criterion:** a bridge converts a Spec Kit `spec.md` + `plan.md` + `tasks.md` into a valid `MasterPlan.json`, then runs through v2 sign-off and execution.
 
 ### P1-06 — constitution / converge are missing
 
-- **Status:** open
+- **Status:** resolved — deterministic `v2 converge` added and tested
 - **Area:** process
-- **Evidence:** v2 has plan hash/sign-off, but no project constitution or explicit spec↔code convergence phase.
-- **Risk:** drift between spec, plan and implementation is discovered late.
-- **Exit criterion:** `constitution.md` is used in planning; `v2 converge` reports drift as a machine-readable artifact.
+- **Batch 4 progress (2026-11-06):** `v2/converge.py` checks source-artifact hashes, allowed paths, changed files, target coverage and verify exit codes; `v2/run.py converge --run-id` exposes it. `test_speckit_converge.py`: 10/10 PASS.
+- **Evidence:** v2 has plan hash/sign-off and now an explicit spec↔code convergence report.
 
 ### P1-07 — runtime is OpenCode-only
 
-- **Status:** open
+- **Status:** resolved — second-runtime stub registered and tested; production adapter remains future work
 - **Area:** architecture
-- **Evidence:** `v2/runtime.py` now defines `AgentRuntime`/`RuntimeRegistry`; current execution still uses OpenCode workers.
-- **Risk:** future Claude Code/Codex/Gemini support still needs concrete adapters and headless compatibility tests.
-- **Exit criterion:** `AgentRuntime` protocol with OpenCode adapter; one stub second runtime tested.
+- **Batch 4 progress (2026-11-06):** `ClaudeCodeRuntimeStub` implements the `AgentRuntime` shape and fails closed; `test_speckit_converge.py` verifies registry/capabilities/health. No production Claude/Codex/Gemini adapter is claimed.
 
 ### P1-08 — provider fallback and cross-family are not tied to a capability registry
 

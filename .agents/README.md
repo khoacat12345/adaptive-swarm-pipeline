@@ -127,6 +127,7 @@ python3 .agents/tests/test_tiers.py
 python3 .agents/tests/test_capability_registry.py
 python3 .agents/tests/test_cost_reconciliation.py
 python3 .agents/tests/test_resilience.py
+python3 .agents/tests/test_speckit_converge.py
 python3 .agents/tests/test_approval_policy.py
 python3 .agents/tests/test_usage_gate.py
 python3 .agents/tests/test_protocol.py

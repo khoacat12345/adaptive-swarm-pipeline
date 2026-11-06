@@ -78,6 +78,25 @@ class AgentRuntime(Protocol):
         ...
 
 
+class ClaudeCodeRuntimeStub:
+    """P1-07 second-runtime boundary; deliberately not executable yet."""
+
+    name = "claude-code-stub"
+
+    def capabilities(self) -> RuntimeCapabilities:
+        return RuntimeCapabilities(
+            headless=True, tools=True, json_output=True,
+            usage_report=False, write_mode="patch", streaming=False,
+        )
+
+    def health(self) -> dict[str, Any]:
+        return {"ok": False, "stub": True, "reason": "adapter not implemented"}
+
+    def execute(self, work_order: Mapping[str, Any], *, worktree: Any,
+                budget: Any, feedback: str | None = None) -> RuntimeResult:
+        raise ExecutionError("claude-code runtime adapter is a stub")
+
+
 class RuntimeRegistry:
     """Small registry for built-in and future runtime adapters."""
 
