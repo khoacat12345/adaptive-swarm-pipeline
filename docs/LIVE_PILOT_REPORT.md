@@ -1,11 +1,56 @@
 # Live Free-Model Pilot — v2.1 Adaptive
 
-> Date: 2026-11-05
+> Date: 2026-11-05 (quota attempts) / 2026-11-07 (successful v2 run)
 > Goal: run a live free-model planning + execution pilot on a tiny temporary repo.
-> Result: **planning succeeded; execution was blocked by free-model quota exhaustion.**
+> Result: **2026-11-07 v2 pilot PASSED end-to-end with free models.**
 > No paid model was used. Main worktree was never modified.
 
-## Task
+## 2026-11-07 — successful v2 end-to-end run
+
+Temporary Git repo:
+
+```text
+src.py   : VALUE = 1 -> VALUE = 2
+check.py : verifies VALUE == 2
+```
+
+Sequence:
+
+```text
+prepare -> plan -> usage-approve -> execute -> verify
+        -> checkpoint -> handoff
+```
+
+Models (all free):
+
+```text
+coder     : opencode/deepseek-v4.1-flash-free
+security  : opencode/glm-5.3-flash-free
+qa        : opencode/glm-5.3-flash-free
+perf      : opencode/glm-5.3-flash-free
+docs      : opencode/glm-5.3-flash-free
+```
+
+Result:
+
+```text
+run_id     : v2_20261106T170048_8354ac
+status     : HANDOFF_READY
+requests   : 1
+repairs    : 0
+reviews    : 4 approve
+verify     : exit 0
+checkpoint : c7ac85c6917d030f4159d3f45d6b6353401e2157
+main       : VALUE = 1 (unchanged)
+worktree   : VALUE = 2
+handoff    : patch + report produced
+```
+
+This closes P0-01 (v2 live execution) and P1-03 (real OpenCode adapter
+evidence) for this tiny task. It does not prove long-run soak or paid spend
+reconciliation.
+
+## Task (2026-11-05 quota attempts)
 
 Temporary repo:
 

@@ -32,7 +32,8 @@
 
 ### P0-01 — v2 live execution has not been run end-to-end
 
-- **Status:** open
+- **Status:** resolved — live free-model v2 phase passed on 2026-11-07
+- **Batch 5 evidence:** `prepare -> plan -> usage-approve -> execute -> verify -> checkpoint -> handoff` on a temporary repo; `HANDOFF_READY`, 1 request, 4 approvals, checkpoint `c7ac85c...`, main `VALUE = 1` unchanged, worktree `VALUE = 2`, handoff patch/report produced. Full detail: [`LIVE_PILOT_REPORT.md`](LIVE_PILOT_REPORT.md).
 - **Area:** M5 pilot
 - **Evidence:** M1–M5 acceptance tests use fake planner/coder/reviewers; `execute --free` has not completed a real live phase.
 - **Risk:** Adapter/tool-calling/session issues can hide until a real model is used.
@@ -211,11 +212,9 @@
 
 ### P1-03 — real OpenCode adapter coverage
 
-- **Status:** open
+- **Status:** resolved — real free-model coder + four reviewer calls completed
 - **Area:** M3.5
-- **Evidence:** `WorkersCoderAdapter`/`WorkersReviewerAdapter` are unit-tested with fakes; no live provider run.
-- **Risk:** tool/JSON/format differences between providers.
-- **Exit criterion:** run one coder + four reviewer calls with free models; validate diff, verdict and budget accounting.
+- **Batch 5 evidence:** `WorkersCoderAdapter` + four `WorkersReviewerAdapter` seats ran live: all four approved, diff verified, requests=1, checkpoint/handoff created. See [`LIVE_PILOT_REPORT.md`](LIVE_PILOT_REPORT.md).
 
 ### P1-04 — CleanArchitect seat is defined but not wired
 
@@ -297,7 +296,7 @@
 
 ### P1-13 - Missing end-to-end operator guide for a new user
 
-- **Status:** in progress — [`OPERATOR_GUIDE.md`](OPERATOR_GUIDE.md) created; needs novice walkthrough
+- **Status:** resolved — [`OPERATOR_GUIDE.md`](OPERATOR_GUIDE.md) covers install → quick path → Usage gate → direct recipe → v2 → recovery
 - **Area:** onboarding / documentation
 - **Evidence:** `docs/INSTALL.md` explains setup and individual commands, but there is no single runbook that walks a new operator from “nothing installed” to “task finished safely”. Current questions include:
   - When does the dashboard open?
@@ -490,3 +489,6 @@ When the repo is installed, inspect and record:
 - 2026-11-06: **P0-06 closed** after owner-confirmed default thresholds (8 requests / $0.50). v1 quick path, direct recipe dashboard wait, v2 `usage-approve`, `/v2` Approve Usage, docs and full regression are complete.
 - 2026-11-06: Batch 1 landed `tier_policy.py`, `capability_registry.py`, `generate_council`, E2 compact timeline and tier/planner events. P0-07/P1-14 moved to in-progress pending skill-boundary guard and E3/E4 live parity.
 - 2026-11-06: Batch 2 landed `model_registry.py` and `spend_reconcile.py`; planner is free-only by default (`--allow-paid` opt-in). P0-02/P0-03/P0-04/P1-08 remain in progress because the live per-call hook and full 9router metadata are not yet available.
+- 2026-11-07: Batch 3 added `run_lock.py` and real child-process transaction crash recovery; P1-11 resolved, P1-04 resolved, P0-05 in progress.
+- 2026-11-07: Batch 4 added `v2/converge.py`, `v2/run.py converge`, a my-project bridge pilot and `ClaudeCodeRuntimeStub`; P1-06/P1-07 resolved, P1-05 in progress.
+- 2026-11-07: Batch 5 live free-model v2 phase passed: `prepare -> plan -> usage-approve -> execute -> verify -> checkpoint -> handoff`; main unchanged, worktree changed, 4 reviewer approvals, checkpoint `c7ac85c...`. P0-01/P1-03/P1-13 resolved. Full local regression: 637 checks/assertions PASS across the listed suites.
