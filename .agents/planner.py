@@ -115,14 +115,29 @@ def parse_plan(text: str) -> dict:
     return data
 
 
-def _models(root) -> list[str]:
+def _models(root, *, free_only: bool = True) -> list[str]:
     tracker = quota.QuotaTracker(root=root).refresh()
-    chain = [router.ROUTES["W4"]["main"], router.ROUTES["W4"]["escalate"],
-             router.MODELS["glm-flash-free"], router.MODELS["deepseek-flash-free"]]
+    if free_only:
+        chain = [router.MODELS["glm-flash-free"], router.MODELS["deepseek-flash-free"]]
+        try:
+            config = json.loads((Path(root) / ".agents" / "config.json")
+                                .read_text(encoding="utf-8"))
+            for model, entry in (config.get("models") or {}).items():
+                if isinstance(entry, dict) and (
+                    entry.get("is_free") or entry.get("cost_tier") == "free"
+                ):
+                    chain.append(str(model))
+        except (OSError, json.JSONDecodeError):
+            pass
+    else:
+        chain = [router.ROUTES["W4"]["main"], router.ROUTES["W4"]["escalate"],
+                 router.MODELS["glm-flash-free"], router.MODELS["deepseek-flash-free"]]
     models: list[str] = []
     for model in chain:
         if model and model not in models and tracker.remaining(model)["ok"]:
             models.append(model)
+    if free_only:
+        return models or [router.MODELS["glm-flash-free"]]
     return models or [router.MODELS["glm-flash-free"]]
 
 
@@ -145,11 +160,11 @@ def _ask(prompt: str, models: list[str], root, runner) -> str:
 
 
 def generate(goal: str, *, root, runner=None, max_attempts: int = 2,
-             models: list[str] | None = None) -> dict:
+             models: list[str] | None = None, free_only: bool = True) -> dict:
     goal = str(goal or "").strip()
     if not goal:
         raise ValueError("goal is empty")
-    models = models or _models(root)
+    models = models or _models(root, free_only=free_only)
     base = build_prompt(goal, root)
     feedback = ""
     last: list[str] = []
@@ -171,7 +186,7 @@ def generate(goal: str, *, root, runner=None, max_attempts: int = 2,
 
 
 def generate_council(goal: str, *, root=".", planners: int = 1,
-                     generate_fn=None) -> dict:
+                     generate_fn=None, free_only: bool = True) -> dict:
     """Generate independent proposals and select the first valid plan.
 
     P1 uses one planner. P2/P3 request two/three independent proposals. This is
@@ -181,12 +196,18 @@ def generate_council(goal: str, *, root=".", planners: int = 1,
     planners = max(1, min(3, int(planners or 1)))
     generate_fn = generate_fn or generate
     if planners == 1:
-        return generate_fn(goal, root=root)
+        try:
+            return generate_fn(goal, root=root, free_only=free_only)
+        except TypeError:
+            return generate_fn(goal, root=root)
     plans = []
     last_error = None
     for _ in range(planners):
         try:
-            plans.append(generate_fn(goal, root=root))
+            try:
+                plans.append(generate_fn(goal, root=root, free_only=free_only))
+            except TypeError:
+                plans.append(generate_fn(goal, root=root))
         except Exception as exc:  # noqa: BLE001
             last_error = exc
     if not plans:
@@ -207,13 +228,18 @@ def main(argv=None) -> int:
                         help="execution tier; selects the planner level P1-P3")
     parser.add_argument("--planners", type=int, choices=(1, 2, 3), default=None,
                         help="override planner count (P1=1, P2=2, P3=3)")
+    parser.add_argument("--allow-paid", action="store_true",
+                        help="explicitly allow paid planner models (default: free-only)")
     args = parser.parse_args(argv)
 
     planner_count = args.planners or 1
     if args.tier:
         import tier_policy
         planner_count = tier_policy.required_planners(args.tier)
-    plan = generate_council(args.goal, root=args.root, planners=planner_count)
+    plan = generate_council(
+        args.goal, root=args.root, planners=planner_count,
+        free_only=not args.allow_paid,
+    )
     out = Path(args.out)
     if not out.is_absolute():
         out = Path(args.root) / args.out

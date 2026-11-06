@@ -87,6 +87,11 @@ def test_capabilities(checks: Checks) -> None:
 
 
 def test_planner_council(checks: Checks) -> None:
+    import inspect
+    checks.check("planner: free-only is default",
+                 inspect.signature(planner._models).parameters["free_only"].default is True)
+    checks.check("planner: generate is free-only by default",
+                 inspect.signature(planner.generate).parameters["free_only"].default is True)
     calls: list[int] = []
 
     def fake(goal, root="."):

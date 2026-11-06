@@ -43,8 +43,9 @@
 
 ### P0-02 — actual spend/cost is not reconciled
 
-- **Status:** open
+- **Status:** in progress — `spend_reconcile.py` + tests landed; per-call hook still pending
 - **Area:** budget/cost
+- **Batch 2 progress (2026-11-06):** added before/after snapshots, `Reconciler`, over-budget detection and an OpenCode DB source adapter. `test_cost_reconciliation.py`: 7/7 PASS. The live execution loop still needs to call it after every provider call.
 - **Evidence:** `ExecutionSeat.cost_usd` is an estimate; `BudgetController` settles the estimated cost, not measured provider billing. `pricing` is `null` for many catalog entries.
 - **Risk:** a paid run can stay under the estimated budget while actual provider spend is higher.
 - **Exit criterion:** after each call, actual tokens/cost are read from OpenCode stats or 9router usage, compared with the reservation, and an overrun stops the run before the next call.
@@ -52,8 +53,9 @@
 
 ### P0-03 — 9router/provider capability data is incomplete
 
-- **Status:** open
+- **Status:** in progress — normalized model registry landed; 9router metadata still incomplete
 - **Area:** providers
+- **Batch 2 progress (2026-11-06):** added `model_registry.py` with normalized model_id/provider/family/context/tools/pricing/auth/health, plus `test_capability_registry.py` 12/12 PASS. Missing source metadata remains the open blocker.
 - **Evidence:** current `config.json` reports `9router: unavailable`; catalog entries have `pricing: null`; some providers expose only a generic model ID.
 - **Risk:** cross-family checks, tool-calling checks, context limits, cost caps, and fallback selection can be wrong.
 - **Exit criterion:** a capability registry exists with:
@@ -62,8 +64,9 @@
 
 ### P0-04 — live paid-model guard is only an estimate gate
 
-- **Status:** open
+- **Status:** in progress — pricing/reconcile primitives landed; hard provider cap still required
 - **Area:** cost safety
+- **Batch 2 progress (2026-11-06):** `model_registry.py` exposes pricing/health/tool metadata; `spend_reconcile.py` computes actual-vs-estimate deltas and over-budget flags. Hook into every provider call remains pending.
 - **Evidence:** paid models are blocked when `cost_usd == 0`; with `--paid-cost N`, each call reserves `N` but actual usage is not verified.
 - **Risk:** a wrong `N` under-reserves.
 - **Exit criterion:** either real usage settlement (P0-02) or a hard provider-level spend cap enforced at 9router/gateway.
@@ -247,19 +250,20 @@
 
 ### P1-08 — provider fallback and cross-family are not tied to a capability registry
 
-- **Status:** open
+- **Status:** in progress — registry exposes `supports_tools`; selection enforcement pending
 - **Area:** routing
+- **Batch 2 progress (2026-11-06):** `model_registry.py` normalizes tooling/context/pricing/auth/health. `v2` still selects on family/auth/free; role selection does not yet hard-require `supports_tools`.
 - **Evidence:** v2 selects free seats from config and checks family, but does not verify tool-calling or context window.
 - **Risk:** a free model can pass family checks but fail tool calling mid-phase.
 - **Exit criterion:** role selection requires `supports_tools` (and required context) unless explicitly overridden.
 
 ### P1-09 — v1 planner still prefers paid models
 
-- **Status:** open
+- **Status:** resolved — planner is free-only by default; paid requires `--allow-paid`
 - **Area:** v1 cost
-- **Evidence:** `planner._models()` begins with `ROUTES["W4"]` main/escalate (paid) before free fallbacks; `planner.py` CLI has no `--free`.
-- **Risk:** “free-only” intent can be violated by the planner before v2 sees it.
-- **Exit criterion:** `planner.py --free` or config-driven free-only default; paid requires explicit flag and cost estimate.
+- **Evidence:** fixed in Batch 2: `_models(free_only=True)` and `generate(free_only=True)` now choose free models first; paid needs `--allow-paid`.
+- **Risk:** none remaining for the default path; paid is still explicit.
+- **Exit criterion:** satisfied by `planner.py --allow-paid` opt-in and `test_tiers.py` default checks.
 
 ### P1-10 — 9router trust boundary and secret handling
 
@@ -488,3 +492,4 @@ When the repo is installed, inspect and record:
 - 2026-11-06: Corrected **P1-14**: the question is not whether the upstream repos are drop-in skills, but whether the **extracted capabilities** (repo map, ACI, lessons, memory, events, speaker selection) are wired for coder, reviewer and meeting across E1–E4. Current answer: partial v2 wiring, no unified tier runtime, and meeting does not inherit v2 planning/ACI.
 - 2026-11-06: **P0-06 closed** after owner-confirmed default thresholds (8 requests / $0.50). v1 quick path, direct recipe dashboard wait, v2 `usage-approve`, `/v2` Approve Usage, docs and full regression are complete.
 - 2026-11-06: Batch 1 landed `tier_policy.py`, `capability_registry.py`, `generate_council`, E2 compact timeline and tier/planner events. P0-07/P1-14 moved to in-progress pending skill-boundary guard and E3/E4 live parity.
+- 2026-11-06: Batch 2 landed `model_registry.py` and `spend_reconcile.py`; planner is free-only by default (`--allow-paid` opt-in). P0-02/P0-03/P0-04/P1-08 remain in progress because the live per-call hook and full 9router metadata are not yet available.
