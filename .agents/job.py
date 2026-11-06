@@ -45,7 +45,9 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import approval_policy               # noqa: E402
+import capability_registry           # noqa: E402
 import ledger                        # noqa: E402
+import tier_policy                   # noqa: E402
 import notify                        # noqa: E402
 import recipe_c                      # noqa: E402
 import router                        # noqa: E402
@@ -681,6 +683,16 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
     if problems:
         raise ValueError("plan khong hop le: " + "; ".join(problems[:8]))
 
+    tier_reviewer = reviewer_kind
+    if reviewer is not None:
+        kind = str(getattr(reviewer, "kind", "") or "")
+        if kind in {"wave-reviewer", "meeting-reviewer"}:
+            tier_reviewer = "meeting" if kind == "meeting-reviewer" else "wave"
+        elif kind == "none":
+            tier_reviewer = "none"
+    tier = tier_policy.select_tier(mode=mode, reviewer=tier_reviewer)
+    capabilities = [cap.name for cap in capability_registry.for_tier(tier.tier)]
+
     # Health gate: meeting/wave requires all four reviewer routes to exist.
     if mode == "meeting" or reviewer_kind == "wave":
         import preflight
@@ -714,6 +726,8 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
         "subtasks": [{"id": item["id"], "status": "pending",
                       "files": item.get("target_files") or []} for item in ordered],
         "mode": mode,
+        "tier": tier.as_dict(),
+        "capabilities": capabilities,
         "team": {"reviewer": getattr(reviewer, "kind", None) or
                  {"wave": "wave-reviewer", "meeting": "meeting-reviewer",
                   "none": "none"}.get(reviewer_kind, "heuristic")},
@@ -725,9 +739,23 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
         return state
 
     if log:
+        ledger.append_event(
+            "tier.selected", run_id=f"job_{plan.get('job_id')}",
+            result={"status": "info"},
+            data={**tier.as_dict(), "capabilities": capabilities}, root=root,
+        )
+        ledger.append_event(
+            "planner.selected", run_id=f"job_{plan.get('job_id')}",
+            result={"status": "info"},
+            data={"tier": tier.tier, "planner": tier.planner,
+                  "required_planners": tier_policy.required_planners(tier.tier)},
+            root=root,
+        )
         ledger.append_event("job.start", run_id=f"job_{plan.get('job_id')}", result={"status": "info"},
                             data={"job_id": plan.get("job_id"),
-                                  "subtasks": len(plan["subtasks"])}, root=root)
+                                  "subtasks": len(plan["subtasks"]),
+                                  "tier": tier.tier, "planner": tier.planner},
+                            root=root)
 
     if reviewer is not None:
         review = reviewer
@@ -818,6 +846,7 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
             "file": report.get("file"),
             "model": actual_model,
             "route": route_plan,
+            "tier": report.get("tier") or tier.as_dict(),
             "error": report.get("error"),
         })
         entry = records[-1]
@@ -848,6 +877,8 @@ def run_job(plan: dict, *, root, coder_factory=None, reviewer=None,
     payload = {
         "job_id": plan.get("job_id"),
         "status": status,
+        "tier": tier.as_dict(),
+        "capabilities": capabilities,
         "subtasks": records,
         "duration_ms": int((time.perf_counter() - started) * 1000),
     }
@@ -936,6 +967,8 @@ def main(argv=None) -> int:
     except (OSError, json.JSONDecodeError) as exc:
         print(f"cannot evaluate usage: {exc}")
         return 2
+    tier = tier_policy.select_tier(mode=args.mode, reviewer=args.reviewer)
+    print(f"tier: {tier_policy.summary(tier)}")
     print(f"usage approval: {'required' if usage.required else 'not required'}"
           + (f" ({', '.join(usage.reasons)})" if usage.required else ""))
     if usage.required:

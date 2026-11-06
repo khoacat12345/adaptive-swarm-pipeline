@@ -138,7 +138,15 @@
 
 ### P0-07 — Four-tier execution/planner model, mandatory planner, and M2 tracking
 
-- **Status:** open
+- **Status:** in progress — tier/planner policy, planner council primitive and M2 compact timeline landed; E3/E4 live-path parity tests pending
+- **Batch 1 progress (2026-11-06):**
+  - Added `tier_policy.py` (E1–E4, P1–P3, deterministic selection).
+  - Added `capability_registry.py` for per-tier capability policy/wiring truth.
+  - `job.py` and `recipe_c.py` now record `tier.selected` + `planner.selected` and expose tier/capabilities in state/report.
+  - `planner.py` supports `--tier` / `--planners` and `generate_council` for P1/P2/P3.
+  - Dashboard `/api/job` and Usage card expose tier/planner and compact E2 timeline.
+  - `test_tiers.py`: 44/44 PASS.
+  - Remaining: mandatory-planner guard at the skill boundary, full E3/E4 execution parity tests, and live capability wiring (P1-14).
 - **Priority rationale:** the tiering is now the core product model; without it, approval, planner count and UI tracking cannot be implemented consistently.
 - **Area:** orchestration / UX
 - **Owner decision:** use four **execution tiers** (separate from the existing classifier `Level 0-3`, which describes task scope):
@@ -317,8 +325,9 @@
 
 ### P1-14 — Extracted capabilities are not uniformly usable across E1–E4
 
-- **Status:** open
+- **Status:** in progress — registry + tier policy landed; live v1/v2 runtime wiring remains partial
 - **Area:** research integration / capability wiring
+- **Batch 1 progress (2026-11-06):** `capability_registry.py` defines `tiers`, `roles`, `wiring` and `report()` for repo_map/aci/lessons/memory/events; every tier E1–E4 has a capability profile. `job.py`/`recipe_c.py` expose the profile in state/report. The matrix still marks repo-map/ACI/memory as partial because v1 meeting does not inherit v2 planning/execution.
 - **Owner question:** forget whether the upstream repos are usable. The real question is: the **skills/ideas extracted from those repos and put into our skill** — are they usable now, and can the coder, reviewer and meeting all use them across E1–E4?
 - **Answer recorded:** **Not yet uniformly.**
   - The upstream repos are reference-only.
@@ -478,3 +487,4 @@ When the repo is installed, inspect and record:
 - 2026-11-06: Recorded **P0-07**: four execution tiers (E1 coder-only, E2 coder+reviewer, E3 coder+additional reviewer(s), E4 meeting), three planner levels (P1=1, P2=2, P3=3), mandatory planner on skill entry, and lightweight E2 run tracking outside War Room.
 - 2026-11-06: Corrected **P1-14**: the question is not whether the upstream repos are drop-in skills, but whether the **extracted capabilities** (repo map, ACI, lessons, memory, events, speaker selection) are wired for coder, reviewer and meeting across E1–E4. Current answer: partial v2 wiring, no unified tier runtime, and meeting does not inherit v2 planning/ACI.
 - 2026-11-06: **P0-06 closed** after owner-confirmed default thresholds (8 requests / $0.50). v1 quick path, direct recipe dashboard wait, v2 `usage-approve`, `/v2` Approve Usage, docs and full regression are complete.
+- 2026-11-06: Batch 1 landed `tier_policy.py`, `capability_registry.py`, `generate_council`, E2 compact timeline and tier/planner events. P0-07/P1-14 moved to in-progress pending skill-boundary guard and E3/E4 live parity.

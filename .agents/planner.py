@@ -170,6 +170,31 @@ def generate(goal: str, *, root, runner=None, max_attempts: int = 2,
     raise PlannerError("planner could not produce a valid plan: " + "; ".join(last[:8]))
 
 
+def generate_council(goal: str, *, root=".", planners: int = 1,
+                     generate_fn=None) -> dict:
+    """Generate independent proposals and select the first valid plan.
+
+    P1 uses one planner. P2/P3 request two/three independent proposals. This is
+    deliberately conservative: the v2 full critique council remains the richer
+    implementation; the v1 path must not silently skip the extra proposals.
+    """
+    planners = max(1, min(3, int(planners or 1)))
+    generate_fn = generate_fn or generate
+    if planners == 1:
+        return generate_fn(goal, root=root)
+    plans = []
+    last_error = None
+    for _ in range(planners):
+        try:
+            plans.append(generate_fn(goal, root=root))
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+    if not plans:
+        raise PlannerError(f"planner council failed: {last_error}")
+    # Keep the proposal with the smallest valid task surface.
+    return min(plans, key=lambda item: len(item.get("subtasks") or []))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="W4 planner: goal -> plan.json")
     parser.add_argument("--goal", required=True)
@@ -178,9 +203,17 @@ def main(argv=None) -> int:
     parser.add_argument("--submit", action="store_true", help="submit plan + print dashboard URL")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--tier", choices=("E1", "E2", "E3", "E4"), default=None,
+                        help="execution tier; selects the planner level P1-P3")
+    parser.add_argument("--planners", type=int, choices=(1, 2, 3), default=None,
+                        help="override planner count (P1=1, P2=2, P3=3)")
     args = parser.parse_args(argv)
 
-    plan = generate(args.goal, root=args.root)
+    planner_count = args.planners or 1
+    if args.tier:
+        import tier_policy
+        planner_count = tier_policy.required_planners(args.tier)
+    plan = generate_council(args.goal, root=args.root, planners=planner_count)
     out = Path(args.out)
     if not out.is_absolute():
         out = Path(args.root) / args.out

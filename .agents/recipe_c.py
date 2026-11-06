@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 
 import approval_policy
+import capability_registry
 import format_ladder
 import clarify
 import ledger
@@ -38,6 +39,7 @@ import plan_validator
 import safe_writer
 import secret_scan
 import system_bot
+import tier_policy
 import work_order as work_order_module
 import workers
 from workers import unified_diff
@@ -315,6 +317,18 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         reviewer.bind_run(run_id, root_path, log)
     if reviewer is not None and hasattr(reviewer, "bind_coder"):
         reviewer.bind_coder(coder)
+    reviewer_kind = str(getattr(reviewer, "kind", "") or "")
+    tier_reviewer = (
+        "meeting" if reviewer_kind == "meeting-reviewer"
+        else "wave" if reviewer_kind == "wave-reviewer"
+        else "none" if reviewer_kind == "none"
+        else "heuristic"
+    )
+    tier = tier_policy.select_tier(
+        mode="meeting" if tier_reviewer == "meeting" else "panel",
+        reviewer=tier_reviewer,
+    )
+    capabilities = [cap.name for cap in capability_registry.for_tier(tier.tier)]
     wave_reviewer = (reviewer is not None
                      and getattr(reviewer, "kind", "") in
                      ("wave-reviewer", "meeting-reviewer"))
@@ -530,7 +544,21 @@ def run(work_order, *, coder, reviewer=None, root=None, run_id: str | None = Non
         "secrets_blocked": [],
         "usage": {"in_tokens": 0, "out_tokens": 0, "cache_read_tokens": 0, "cost": 0.0},
         "session": [],
+        "tier": tier.as_dict(),
+        "capabilities": capabilities,
     }
+    if log:
+        ledger.append_event(
+            "tier.selected", run_id=run_id, result={"status": "info"},
+            data={**tier.as_dict(), "capabilities": capabilities},
+            root=root_path,
+        )
+        ledger.append_event(
+            "planner.selected", run_id=run_id, result={"status": "info"},
+            data={"tier": tier.tier, "planner": tier.planner,
+                  "required_planners": tier_policy.required_planners(tier.tier)},
+            root=root_path,
+        )
 
     # Worker objects (nhat la WaveReviewer) duoc job.py tai su dung qua cac
     # subtask; chi tinh request PHAT SINH trong lan chay nay.

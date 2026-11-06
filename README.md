@@ -244,6 +244,7 @@ Only the configured `chat_id` is accepted. Commands: `/status`, `/approve`,
 ## Tests
 
 ```bash
+python .agents/tests/test_tiers.py        # E1-E4 / P1-P3 policy
 python .agents/tests/test_phase4.py       # observation layer
 python .agents/tests/test_level3.py       # multi-file transaction + regressions
 python .agents/tests/test_phase5.py        # router + fallback reviewer + regressions

@@ -501,12 +501,18 @@ def make_handler(root: Path, ledger: Path):
                         self._json({"workspaces": [], "error": str(exc)[:300]})
                 elif route == "/api/job":
                     import job as job_module
+                    import ledger as ledger_module
+                    import tier_policy
                     plan_state = job_module.read_plan_state(root)
+                    state = job_module.read_state(root)
+                    events = ledger_module.read_events(root=root)
                     self._json({
-                        "state": job_module.read_state(root),
+                        "state": state,
                         "plan": plan_state.get("plan"),
                         "decision": plan_state.get("decision"),
                         "control": job_module.read_control(root),
+                        "tier": state.get("tier"),
+                        "compact_timeline": tier_policy.compact_timeline(events[-40:]),
                     })
                 elif route == "/api/team":
                     import team_view

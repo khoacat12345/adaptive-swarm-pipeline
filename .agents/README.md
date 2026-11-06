@@ -123,6 +123,7 @@ Plan tab is preview-only under P0-06.
 ## Tests
 
 ```bash
+python3 .agents/tests/test_tiers.py
 python3 .agents/tests/test_approval_policy.py
 python3 .agents/tests/test_usage_gate.py
 python3 .agents/tests/test_protocol.py

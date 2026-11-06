@@ -4862,6 +4862,16 @@
       if (!box) return;
       const gate = state.usageGate || { reviewer: 'heuristic', mode: 'panel' };
       const direct = data.source === 'recipe';
+      const tierInfo = (state.job || {}).tier || {};
+      const tierLabel = tierInfo.tier
+        ? `${tierInfo.tier} · ${tierInfo.planner || 'P1'}`
+        : (direct ? 'direct recipe' : 'no tier');
+      const compactTimeline = ((state.job || {}).compact_timeline || []).slice(-8);
+      const activity = compactTimeline.length
+        ? `<div class="row" style="margin-top:8px;gap:6px">
+             <span class="muted" style="font-size:10.5px">run:</span>
+             ${compactTimeline.map((item) => `<span class="chip">${esc(item.stage)}</span>`).join(' → ')}
+           </div>` : '';
       const decision = data.decision || {};
       const status = (data.status || {}).status || (decision.required ? 'awaiting' : 'not_required');
       const estimate = decision.estimate || {};
@@ -4901,7 +4911,7 @@
       box.innerHTML = `<div class="spread">
           <div><h2 style="margin:0">Usage approval</h2>
           <span class="muted" style="font-size:10.5px">${direct ? 'direct recipe' : esc(plan.job_id || 'no plan')} ·
-          ${esc((plan.subtasks || []).length)} subtask(s)</span></div>
+          ${esc((plan.subtasks || []).length)} subtask(s) · <b>${esc(tierLabel)}</b></span></div>
           <span class="pill ${statusPill}">${esc(status)}</span>
         </div>
         <div class="row" style="margin-top:10px">
@@ -4913,7 +4923,7 @@
           ${statCard('Cost', cost, estimate.confidence || 'estimate')}
           ${statCard('Wall time', estimate.wall_seconds == null ? '-' : estimate.wall_seconds + 's', 'estimated')}
           ${statCard('Models', models.length ? models.join(', ') : '-', 'route')}
-        </div>${actions}`;
+        </div>${activity}${actions}`;
     }
 
     async function decideUsage(kind) {
