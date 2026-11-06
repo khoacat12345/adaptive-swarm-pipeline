@@ -492,3 +492,14 @@ When the repo is installed, inspect and record:
 - 2026-11-07: Batch 3 added `run_lock.py` and real child-process transaction crash recovery; P1-11 resolved, P1-04 resolved, P0-05 in progress.
 - 2026-11-07: Batch 4 added `v2/converge.py`, `v2/run.py converge`, a my-project bridge pilot and `ClaudeCodeRuntimeStub`; P1-06/P1-07 resolved, P1-05 in progress.
 - 2026-11-07: Batch 5 live free-model v2 phase passed: `prepare -> plan -> usage-approve -> execute -> verify -> checkpoint -> handoff`; main unchanged, worktree changed, 4 reviewer approvals, checkpoint `c7ac85c...`. P0-01/P1-03/P1-13 resolved. Full local regression: 637 checks/assertions PASS across the listed suites.
+
+## Batch commit ledger
+
+| Batch | Commit | Evidence / status |
+|---|---|---|
+| P0-06 | `81f2b84` | Usage approval complete (resolved) |
+| 1 | `165b8f8` | E1–E4/P1–P3 policy, capability registry, E2 timeline; P0-07/P1-14 in progress |
+| 2 | `0c493d1` | Model registry + spend reconciliation; P1-09 resolved; P0-02/03/04/P1-08 in progress |
+| 3 | `4bb8161` | Repo lock + crash transaction recovery; P1-11/P1-04 resolved; P0-05 in progress |
+| 4 | `6740e82` | Converge + Spec Kit bridge pilot + runtime stub; P1-06/P1-07 resolved; P1-05 in progress |
+| 5 | `fa2a359` | Live free-model v2 pilot; P0-01/P1-03/P1-13 resolved |
