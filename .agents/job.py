@@ -51,6 +51,7 @@ import tier_policy                   # noqa: E402
 import notify                        # noqa: E402
 import recipe_c                      # noqa: E402
 import router                        # noqa: E402
+import run_lock                      # noqa: E402
 import workers                       # noqa: E402
 import work_order as work_order_module  # noqa: E402
 
@@ -932,6 +933,14 @@ def main(argv=None) -> int:
     parser.add_argument("--open", action="store_true",
                         help="tu khoi dong dashboard neu can va mo trinh duyet")
     args = parser.parse_args(argv)
+
+    try:
+        lock = run_lock.RepoLock(args.root, owner="job").acquire()
+    except run_lock.LockBusy as exc:
+        print(f"repo lock busy: {exc}")
+        return 2
+    import atexit
+    atexit.register(lock.release)
 
     try:
         if args.resume:

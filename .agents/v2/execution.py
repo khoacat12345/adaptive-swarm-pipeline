@@ -447,7 +447,6 @@ class ExecutionEngine:
         *,
         coder: ExecutionSeat,
         reviewers: Mapping[str, ExecutionSeat],
-        cleaner: ExecutionSeat | None = None,
     ) -> ExecutionResult:
         store, plan, _, workspace = self._load(run_id)
         store.assert_state("PROVISIONING")

@@ -105,6 +105,13 @@ def main(argv: list[str] | None = None) -> int:
     handoff.add_argument("--report", default=None)
 
     args = parser.parse_args(argv)
+    from run_lock import LockBusy, RepoLock
+    try:
+        lock = RepoLock(args.root, owner="v2").acquire()
+    except LockBusy as exc:
+        raise SystemExit(f"repo lock busy: {exc}")
+    import atexit
+    atexit.register(lock.release)
     runner = V2Runner(
         args.root,
         state_root=args.state_root,

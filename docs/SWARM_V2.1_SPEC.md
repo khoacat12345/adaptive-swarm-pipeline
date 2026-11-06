@@ -670,8 +670,9 @@ There is no "minor plan edit" exception.
 8. Deterministic verify must exit `0`.
 9. On failure: repair loop, maximum 3 attempts, no-progress detector.
 10. On success: checkpoint commit, settle budget, next phase.
-11. Cleaner, if enabled, proposes cleanup only after verify; re-verify after any
-    cleanup and checkpoint again.
+11. CleanArchitect is deferred under P1-04: the unused `cleaner` parameter was
+    removed. A future cleanup step must run only after verify, re-verify, and
+    checkpoint again.
 
 ### 8.2 Test integrity
 

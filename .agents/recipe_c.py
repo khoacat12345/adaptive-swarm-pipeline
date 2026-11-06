@@ -36,6 +36,7 @@ import ledger
 import memory
 import permissions
 import plan_validator
+import run_lock
 import safe_writer
 import secret_scan
 import system_bot
@@ -1304,6 +1305,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--usage-timeout", type=int, default=600,
                         help="seconds to wait for Usage approval")
     args = parser.parse_args(argv)
+
+    try:
+        lock = run_lock.RepoLock(args.root, owner="recipe_c").acquire()
+    except run_lock.LockBusy as exc:
+        print(f"repo lock busy: {exc}", file=sys.stderr)
+        return 3
+    import atexit
+    atexit.register(lock.release)
 
     order_data = json.loads(Path(args.order).read_text(encoding="utf-8"))
     order = work_order_module.WorkOrder.from_dict(order_data)

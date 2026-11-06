@@ -73,8 +73,9 @@
 
 ### P0-05 — long-run crash/resume is not process-tested
 
-- **Status:** open
+- **Status:** in progress — real transaction crash/restore + repo lock tested; v2 phase-kill parity still pending
 - **Area:** overnight reliability
+- **Batch 3 progress (2026-11-06):** `test_resilience.py` kills a child process after a transaction write and proves `recover_open_transactions()` restores exact bytes (8/8 PASS). The repo lock is also tested. V2 phase-process kill/resume remains open.
 - **Evidence:** state transitions and checkpoint records are unit-tested; there is no test that kills the runner process mid-phase and resumes it in a new process.
 - **Risk:** duplicate writes, stuck locks, or lost checkpoints under a real crash.
 - **Exit criterion:** kill runner after write/before verify and after verify/before checkpoint; new process resumes safely; no duplicate file version.
@@ -218,11 +219,9 @@
 
 ### P1-04 — CleanArchitect seat is defined but not wired
 
-- **Status:** open
+- **Status:** resolved — unused `cleaner` parameter removed; cleanup deferred in spec
 - **Area:** execution roster
-- **Evidence:** `cleaner` is accepted by `ExecutionEngine.execute` but not executed.
-- **Risk:** spec says optional cleanup; implementation silently ignores it.
-- **Exit criterion:** either implement post-verify cleanup + full re-verify, or remove the parameter and document it as deferred.
+- **Batch 3 progress (2026-11-06):** `ExecutionEngine.execute` no longer accepts a silent `cleaner`; `SWARM_V2.1_SPEC.md` documents CleanArchitect as deferred with re-verify requirements.
 
 ### P1-05 - Spec Kit bridge is partially implemented
 
@@ -275,8 +274,9 @@
 
 ### P1-11 — concurrent runs / stale plan state
 
-- **Status:** open
+- **Status:** resolved — repo lock + stale reclaim tested; job/recipe/v2 CLI use it
 - **Area:** concurrency
+- **Batch 3 progress (2026-11-06):** `.agents/run_lock.py` writes `.agents/tmp/run.lock` with PID/owner; `job.py`, `recipe_c.py` and `v2/run.py` acquire it. `test_resilience.py` verifies second-process blocking and stale-lock reclaim.
 - **Evidence:** v1 plan state is a single shared `.agents/tmp/plan.json`; a second session/planner can replace it. v2 has a run lock only inside its own state model.
 - **Risk:** two sessions overwrite each other’s plan/approval.
 - **Exit criterion:** per-repo lock is enforced before planner/run; stale lock detection; no shared mutable plan.
