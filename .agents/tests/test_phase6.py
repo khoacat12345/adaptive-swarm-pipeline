@@ -39,6 +39,7 @@ for _path in (AGENTS_DIR, AGENTS_DIR / "tests"):
 
 import dashboard                      # noqa: E402
 import job                            # noqa: E402
+import usage_request                  # noqa: E402
 import plan_md                        # noqa: E402
 import replay                         # noqa: E402
 import work_order as work_order_module  # noqa: E402
@@ -441,6 +442,25 @@ def test_dashboard_api(checks: Checks) -> None:
         checks.check("dashboard: usage approve -> 200", status == 200, body)
         checks.check("dashboard: usage record exists",
                      bool(job.read_usage_approval(root)), body)
+
+        direct_plan = make_plan()
+        direct_decision = job.usage_decision(root, direct_plan, reviewer="wave")
+        direct = usage_request.write_request(
+            root, plan=direct_plan, mode="panel", reviewer="wave",
+            models=[], decision=direct_decision, label="test direct",
+        )
+        with urllib.request.urlopen(
+                base + "/api/usage/status?source=recipe", timeout=5) as response:
+            direct_status = json.loads(response.read().decode("utf-8"))
+        checks.check("dashboard: direct usage awaiting",
+                     (direct_status.get("status") or {}).get("status") == "awaiting",
+                     direct_status)
+        status, body = post({"decision": "approve", "token": direct["token"],
+                             "source": "recipe"}, "/api/usage/decision")
+        checks.check("dashboard: direct usage approve", status == 200, body)
+        checks.check("dashboard: direct usage approved",
+                     (usage_request.status(root).get("status") or {}).get("status")
+                     == "approved")
 
         status, _ = post({"decision": "approve", "token": "sai"})
         checks.check("dashboard: sai token -> 403", status == 403, status)

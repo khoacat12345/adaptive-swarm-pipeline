@@ -1,6 +1,6 @@
 # Plan — P0-06: Usage-only approval
 
-> Status: planning only; no runtime code changed yet.
+> Status: implemented and accepted (2026-11-06).
 > Source of truth: [`OPEN_PROBLEMS.md`](OPEN_PROBLEMS.md), section **P0-06**.
 > Goal: remove plan approval as a default human gate; keep a conditional approval only for quota/spend.
 

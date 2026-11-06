@@ -1269,6 +1269,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="path to an existing Usage approval JSON")
     parser.add_argument("--usage-approve", action="store_true",
                         help="create an explicit CLI Usage approval when required")
+    parser.add_argument("--wait-usage", action="store_true",
+                        help="open the local dashboard and wait for Usage approval")
+    parser.add_argument("--port", type=int, default=8080,
+                        help="dashboard port for --wait-usage")
+    parser.add_argument("--usage-timeout", type=int, default=600,
+                        help="seconds to wait for Usage approval")
     args = parser.parse_args(argv)
 
     order_data = json.loads(Path(args.order).read_text(encoding="utf-8"))
@@ -1290,13 +1296,63 @@ def main(argv: list[str] | None = None) -> int:
             approval_policy.create_approval(
                 approval_file, usage, approved_by="cli",
             )
+        elif args.wait_usage:
+            import threading
+            import webbrowser
+
+            import dashboard
+            import usage_request
+
+            request = usage_request.write_request(
+                args.root,
+                plan=_usage_plan(order, order_data),
+                mode=args.mode,
+                reviewer=args.reviewer,
+                models=_usage_models(args),
+                decision=usage,
+                label=f"direct recipe: {order.task_id}",
+            )
+            server = None
+            try:
+                try:
+                    server = dashboard.make_server(args.port, root=args.root)
+                    threading.Thread(target=server.serve_forever, daemon=True).start()
+                except OSError:
+                    server = None
+                url = (f"http://127.0.0.1:{args.port}/?token={request['token']}"
+                       "&usage_source=recipe")
+                print(f"dashboard: {url}")
+                print("waiting for Usage approval on the dashboard...", file=sys.stderr)
+                try:
+                    webbrowser.open(url)
+                except Exception:  # noqa: BLE001
+                    pass
+                deadline = time.time() + max(1, int(args.usage_timeout))
+                while time.time() < deadline:
+                    status = approval_policy.approval_status(
+                        usage_request.approval_path(args.root), usage,
+                    )["status"]
+                    if status == "approved":
+                        approval_file = usage_request.approval_path(args.root)
+                        break
+                    if status in {"expired", "invalid"}:
+                        print(f"Usage approval {status}", file=sys.stderr)
+                        return 3
+                    time.sleep(1)
+                else:
+                    print("Usage approval timeout", file=sys.stderr)
+                    return 3
+            finally:
+                if server is not None:
+                    server.shutdown()
+                    server.server_close()
         try:
             approval_policy.assert_approval(approval_file, usage)
         except approval_policy.ApprovalError as exc:
             print(f"Usage approval required: {exc}", file=sys.stderr)
             print(f"estimate: {usage.estimate.as_dict()}", file=sys.stderr)
-            print("Approve in the dashboard Usage tab, or pass "
-                  "--usage-approve for an explicit headless approval.",
+            print("Approve in the dashboard Usage tab, pass --wait-usage, "
+                  "or pass --usage-approve for an explicit headless approval.",
                   file=sys.stderr)
             return 3
     else:

@@ -451,6 +451,11 @@ class ExecutionEngine:
     ) -> ExecutionResult:
         store, plan, _, workspace = self._load(run_id)
         store.assert_state("PROVISIONING")
+        import approval_policy
+        try:
+            self.runner.assert_usage(run_id)
+        except approval_policy.ApprovalError as exc:
+            raise ExecutionError(f"usage approval: {exc}") from exc
         missing = [role for role in REVIEW_ROLES if role not in reviewers]
         if missing:
             raise ExecutionError(f"missing reviewers: {', '.join(missing)}")

@@ -421,7 +421,16 @@ def make_handler(root: Path, ledger: Path):
                 elif route == "/api/usage/status":
                     import approval_policy
                     import job as job_module
+                    import usage_request
                     query = parse_qs(parsed.query)
+                    source = (query.get("source") or ["plan"])[0]
+                    if source == "recipe":
+                        data = usage_request.status(root)
+                        if not data:
+                            self._json({"error": "no direct Usage request"}, 404)
+                            return
+                        self._json(data)
+                        return
                     reviewer = (query.get("reviewer") or ["heuristic"])[0]
                     mode = (query.get("mode") or ["panel"])[0]
                     try:
@@ -537,7 +546,7 @@ def make_handler(root: Path, ledger: Path):
                     return
                 raw = self.rfile.read(length) if length else b""
                 payload = json.loads(raw.decode("utf-8") or "{}")
-                if route == "/api/v2/signoff":
+                if route in ("/api/v2/signoff", "/api/v2/usage/approve"):
                     from v2 import web as v2_web
                     from v2.errors import PlanChangedError, StateTransitionError
                     try:
@@ -569,6 +578,30 @@ def make_handler(root: Path, ledger: Path):
                     except Exception as exc:  # noqa: BLE001
                         self._json({"error": str(exc)[:300]}, 400)
                 elif route == "/api/usage/decision":
+                    import usage_request
+                    source = str(payload.get("source") or "plan")
+                    if source == "recipe":
+                        decision = str(payload.get("decision") or "").lower()
+                        try:
+                            if decision == "approve":
+                                result = usage_request.approve(
+                                    root, str(payload.get("token") or ""),
+                                    approved_by="dashboard-user",
+                                )
+                            elif decision == "reject":
+                                result = usage_request.reject(
+                                    root, str(payload.get("token") or ""),
+                                )
+                            else:
+                                raise ValueError("decision must be approve or reject")
+                        except PermissionError as exc:
+                            self._json({"error": str(exc)}, 403)
+                            return
+                        except ValueError as exc:
+                            self._json({"error": str(exc)}, 400)
+                            return
+                        self._json(result)
+                        return
                     import job as job_module
                     decision = str(payload.get("decision") or "").lower()
                     try:

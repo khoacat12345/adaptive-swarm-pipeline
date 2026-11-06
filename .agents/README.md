@@ -14,9 +14,12 @@ command can declare success.
 2. **Machine verify**: no apply unless `verify_command` exits `0`.
 3. **Byte-exact rollback**: backup first; failed verify restores exact bytes.
 4. **Budget**: soft 8 / hard 16 requests, 600 seconds; hard abort at 16.
-5. **Secret safety**: secrets are blocked or redacted before leaving the machine.
-6. **Append-only ledger**: replay, dashboard and memory read the same evidence.
-7. **No silent config or roadmap changes**.
+5. **Usage approval**: a quick free one-coder + one-reviewer run may start
+   automatically. A wave/meeting/overnight/paid or over-threshold run needs a
+   Usage approval bound to its plan + estimate. Plan approval is not a default gate.
+6. **Secret safety**: secrets are blocked or redacted before leaving the machine.
+7. **Append-only ledger**: replay, dashboard and memory read the same evidence.
+8. **No silent config or roadmap changes**.
 
 ## Setup
 
@@ -31,6 +34,11 @@ sync the installed copy so OpenCode does not load a stale frontmatter file:
 ```bash
 python3 .agents/sync_skill.py --write
 ```
+
+Usage approval defaults to **8 requests / $0.50 / 2 hours**. Override in
+`.agents/approval.json` or with `SWARM_USAGE_REQUEST_THRESHOLD`,
+`SWARM_USAGE_COST_THRESHOLD_USD`, and `SWARM_USAGE_APPROVAL_TTL`. Approval is
+bound to the exact plan and estimate; any plan or estimate change invalidates it.
 
 `scout.py` reads the local OpenCode model catalog and writes
 `.agents/config.json`. The router uses that catalog; OpenCode Go is optional.
@@ -55,19 +63,48 @@ with a warning. Meeting runs have a 600s wall-clock cap; role reviewers get
 
 ## Run a task
 
+### Quick path
+
 ```bash
 python3 .agents/recipe_c.py --order order.json --route --json
 ```
 
-Panel mode is the default. To use the governed meeting mode:
+A free one-coder + one-reviewer task below the Usage threshold runs without a
+plan-approval click. Machine verify, reviewer and budget caps still apply.
+
+### Expensive path on the dashboard
 
 ```bash
-python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --decision approve
+python3 .agents/job.py --plan plan.json --reviewer wave --wait --open
+python3 .agents/recipe_c.py --order order.json --reviewer wave --wait-usage
+```
+
+The dashboard opens the **Usage** tab and waits for approval. Direct recipe
+requests are kept under `.agents/tmp/usage_request.json`, separate from the job
+plan/token.
+
+### Meeting
+
+```bash
+python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --wait --open
 ```
 
 `--mode meeting` requires `--reviewer wave` and all four reviewer roles
 (`security`, `qa`, `perf`, `docs`). If any reviewer is unavailable, the meeting
 aborts with `meeting.aborted`; nothing is applied.
+
+### v2
+
+```bash
+python3 .agents/v2/run.py prepare --goal "..." --phase P1
+python3 .agents/v2/run.py plan --run-id v2_... --plan plan.json
+python3 .agents/v2/run.py usage-approve --run-id v2_...
+python3 .agents/v2/run.py execute --run-id v2_... --free
+```
+
+`signoff` remains an alias for one release; `usage-approve` is the new explicit
+name. The `/v2` page shows **Approve Usage**. `Accept handoff` remains a separate
+end-of-run acknowledgement.
 
 ## Observe
 
@@ -79,11 +116,15 @@ python3 .agents/cost_report.py
 python3 .agents/memory.py
 ```
 
-Dashboard: `http://127.0.0.1:8080/`. It binds loopback only.
+Dashboard: `http://127.0.0.1:8080/`. It binds loopback only. The **Usage** tab
+shows the Usage gate, estimate, plan summary and Approve/Reject controls. The
+Plan tab is preview-only under P0-06.
 
 ## Tests
 
 ```bash
+python3 .agents/tests/test_approval_policy.py
+python3 .agents/tests/test_usage_gate.py
 python3 .agents/tests/test_protocol.py
 python3 .agents/tests/test_preflight.py
 python3 .agents/tests/test_skill_consistency.py
@@ -119,7 +160,9 @@ Run the full suite listed in the root README before a release.
 | `safe_writer.py` | backup, atomic write, transaction, rollback |
 | `router.py` | work-type router and local catalog selector |
 | `quota.py` | OpenCode quota and cost accounting (`SWARM_PLAN_MONTHLY_USD` override) |
-| `job.py` | plan approval and sequential executor |
+| `job.py` | Usage approval, state/control and sequential executor |
+| `approval_policy.py` | shared Usage estimate/policy/approval record |
+| `usage_request.py` | direct recipe request for the dashboard Usage gate |
 | `planner.py` | goal -> plan |
 | `preflight.py` | health/cost gate: model route, auth, cooldown, chain |
 | `sync_skill.py` | sync `.agents/SKILL.md` into installed OpenCode skill |

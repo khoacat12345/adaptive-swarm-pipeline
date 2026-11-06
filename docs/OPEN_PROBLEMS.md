@@ -78,15 +78,17 @@
 
 ### P0-06 — Replace plan approval with conditional Usage approval
 
-- **Status:** in progress — v1 core + Usage UI implemented; v2 gate and final docs follow-up
+- **Status:** resolved — implementation + docs + regression complete
 - **Plan:** [`PLAN_P0_06_USAGE_APPROVAL.md`](PLAN_P0_06_USAGE_APPROVAL.md)
 - **Progress (2026-11-06):**
   - Added shared `.agents/approval_policy.py` (estimate, policy, hash-bound approval record).
-  - `job.py` now auto-runs quick plans and gates expensive plans on Usage approval.
-  - `recipe_c --order` now blocks expensive direct runs without a Usage approval.
+  - `job.py` auto-runs quick plans and gates expensive plans on Usage approval.
+  - `recipe_c --order` blocks expensive direct runs; `--wait-usage` opens the dashboard and waits for approval.
+  - v2 `usage-approve` / `assert-usage` added; `/v2` button is **Approve Usage**; `execute` asserts Usage approval.
   - Dashboard Usage API/UI added; Plan page is preview-only.
-  - Tests: approval policy 28/28; usage gate 1/1; Phase 6A 79/79; wave 32/32; meeting UI 31/31; preflight 38/38; skill 16/16.
-  - README/INSTALL/SKILL updated for the new flow.
+  - Operator guide: [`OPERATOR_GUIDE.md`](OPERATOR_GUIDE.md).
+  - Tests: approval policy 28/28; usage gate 2/2; Phase 6A 82/82; wave 32/32; meeting UI 31/31; preflight 38/38; v2 M1 43/43, M2 47/47, M3 25/25, M5 14/14, P0 15/15; skill 16/16; unittest discover 34/34.
+  - README/INSTALL/SKILL/README.vi/.agents README updated for the new flow.
 - **Priority rationale:** super-urgent product rule. Current behavior makes quick tasks require plan approval while expensive paths can bypass it. The owner’s intended rule is different and must become explicit.
 - **Area:** approval / cost control / UI
 - **Owner decision:**
@@ -284,9 +286,9 @@
 - **Exit criterion:** a Spec Kit-generated `tasks.yaml` becomes a signed v2 plan without bypassing any safety gate.
 - **Reference:** `docs/SWARM_V2.1_SPEC.md`, `docs/CONSTITUTION.md`.
 
-### P1-13 — Missing end-to-end operator guide for a new user
+### P1-13 - Missing end-to-end operator guide for a new user
 
-- **Status:** open
+- **Status:** in progress — [`OPERATOR_GUIDE.md`](OPERATOR_GUIDE.md) created; needs novice walkthrough
 - **Area:** onboarding / documentation
 - **Evidence:** `docs/INSTALL.md` explains setup and individual commands, but there is no single runbook that walks a new operator from “nothing installed” to “task finished safely”. Current questions include:
   - When does the dashboard open?
@@ -475,3 +477,4 @@ When the repo is installed, inspect and record:
 - 2026-11-06: Promoted approval inconsistency to **P0-06** after owner clarification. Plan approval is removed as the default human gate; the planner runs automatically. Only **Usage approval** for quota/cost is kept, conditionally triggered in the Usage tab. Current `job.py` over-gates quick tasks while direct `recipe_c` under-gates expensive ones; the new policy must be enforced at every entry point.
 - 2026-11-06: Recorded **P0-07**: four execution tiers (E1 coder-only, E2 coder+reviewer, E3 coder+additional reviewer(s), E4 meeting), three planner levels (P1=1, P2=2, P3=3), mandatory planner on skill entry, and lightweight E2 run tracking outside War Room.
 - 2026-11-06: Corrected **P1-14**: the question is not whether the upstream repos are drop-in skills, but whether the **extracted capabilities** (repo map, ACI, lessons, memory, events, speaker selection) are wired for coder, reviewer and meeting across E1–E4. Current answer: partial v2 wiring, no unified tier runtime, and meeting does not inherit v2 planning/ACI.
+- 2026-11-06: **P0-06 closed** after owner-confirmed default thresholds (8 requests / $0.50). v1 quick path, direct recipe dashboard wait, v2 `usage-approve`, `/v2` Approve Usage, docs and full regression are complete.

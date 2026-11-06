@@ -67,8 +67,17 @@ def main(argv: list[str] | None = None) -> int:
     signoff_parser.add_argument("--auto-merge", action="store_true")
     signoff_parser.add_argument("--allow-dirty-snapshot", action="store_true")
 
+    usage_parser = sub.add_parser("usage-approve")
+    usage_parser.add_argument("--run-id", required=True)
+    usage_parser.add_argument("--approved-by", default="local-user")
+    usage_parser.add_argument("--auto-merge", action="store_true")
+    usage_parser.add_argument("--allow-dirty-snapshot", action="store_true")
+
     assert_parser = sub.add_parser("assert-signoff")
     assert_parser.add_argument("--run-id", required=True)
+
+    assert_usage_parser = sub.add_parser("assert-usage")
+    assert_usage_parser.add_argument("--run-id", required=True)
 
     execute = sub.add_parser("execute")
     execute.add_argument("--run-id", required=True)
@@ -180,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         }, ensure_ascii=False, indent=2))
         return 0
 
-    if args.command == "signoff":
+    if args.command in {"signoff", "usage-approve"}:
         result = runner.signoff(
             args.run_id,
             approved_by=args.approved_by,
@@ -192,6 +201,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "assert-signoff":
         record = runner.assert_signed(args.run_id)
+        print(json.dumps(record, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "assert-usage":
+        record = runner.assert_usage(args.run_id)
         print(json.dumps(record, ensure_ascii=False, indent=2))
         return 0
 

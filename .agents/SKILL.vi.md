@@ -50,12 +50,19 @@ Tao `order.json` (Work Order 5 truong bat buoc):
 ```
 
 ```powershell
-python .agents/recipe_c.py --order order.json          # chay that
-python .agents/recipe_c.py --order order.json --json   # may doc
+# quick path: task nho free duoi threshold, khong can approve plan
+python .agents/recipe_c.py --order order.json
+python .agents/recipe_c.py --order order.json --json
 python .agents/recipe_c.py --order order.json --dry-run
+
+# expensive path: wave/meeting/chay lau can Usage approval
+python .agents/recipe_c.py --order order.json --reviewer wave --wait-usage
 ```
 
 Ket qua: `status=applied` (da ghi + verify) hoac `aborted` (khong ghi gi).
+Usage approval nam trong tab Usage cua dashboard, bind voi plan + estimate.
+Defaults: 8 requests / $0.50 / 2 gio; override `.agents/approval.json`.
+Direct `recipe_c` khong duoc bypass: dung `--wait-usage` hoac `--usage-approve`.
 
 ## Quan sat (0 request, 0 token)
 
@@ -64,7 +71,7 @@ python .agents/replay.py --last              # timeline run gan nhat
 python .agents/replay.py --list              # liet ke cac run (moi nhat truoc)
 python .agents/replay.py <run_id> --json     # may doc
 python .agents/dashboard.py --port 8080 --open
-python .agents/job.py --plan scratch/swarm_demo/plan.json --root . --wait --open   # plan + duyet tren web
+python .agents/job.py --plan scratch/swarm_demo/plan.json --root . --reviewer wave --wait --open   # Usage gate tren web
 python .agents/cost_report.py                # token / request / fallback
 python .agents/memory.py                     # loi hay gap + goi y
 ```
@@ -75,6 +82,7 @@ War room / Verify / Report (graph + replay, gate, report). Plan la trang doc lap
 Deep link `#warroom`, `#verify`, `#report` mo dung sub-tab Overview; `#analyze` -> Plan.
 Chat la chatbox: Lead ben phai, cac vai khac ben trai. Full plan `.md` tai `/api/plan/md`.
 Run mac dinh `heuristic` (0 reviewer); wave chi khi chon/`--reviewer wave`.
+Plan page la preview-only; Usage page moi co Approve/Reject.
 Server chi bind loopback, khong mo ra mang.
 
 ## Nghiem thu
@@ -128,7 +136,7 @@ python .agents/tests/test_telegram.py       # 15/15 (bot 2 chieu)
 | `.agents/recipe_c.py` | dong co pipeline (verify 2 lan, circuit breaker, budget) |
 | `.agents/router.py` | chon model theo loai viec W0-W8 (main/escalate, khac ho) |
 | `.agents/quota.py` | doc usage that tu `opencode stats`, cat theo tran Go |
-| `.agents/job.py` | plan + duyet tren dashboard + chay tuan tu |
+| `.agents/job.py` | Usage approval + chay tuan tu |
 | `.agents/planner.py` | goal -> plan.json (W4 planner) |
 | `.agents/notify.py` | webhook 1 chieu (Discord/Telegram/generic) |
 | `.agents/telegram_bot.py` | bot Telegram 2 chieu (/approve /pause /say) |

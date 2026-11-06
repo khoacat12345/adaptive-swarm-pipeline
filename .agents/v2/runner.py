@@ -15,6 +15,8 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+import approval_policy
+
 from . import isolation
 from .budget import BudgetConfig, BudgetController
 from .errors import ManifestError, StateTransitionError
@@ -41,6 +43,31 @@ class V2Runner:
 
     def _store(self, run_id: str) -> RunStore:
         return RunStore(self.root, run_id, state_root=self.state_root)
+
+    def usage_approval_path(self, run_id: str) -> Path:
+        return self.load(run_id).run_dir / "usage_approval.json"
+
+    def usage_decision(self, run_id: str, plan: dict[str, Any] | None = None):
+        store = self.load(run_id)
+        if plan is None:
+            plan_path = store.run_dir / "plan.json"
+            if not plan_path.exists():
+                raise ManifestError(f"run has no plan: {run_id}")
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        # v2 execution is always a four-reviewer/War-Room path.
+        return approval_policy.evaluate(
+            plan,
+            mode="panel",
+            reviewer="wave",
+            models=[],
+            root=self.root,
+        )
+
+    def assert_usage(self, run_id: str) -> dict[str, Any]:
+        decision = self.usage_decision(run_id)
+        return approval_policy.assert_approval(
+            self.usage_approval_path(run_id), decision,
+        )
 
     def prepare(
         self,
@@ -107,6 +134,7 @@ class V2Runner:
                 "budget": budget.summary(first_phase),
                 "manifest": store.summary(),
                 "signoff_token": signoff_token,
+                "usage_token": signoff_token,
             }
         except Exception as exc:
             try:
@@ -139,6 +167,10 @@ class V2Runner:
             )
         validated = validate_plan(plan, worktree=workspace.path)
         save_plan(store.run_dir / "plan.json", plan)
+        try:
+            self.usage_approval_path(run_id).unlink()
+        except FileNotFoundError:
+            pass
         store.update(plan_hash=validated["plan_hash"])
         if status == "PLANNING":
             store.transition("plan_valid")
@@ -193,6 +225,10 @@ class V2Runner:
             auto_merge=auto_merge,
             allow_dirty_snapshot=allow_dirty_snapshot,
         )
+        usage = self.usage_decision(run_id, plan)
+        usage_record = approval_policy.create_approval(
+            self.usage_approval_path(run_id), usage, approved_by=approved_by,
+        )
         store.transition("sign_off")
         store.append_event(
             "signoff.approved",
@@ -203,10 +239,21 @@ class V2Runner:
                 "budget_config_hash": budget.config_hash,
             },
         )
+        store.append_event(
+            "usage.approved",
+            {
+                "plan_hash": usage.plan_hash,
+                "estimate_hash": usage.estimate_hash,
+                "reasons": list(usage.reasons),
+                "estimate": usage.estimate.as_dict(),
+                "approved_by": approved_by,
+            },
+        )
         return {
             "run_id": run_id,
             "status": store.load().get("status"),
             "signoff": record,
+            "usage": usage_record,
             "budget": budget.summary(validated["phase_ids"][0]),
         }
 

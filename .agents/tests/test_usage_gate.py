@@ -16,7 +16,9 @@ AGENTS_DIR = Path(__file__).resolve().parents[1]
 if str(AGENTS_DIR) not in sys.path:
     sys.path.insert(0, str(AGENTS_DIR))
 
+import approval_policy  # noqa: E402
 import recipe_c  # noqa: E402
+import usage_request  # noqa: E402
 
 TEMP_ROOT = Path(tempfile.gettempdir()) / "opencode" / "usage_gate_tests"
 
@@ -42,6 +44,33 @@ def make_order(root: Path) -> Path:
     return path
 
 
+def test_direct_request(root: Path, order_path: Path) -> bool:
+    data = json.loads(order_path.read_text(encoding="utf-8"))
+    order = recipe_c.work_order_module.WorkOrder.from_dict(data)
+    plan = recipe_c._usage_plan(order, data)
+    decision = approval_policy.evaluate(
+        plan, mode="panel", reviewer="wave", models=[], root=root,
+    )
+    request = usage_request.write_request(
+        root, plan=plan, mode="panel", reviewer="wave", models=[],
+        decision=decision, label="test direct",
+    )
+    first = usage_request.status(root)
+    wrong = False
+    try:
+        usage_request.approve(root, "wrong")
+    except PermissionError:
+        wrong = True
+    approved = usage_request.approve(root, request["token"])
+    final = usage_request.status(root)
+    return (
+        first.get("status", {}).get("status") == "awaiting"
+        and wrong
+        and approved.get("status") == "approved"
+        and final.get("status", {}).get("status") == "approved"
+    )
+
+
 def main() -> int:
     shutil.rmtree(TEMP_ROOT, ignore_errors=True)
     TEMP_ROOT.mkdir(parents=True)
@@ -54,10 +83,12 @@ def main() -> int:
             "--reviewer", "wave",
         ])
     text = stderr.getvalue()
-    ok = code == 3 and "Usage approval required" in text
-    print(f"USAGE GATE: {'1/1 PASS' if ok else '0/1 PASS'}")
+    gate_ok = code == 3 and "Usage approval required" in text
+    request_ok = test_direct_request(TEMP_ROOT, order)
+    ok = gate_ok and request_ok
+    print(f"USAGE GATE: {'2/2 PASS' if ok else '0/2 PASS'}")
     if not ok:
-        print(f"  code={code} stderr={text[:500]}")
+        print(f"  gate={gate_ok} request={request_ok} code={code} stderr={text[:500]}")
     return 0 if ok else 1
 
 

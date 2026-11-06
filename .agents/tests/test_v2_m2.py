@@ -22,6 +22,7 @@ AGENTS_DIR = Path(__file__).resolve().parents[1]
 if str(AGENTS_DIR) not in sys.path:
     sys.path.insert(0, str(AGENTS_DIR))
 
+import approval_policy  # noqa: E402
 from v2 import isolation  # noqa: E402
 from v2.errors import PlanChangedError  # noqa: E402
 from v2.plan import (  # noqa: E402
@@ -268,9 +269,23 @@ def test_signoff(checks: Checks) -> None:
                      submitted["status"] == "AWAITING_SIGNOFF")
         checks.check("signoff: before signoff is unsigned",
                      needs_reapproval(runner.load(run_id), plan) is True)
+        usage_decision = runner.usage_decision(run_id)
+        checks.check("usage: v2 path requires approval",
+                     usage_decision.required is True, usage_decision.as_dict())
+        missing_usage = False
+        try:
+            runner.assert_usage(run_id)
+        except approval_policy.ApprovalRequired:
+            missing_usage = True
+        checks.check("usage: missing approval is blocked", missing_usage)
         signed = runner.signoff(run_id)
         checks.check("signoff: state becomes PROVISIONING",
                      signed["status"] == "PROVISIONING")
+        checks.check("usage: signoff creates usage record",
+                     bool(signed.get("usage")), signed)
+        checks.check("usage: assert usage passes",
+                     runner.assert_usage(run_id).get("plan_hash")
+                     == submitted["plan_hash"])
         record = load_signoff(runner.load(run_id))
         checks.check("signoff: record has plan hash",
                      record.get("plan_hash") == submitted["plan_hash"])
@@ -295,6 +310,12 @@ def test_signoff(checks: Checks) -> None:
                      runner.load(run_id).load()["status"] == "AWAITING_SIGNOFF")
         checks.check("signoff: old approval no longer matches",
                      needs_reapproval(runner.load(run_id), changed) is True)
+        changed_usage_blocked = False
+        try:
+            runner.assert_usage(run_id)
+        except approval_policy.ApprovalError:
+            changed_usage_blocked = True
+        checks.check("usage: plan change invalidates approval", changed_usage_blocked)
     finally:
         cleanup(runner, root, wt_root)
 
@@ -304,6 +325,8 @@ def test_web(checks: Checks) -> None:
     wt_root = TEMP_ROOT / "web-wt"
     rmtree(wt_root)
     try:
+        checks.check("web: page says Approve Usage",
+                     "Approve Usage" in v2_web.page())
         # The dashboard uses the default .agents/tmp/v2 state root.
         runner = V2Runner(root, worktree_root=wt_root)
         prepared = runner.prepare("web signoff", phase_ids=["P1"])
@@ -316,6 +339,10 @@ def test_web(checks: Checks) -> None:
         detail = v2_web.run_detail(root, run_id)
         checks.check("web: plan is visible", detail["plan"].get("run_id") == run_id)
         checks.check("web: plan can be signed", detail["can_sign"] is True)
+        checks.check("web: usage is awaiting",
+                     (detail.get("usage") or {}).get("status") == "awaiting", detail)
+        checks.check("web: can approve usage",
+                     detail.get("can_approve_usage") is True, detail)
         checks.check("web: run is listed",
                      any(item["run_id"] == run_id for item in v2_web.list_runs(root)["runs"]))
         wrong = False
@@ -329,6 +356,8 @@ def test_web(checks: Checks) -> None:
                      signed["status"] == "PROVISIONING")
         detail = v2_web.run_detail(root, run_id)
         checks.check("web: signed plan is marked", detail["signed"] is True)
+        checks.check("web: usage is approved",
+                     (detail.get("usage") or {}).get("status") == "approved", detail)
         checks.check("web: signed plan cannot be signed twice", detail["can_sign"] is False)
         paused = v2_web.control(root, run_id, token, "pause")
         checks.check("web: pause control works", paused["status"] == "PAUSED")

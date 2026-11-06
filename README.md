@@ -17,17 +17,18 @@ real machine check passes.
 ## v2.1 — isolated autonomous foundation
 
 The v2.1 path is opt-in and lives under `.agents/v2/`. It adds a guarded Git
-worktree, reserve-before-call budgets, three-seat planning, immutable plan
-sign-off, a coder/reviewer execution engine and a local `/v2` control page.
+worktree, reserve-before-call budgets, three-seat planning, hash-bound Usage
+approval, a coder/reviewer execution engine and a local `/v2` control page.
 It does **not** auto-merge and does not replace the v1 execution path yet.
 
 ```bash
 python .agents/v2/run.py prepare --goal "your task" --phase P1
 python .agents/v2/run.py plan --run-id <id> --plan plan.json
-python .agents/v2/run.py signoff --run-id <id>
+python .agents/v2/run.py usage-approve --run-id <id>
 python .agents/v2/run.py execute --run-id <id> --free
 ```
 
+Operator guide: [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md).
 Details: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Constitution:
 [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md). Tasks schema:
 [`docs/schemas/tasks.schema.json`](docs/schemas/tasks.schema.json). Release

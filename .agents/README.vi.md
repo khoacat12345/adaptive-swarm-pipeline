@@ -58,8 +58,11 @@ Hai dieu khong doi qua ca 4 phase:
 # Buoc 1 (1 lan / khi doi may): scout -> ghi config.json
 python .agents/scout.py --write
 
-# Buoc 2 (moi task): giao Work Order
+# Buoc 2 (moi task): giao Work Order quick path
 python .agents/recipe_c.py --order order.json
+
+# Wave/meeting/chay lau: cho Usage approval tren dashboard
+python .agents/recipe_c.py --order order.json --reviewer wave --wait-usage
 ```
 
 `order.json` toi thieu:
@@ -539,14 +542,20 @@ hoac `--allow-escalate`) -> **fallback re/free** (deepseek/glm free) -> `exhaust
 (chan run, `--force` de bo qua). Khong bao gio tu nang cap khi main can ma escalate
 cung khan. Xem nhanh: `python .agents/quota.py`.
 
-### Job plan + duyet (Phase 6A)
+### Job plan + Usage approval (P0-06)
+
+Plan approval khong con la gate mac dinh. Task nho 1 coder + 1 reviewer co the
+tu chay. Chi wave/meeting/chay dem/paid/vuot threshold moi can **Usage approval**.
 
 ```powershell
-# chay demo co san (plan nam trong repo):
-python .agents/job.py --plan scratch/swarm_demo/plan.json --root . --wait --open
+# quick path: khong can approve plan
+python .agents/job.py --plan plan.json --root "C:\path\to\project"
 
-# du an khac (thay bang duong dan that, KHONG dung dau < >):
-python .agents/job.py --plan plan.json --root "C:\path\to\project" --wait --open
+# expensive path: mo Usage gate tren dashboard
+python .agents/job.py --plan plan.json --root "C:\path\to\project" --reviewer wave --wait --open
+
+# direct recipe, cho Usage approval tren dashboard
+python .agents/recipe_c.py --order order.json --reviewer wave --wait-usage
 ```
 
 `--open`: tu khoi dong dashboard neu port trong + mo trinh duyet kem token.
@@ -558,15 +567,16 @@ Trang poll 3s va chi ve lai phan thay doi (khong nhay/F5); quota bar cap nhat to
 Plan gom `job_id`, `objective`, `subtasks[]`. Moi subtask: `id`, `title`, `objective`,
 `verify_command`, `target_files`, `sandbox_files`, `level`, `max_rounds`, `depends_on`.
 
-- Duyet **ca plan** mot lan; chay tuan tu theo topo, dung ngay khi 1 buoc fail.
-- Dashboard co **Approve & Run** (duyet + chay ngay) va **Run job** o War room.
-  Mac dinh `heuristic` (0 reviewer request / $0); chon `wave` (5 agent) hoac dung
-  `--reviewer wave` khi muon bat 4 reviewer. Approve-only van duoc giu.
-- Khong duyet / timeout -> **khong ghi file nao**.
+- **Plan page la preview-only**; khong con nut Approve plan.
+- **Usage tab** hien plan, agent/model, estimated request/cost/wall, budget va
+  nut Approve/Reject. Approval bind voi `plan_hash + estimate_hash`.
+- Mac dinh: **8 requests / $0.50 / 2 gio**. Override trong `.agents/approval.json`
+  hoac env `SWARM_USAGE_*`.
+- Task nho free duoi threshold: chay tu dong, van verify + reviewer + budget cap.
+- Wave/meeting/paid/overnight: block truoc model call neu chua co Usage approval.
+- Direct `recipe_c` khong bypass: dung `--wait-usage` hoac `--usage-approve`.
 - Moi subtask tu chon model theo W0-W8 + quota (fallback ladder).
 - Token 1 lan chi in ra CLI; dashboard khong tra token qua API.
-- Dashboard (tieng Anh) hien them **quota bar** (plan chung 5h/7d/30d + model dang
-  dung) va **quick access**: copy lenh `job.py --plan ... --wait --open` de chay lai.
 - **Overview** ngan: 5 agent + Lead, flow Plan -> Code -> Review -> Verify -> Apply,
   khong bar chart. **Plan** dai: phase theo dependency wave, key points + chi tiet
   gap/mo, link `Open full plan (.md)` + `Download`. **Chat** kieu chatbox: Lead ben
@@ -1267,11 +1277,7 @@ main/escalate uu tien ngon-bo-re; `validate_roles()` chan trung ho o vai kiem to
 tu day escalate len khi main sap can; `recipe_c --route` ghi event `router.decided`.
 Nghiem thu Phase 6A **70/70**, quota **26/26**, Level 3 **47/47**, Phase 4 **36/36**.
 
-**Phase 6A — job plan + duyet (da lam):** `job.py` nhan `plan.json` (subtasks +
-`depends_on` + verify), ghi plan vao `.agents/tmp/`, in URL dashboard kem token;
-nguoi dung bam Duyet/Tu choi tren 127.0.0.1; chi khi approved moi chay tuan tu, moi
-subtask 1 Work Order + transaction va tu route W0-W8 + quota. Timeout = tu choi.
-Nghiem thu **32/32 PASS** (gom Phase 5 hoi quy).
+**Phase 6A - job plan + Usage approval (P0-06):** `job.py` nhan `plan.json` (subtasks + `depends_on` + verify), ghi plan vao `.agents/tmp/`, validate va estimate Usage. Task nho free duoi threshold tu chay, khong can plan approval. Wave/meeting/overnight/paid/vuot threshold mo **Usage** tren dashboard va chi chay sau khi approve. Direct `recipe_c --wait-usage` cung cho approval tren dashboard. Moi subtask 1 Work Order + transaction va tu route W0-W8 + quota. Timeout/expired = khong chay.
 
 **Chua lam (co y):** executor song song (Level 3 chay tuan tu trong 1 giao dich),
 backoff luy tien cho cooldown, 5 sub-agent song song (QA/security/perf/doc), bridge
@@ -1288,14 +1294,15 @@ Ban 1.0 bo sung **meeting mode** ben canh panel mode cu.
 
 ```powershell
 # Mac dinh: panel, 4 reviewer doc lap, khong hop
-python .agents/job.py --plan plan.json --mode panel --reviewer wave
+python .agents/job.py --plan plan.json --mode panel --reviewer wave --wait --open
 
 # Meeting: Round 1 doc lap + toi da 1 vong rebuttal co muc tieu
-python .agents/job.py --plan plan.json --mode meeting --reviewer wave
+python .agents/job.py --plan plan.json --mode meeting --reviewer wave --wait --open
 ```
 
-- `--mode panel` la mac dinh; 352 test legacy khong doi hanh vi.
-- `--mode meeting` bat buoc `--reviewer wave` (du 4 vai Security, QA, Perf, Docs).
+- `--mode panel` la mac dinh; task nho free duoi threshold khong can Usage approval.
+- `--mode meeting` bat buoc `--reviewer wave` (du 4 vai Security, QA, Perf, Docs)
+  va luon can Usage approval truoc khi goi model.
 - Meeting chi mo Round 2 khi Round 1 co conflict.
 - Round 2 toi da 2 reviewer + Coder; patch moi bat buoc Security + QA re-check.
 - Khong co Round 3. Sau Round 2 van reject/escalate -> khong apply.

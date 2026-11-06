@@ -2834,7 +2834,9 @@
       chatFilter: 'all', overviewTab: 'warroom', hourlyMode: 'cost', teamData: null, replayIndex: null, replayTimer: null, pageSig: {},
       meetingRound: 'all', stream: null, streamRun: null, streamHealthy: false, streamRefreshTimer: null,
       token: new URLSearchParams(location.search).get('token') || '', sessionToken: '',
-      usageGate: { reviewer: 'heuristic', mode: 'panel' }, usageApproval: null,
+      usageGate: { reviewer: 'heuristic', mode: 'panel' },
+      usageSource: new URLSearchParams(location.search).get('usage_source') || 'plan',
+      usageApproval: null,
       lastQuota: 0, sig: {}
     };
     // Optional deep-link/test hook: ?follow=1 opens Chat at the newest event.
@@ -3621,6 +3623,7 @@
       }
       const subs = mergedSubtasks(plan, jobState);
       const phase = jobState.phase || 'idle';
+      const gate = state.usageGate || { reviewer: 'heuristic', mode: 'panel' };
       const ctx = runContext(decision, phase);
       const timeline = ctx.timeline;
       if (ctx.stale || (state.replayIndex != null && !timeline[state.replayIndex])) {
@@ -3757,9 +3760,9 @@
       </select>
       <select id="runReviewer" class="btn ghost" style="padding:7px 8px"
         title="Default heuristic costs 0 reviewer requests; wave calls 4 reviewer models">
-        <option value="heuristic" selected>heuristic · 0 reviewers / $0</option>
-        <option value="wave">wave · 5 agents (4 extra requests)</option>
-        <option value="none">none</option>
+        <option value="heuristic"${gate.reviewer === 'heuristic' ? ' selected' : ''}>heuristic · 0 reviewers / $0</option>
+        <option value="wave"${gate.reviewer === 'wave' ? ' selected' : ''}>wave · 5 agents (4 extra requests)</option>
+        <option value="none"${gate.reviewer === 'none' ? ' selected' : ''}>none</option>
       </select>
       <button class="btn ghost" onclick="switchView('quota')">Usage gate</button>
       <button class="btn primary" onclick="runJob(this)">Run job</button>
@@ -4814,15 +4817,36 @@
       if (!box) return;
       const gate = state.usageGate || { reviewer: 'heuristic', mode: 'panel' };
       const params = new URLSearchParams({ reviewer: gate.reviewer, mode: gate.mode });
-      try {
+      const loadPlan = async () => {
         const data = await api('/api/usage/status?' + params.toString());
-        state.usageApproval = data;
-        renderUsageApproval(data);
-      } catch (error) {
-        box.innerHTML = `<div class="spread"><b>Usage approval</b>
-          <span class="pill">no plan</span></div>
-          <p class="muted" style="margin:8px 0 0">${esc(error.message)}</p>`;
+        state.usageSource = 'plan';
+        return data;
+      };
+      const loadRecipe = async () => {
+        const data = await api('/api/usage/status?source=recipe');
+        state.usageSource = 'recipe';
+        return data;
+      };
+      let data = null;
+      let firstError = null;
+      const order = state.usageSource === 'recipe'
+        ? [loadRecipe, loadPlan] : [loadPlan, loadRecipe];
+      for (const load of order) {
+        try {
+          data = await load();
+          break;
+        } catch (error) {
+          if (!firstError) firstError = error;
+        }
       }
+      if (!data) {
+        box.innerHTML = `<div class="spread"><b>Usage approval</b>
+          <span class="pill">no plan / direct request</span></div>
+          <p class="muted" style="margin:8px 0 0">${esc(firstError ? firstError.message : 'no data')}</p>`;
+        return;
+      }
+      state.usageApproval = data;
+      renderUsageApproval(data);
     }
 
     function setUsageGate(reviewer, mode) {
@@ -4837,6 +4861,7 @@
       const box = $('#usageApproval');
       if (!box) return;
       const gate = state.usageGate || { reviewer: 'heuristic', mode: 'panel' };
+      const direct = data.source === 'recipe';
       const decision = data.decision || {};
       const status = (data.status || {}).status || (decision.required ? 'awaiting' : 'not_required');
       const estimate = decision.estimate || {};
@@ -4848,6 +4873,20 @@
         : status === 'awaiting' ? 'warn'
           : status === 'not_required' ? 'ok' : 'bad';
       const cost = estimate.cost_usd == null ? 'unknown' : `$${Number(estimate.cost_usd).toFixed(2)}`;
+      const gateControls = direct
+        ? `<span class="chip">${esc(data.mode || 'panel')} / ${esc(data.reviewer || 'heuristic')}</span>
+           <span class="muted" style="font-size:10.5px">direct recipe request</span>`
+        : `<select id="usageReviewer" class="btn ghost" style="padding:7px 8px"
+            onchange="setUsageGate(this.value, document.getElementById('usageMode').value)">
+            <option value="heuristic"${selected('heuristic', gate.reviewer)}>quick · 1 reviewer</option>
+            <option value="wave"${selected('wave', gate.reviewer)}>wave · 5 agents</option>
+            <option value="none"${selected('none', gate.reviewer)}>no reviewer</option>
+          </select>
+          <select id="usageMode" class="btn ghost" style="padding:7px 8px"
+            onchange="setUsageGate(document.getElementById('usageReviewer').value, this.value)">
+            <option value="panel"${selected('panel', gate.mode)}>panel</option>
+            <option value="meeting"${selected('meeting', gate.mode)}>meeting</option>
+          </select>`;
       const actions = decision.required && status === 'awaiting'
         ? `<div class="row" style="margin-top:10px">
              <button class="btn primary" onclick="decideUsage('approve')">Approve Usage</button>
@@ -4861,22 +4900,12 @@
             : `<p class="muted" style="margin:8px 0 0">Quick path: no Usage approval needed. Verify, reviewer and budget caps still apply.</p>`;
       box.innerHTML = `<div class="spread">
           <div><h2 style="margin:0">Usage approval</h2>
-          <span class="muted" style="font-size:10.5px">${esc(plan.job_id || 'no plan')} ·
+          <span class="muted" style="font-size:10.5px">${direct ? 'direct recipe' : esc(plan.job_id || 'no plan')} ·
           ${esc((plan.subtasks || []).length)} subtask(s)</span></div>
           <span class="pill ${statusPill}">${esc(status)}</span>
         </div>
         <div class="row" style="margin-top:10px">
-          <select id="usageReviewer" class="btn ghost" style="padding:7px 8px"
-            onchange="setUsageGate(this.value, document.getElementById('usageMode').value)">
-            <option value="heuristic"${selected('heuristic', gate.reviewer)}>quick · 1 reviewer</option>
-            <option value="wave"${selected('wave', gate.reviewer)}>wave · 5 agents</option>
-            <option value="none"${selected('none', gate.reviewer)}>no reviewer</option>
-          </select>
-          <select id="usageMode" class="btn ghost" style="padding:7px 8px"
-            onchange="setUsageGate(document.getElementById('usageReviewer').value, this.value)">
-            <option value="panel"${selected('panel', gate.mode)}>panel</option>
-            <option value="meeting"${selected('meeting', gate.mode)}>meeting</option>
-          </select>
+          ${gateControls}
           <span class="muted" style="font-size:10.5px">${esc(reasons || 'below threshold')}</span>
         </div>
         <div class="statgrid" style="margin-top:10px">
@@ -4893,6 +4922,7 @@
         await api('/api/usage/decision', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ decision: kind, token: authToken(),
+            source: state.usageSource || 'plan',
             reviewer: gate.reviewer, mode: gate.mode })
         });
         toast('Usage ' + kind + 'd');

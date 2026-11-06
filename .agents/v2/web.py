@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Minimal M2 sign-off surface for the local dashboard.
+"""Minimal v2 Usage-approval surface for the local dashboard.
 
 The page is intentionally standalone (/v2). It does not edit a plan: the user
-approves the exact plan hash that is already on disk. The full worktree/budget
-dashboard remains M4.
+approves the exact plan + usage estimate that is already on disk. The plan hash
+is kept for audit, but the gate is Usage approval under P0-06.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+
+import approval_policy
 
 from .errors import PlanChangedError, StateTransitionError
 from .plan import plan_hash
@@ -43,7 +45,7 @@ PAGE = r"""<!doctype html>
 </style>
 </head>
 <body>
-<header><h1>Swarm v2.1</h1><small>Plan sign-off · local only</small><span class="grow"></span><span class="pill">M2</span></header>
+<header><h1>Swarm v2.1</h1><small>Usage approval - local only</small><span class="grow"></span><span class="pill">P0-06</span></header>
 <main>
   <section class="card">
     <div class="row"><b>Runs</b><span class="grow"></span><button onclick="loadRuns()">Refresh</button></div>
@@ -54,7 +56,7 @@ PAGE = r"""<!doctype html>
     <div id="hash" class="muted" style="margin-top:8px"></div>
     <div class="row" style="margin-top:12px">
       <input id="token" type="password" placeholder="run token from prepare output" autocomplete="off">
-      <button class="primary" id="approve" onclick="approve()" disabled>Approve exact plan hash</button>
+      <button class="primary" id="approve" onclick="approve()" disabled>Approve Usage</button>
       <button id="pause" onclick="control('pause')" disabled>Pause</button>
       <button id="resume" onclick="control('resume')" disabled>Resume</button>
       <button id="stop" onclick="control('stop')" disabled>Stop</button>
@@ -102,12 +104,12 @@ async function selectRun(id) {
     $('statusline').textContent = data.workspace?.worktree_path ? ('worktree: ' + data.workspace.worktree_path) : '';
     $('budget').textContent = data.budget ? `budget: ${data.budget.global?.used_requests || 0} used / ${data.budget.global?.reserved_requests || 0} reserved / phase ${data.budget.phases ? Object.keys(data.budget.phases).length : 0}` : 'budget: not started';
     $('plan').textContent = JSON.stringify(data.plan || {}, null, 2);
-    $('approve').disabled = !data.can_sign;
+    $('approve').disabled = !data.can_approve_usage;
     $('pause').disabled = !data.can_control?.pause;
     $('resume').disabled = !data.can_control?.resume;
     $('stop').disabled = !data.can_control?.stop;
     $('accept').disabled = !data.can_control?.accept;
-    if (data.signed) $('msg').innerHTML = '<span class="ok">Signed. Any plan change requires reapproval.</span>';
+    if (data.usage?.status === 'approved') $('msg').innerHTML = '<span class="ok">Usage approved. Any plan change requires reapproval.</span>';
   } catch (err) { $('msg').innerHTML = `<span class="bad">${escapeHtml(err.message)}</span>`; }
 }
 async function control(action) {
@@ -122,10 +124,10 @@ async function control(action) {
 async function approve() {
   if (!selected) return;
   $('approve').disabled = true;
-  $('msg').textContent = 'Signing...';
+  $('msg').textContent = 'Approving Usage...';
   try {
-    const data = await api('/api/v2/signoff', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({run_id:selected, token:$('token').value})});
-    $('msg').innerHTML = '<span class="ok">Signed: ' + escapeHtml(data.signoff?.plan_hash || '') + '</span>';
+    const data = await api('/api/v2/usage/approve', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({run_id:selected, token:$('token').value})});
+    $('msg').innerHTML = '<span class="ok">Usage approved: ' + escapeHtml(data.usage?.estimate_hash || data.signoff?.plan_hash || '') + '</span>';
     await selectRun(selected);
   } catch (err) { $('msg').innerHTML = `<span class="bad">${escapeHtml(err.message)}</span>`; $('approve').disabled = false; }
 }
@@ -193,6 +195,17 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
             signed = bool(current_hash) and signed_record.get("plan_hash") == current_hash
         except (OSError, json.JSONDecodeError):
             signed = False
+    usage_status: dict[str, Any] = {}
+    if plan:
+        try:
+            decision = runner.usage_decision(run_id, plan)
+            usage_status = approval_policy.approval_status(
+                runner.usage_approval_path(run_id), decision,
+            )
+        except Exception as exc:  # noqa: BLE001
+            usage_status = {"status": "invalid", "error": str(exc)[:300]}
+    usage_approved = usage_status.get("status") == "approved"
+    signed = signed or usage_approved
     budget = {}
     if store.budget_path.exists():
         try:
@@ -206,7 +219,11 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
         "stop": status in {"PROVISIONING", "PHASE_EXECUTING", "PHASE_VERIFYING", "PAUSED", "BLOCKED"},
         "accept": status == "HANDOFF_READY",
     }
-    can_sign = status == "AWAITING_SIGNOFF" and bool(plan) and not signed
+    can_approve_usage = (
+        status == "AWAITING_SIGNOFF"
+        and bool(plan)
+        and usage_status.get("status") == "awaiting"
+    )
     return {
         "run_id": run_id,
         "goal": manifest.get("goal"),
@@ -225,7 +242,9 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
             for phase in (plan.get("phases") or [])
         ],
         "signed": signed,
-        "can_sign": can_sign,
+        "usage": usage_status,
+        "can_sign": can_approve_usage,
+        "can_approve_usage": can_approve_usage,
         "can_control": can_control,
     }
 
@@ -236,10 +255,13 @@ def plan_detail(root: str | Path, run_id: str) -> dict[str, Any]:
     plan = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.exists() else {}
     signoff_path = store.run_dir / "signoff.json"
     signoff = json.loads(signoff_path.read_text(encoding="utf-8")) if signoff_path.exists() else {}
+    usage_path = store.run_dir / "usage_approval.json"
+    usage = json.loads(usage_path.read_text(encoding="utf-8")) if usage_path.exists() else {}
     return {
         "plan": plan,
         "plan_hash": plan_hash(plan) if plan else None,
         "signoff": signoff,
+        "usage": usage,
     }
 
 
