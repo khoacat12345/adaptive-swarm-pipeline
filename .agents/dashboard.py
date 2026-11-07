@@ -362,6 +362,13 @@ def make_handler(root: Path, ledger: Path):
                 elif route == "/api/v2/runs":
                     from v2 import web as v2_web
                     self._json(v2_web.list_runs(root))
+                elif route.startswith("/api/v2/runs/") and route.endswith("/diff"):
+                    from v2 import web as v2_web
+                    run_id = route[len("/api/v2/runs/"):-len("/diff")].strip("/")
+                    try:
+                        self._json(v2_web.handoff_diff(root, run_id))
+                    except Exception as exc:  # noqa: BLE001
+                        self._json({"error": str(exc)[:300]}, 404)
                 elif route.startswith("/api/v2/runs/") and route.endswith("/plan"):
                     from v2 import web as v2_web
                     run_id = route[len("/api/v2/runs/"):-len("/plan")].strip("/")

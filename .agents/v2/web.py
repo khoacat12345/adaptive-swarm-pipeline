@@ -45,7 +45,7 @@ PAGE = r"""<!doctype html>
 </style>
 </head>
 <body>
-<header><h1>Swarm v2.1</h1><small>Usage approval - local only</small><span class="grow"></span><span class="pill">P0-06</span></header>
+<header><h1>Swarm v2.1</h1><small>Usage approval - local only</small><span class="grow"></span><a class="pill" href="/" style="text-decoration:none">Back to Dashboard</a><span class="pill">P0-06</span></header>
 <main>
   <section class="card">
     <div class="row"><b>Runs</b><span class="grow"></span><button onclick="loadRuns()">Refresh</button></div>
@@ -67,9 +67,23 @@ PAGE = r"""<!doctype html>
     <div id="msg" class="muted" style="margin-top:10px"></div>
     <pre id="plan" style="margin-top:12px">Select a run.</pre>
   </section>
+  <section class="card">
+    <div class="row"><b>Spend reconciliation</b><span class="grow"></span><span class="pill">live</span></div>
+    <table style="width:100%;border-collapse:collapse;margin-top:12px">
+      <thead><tr><th align="left">Metric</th><th align="right">Estimated</th><th align="right">Actual / used</th><th align="right">Remaining</th></tr></thead>
+      <tbody id="spendBody"><tr><td colspan="4" class="muted">Select a run.</td></tr></tbody>
+    </table>
+    <div id="phaseSpend" class="muted" style="margin-top:10px"></div>
+  </section>
+  <section class="card">
+    <div class="row"><b>Recent handoff runs</b><span class="grow"></span><button id="diffBtn" onclick="showDiff()" disabled>Preview handoff diff</button></div>
+    <div id="handoffList" class="runs" style="margin-top:12px"><span class="muted">Select a run.</span></div>
+    <pre id="diff" style="margin-top:12px;display:none"></pre>
+  </section>
 </main>
 <script>
 let selected = null;
+let handoffRuns = [];
 const $ = (id) => document.getElementById(id);
 async function api(url, options) {
   const res = await fetch(url, options);
@@ -82,14 +96,28 @@ async function loadRuns() {
     const data = await api('/api/v2/runs');
     const runs = data.runs || [];
     $('runs').innerHTML = runs.length ? '' : '<span class="muted">No v2 runs yet. Run prepare from the CLI first.</span>';
+    handoffRuns = runs.filter(run => run.handoff).slice(0, 5);
     for (const run of runs) {
       const el = document.createElement('div');
       el.className = 'run' + (selected === run.run_id ? ' active' : '');
-      el.innerHTML = `<b>${escapeHtml(run.run_id)}</b><span class="grow"></span><span class="pill">${escapeHtml(run.status)}</span>`;
+      el.innerHTML = `<b>${escapeHtml(run.run_id)}</b><span class="grow"></span>${run.handoff ? '<span class="pill ok">handoff</span>' : ''}<span class="pill">${escapeHtml(run.status)}</span>`;
       el.onclick = () => selectRun(run.run_id);
       $('runs').appendChild(el);
     }
+    renderHandoff();
   } catch (err) { $('runs').innerHTML = `<span class="bad">${escapeHtml(err.message)}</span>`; }
+}
+function renderHandoff() {
+  const box = $('handoffList');
+  if (!handoffRuns.length) { box.innerHTML = '<span class="muted">No handoff runs yet.</span>'; return; }
+  box.innerHTML = '';
+  for (const run of handoffRuns) {
+    const el = document.createElement('div');
+    el.className = 'run' + (selected === run.run_id ? ' active' : '');
+    el.innerHTML = `<b>${escapeHtml(run.run_id)}</b><span class="grow"></span><span class="pill ok">HANDOFF_READY</span><span class="pill">${escapeHtml(run.created_at || '')}</span>`;
+    el.onclick = () => selectRun(run.run_id);
+    box.appendChild(el);
+  }
 }
 async function selectRun(id) {
   selected = id;
@@ -103,6 +131,9 @@ async function selectRun(id) {
     $('hash').textContent = data.plan_hash ? 'plan_hash: ' + data.plan_hash : 'No plan submitted.';
     $('statusline').textContent = data.workspace?.worktree_path ? ('worktree: ' + data.workspace.worktree_path) : '';
     $('budget').textContent = data.budget ? `budget: ${data.budget.global?.used_requests || 0} used / ${data.budget.global?.reserved_requests || 0} reserved / phase ${data.budget.phases ? Object.keys(data.budget.phases).length : 0}` : 'budget: not started';
+    renderSpend(data.spend || {});
+    $('diffBtn').disabled = !data.handoff?.ready;
+    $('diff').style.display = 'none';
     $('plan').textContent = JSON.stringify(data.plan || {}, null, 2);
     $('approve').disabled = !data.can_approve_usage;
     $('pause').disabled = !data.can_control?.pause;
@@ -111,6 +142,24 @@ async function selectRun(id) {
     $('accept').disabled = !data.can_control?.accept;
     if (data.usage?.status === 'approved') $('msg').innerHTML = '<span class="ok">Usage approved. Any plan change requires reapproval.</span>';
   } catch (err) { $('msg').innerHTML = `<span class="bad">${escapeHtml(err.message)}</span>`; }
+}
+function renderSpend(spend) {
+  const fmt = (value) => value === undefined || value === null ? '-' : String(value);
+  $('spendBody').innerHTML = `
+    <tr><td>Requests / calls</td><td align="right">${fmt(spend.estimated_requests)}</td><td align="right">${fmt(spend.used_requests)}</td><td align="right">${fmt(spend.remaining_requests)}</td></tr>
+    <tr><td>Cost (USD)</td><td align="right">${fmt(spend.estimated_cost_usd)}</td><td align="right">${fmt(spend.used_cost_usd)}</td><td align="right">${fmt(spend.remaining_cost_usd)}</td></tr>
+    <tr><td>Tokens (actual)</td><td align="right">-</td><td align="right">${fmt(spend.used_tokens)}</td><td align="right">-</td></tr>`;
+  const phases = Object.entries(spend.phases || {});
+  $('phaseSpend').textContent = phases.length ? ('per-phase: ' + phases.map(([id, p]) => `${id} ${p.used_requests || 0} calls / $${p.used_cost_usd || 0}`).join(' | ')) : '';
+}
+async function showDiff() {
+  if (!selected) return;
+  $('diff').style.display = 'block';
+  $('diff').textContent = 'Loading diff...';
+  try {
+    const data = await api('/api/v2/runs/' + encodeURIComponent(selected) + '/diff');
+    $('diff').textContent = data.diff || '(empty patch)';
+  } catch (err) { $('diff').textContent = 'Error: ' + err.message; }
 }
 async function control(action) {
   if (!selected) return;
@@ -167,6 +216,7 @@ def list_runs(root: str | Path) -> dict[str, Any]:
                 "status": payload.get("status"),
                 "created_at": payload.get("created_at"),
                 "plan_hash": payload.get("plan_hash"),
+                "handoff": (run_dir / "handoff" / "handoff.patch").exists(),
             })
     return {"runs": runs}
 
@@ -212,6 +262,43 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
             budget = json.loads(store.budget_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             budget = {}
+    handoff_dir = store.run_dir / "handoff"
+    handoff = {
+        "ready": (handoff_dir / "handoff.patch").exists(),
+        "patch": str(handoff_dir / "handoff.patch"),
+        "report": str(handoff_dir / "report.md"),
+    }
+    global_budget = budget.get("global") or {}
+    config_global = (budget.get("config") or {}).get("global") or {}
+    phase_budgets = budget.get("phases") or {}
+    used_requests = int(global_budget.get("used_requests", 0) or 0)
+    used_cost = float(global_budget.get("used_cost_usd", 0.0) or 0.0)
+    max_requests = int(config_global.get("max_requests", 0) or 0)
+    max_cost = float(config_global.get("max_cost_usd", 0.0) or 0.0)
+    spend = {
+        "estimated_requests": sum(
+            int((phase.get("budget") or {}).get("requests", 0) or 0)
+            for phase in (plan.get("phases") or [])
+        ),
+        "estimated_cost_usd": sum(
+            float((phase.get("budget") or {}).get("cost_usd", 0.0) or 0.0)
+            for phase in (plan.get("phases") or [])
+        ),
+        "used_requests": used_requests,
+        "used_cost_usd": round(used_cost, 8),
+        "used_tokens": int(global_budget.get("used_tokens", 0) or 0),
+        "max_requests": max_requests,
+        "max_cost_usd": max_cost,
+        "remaining_requests": max(0, max_requests - used_requests),
+        "remaining_cost_usd": round(max(0.0, max_cost - used_cost), 8),
+        "phases": {
+            phase_id: {
+                "used_requests": int((phase.get("used_requests", 0) or 0)),
+                "used_cost_usd": round(float(phase.get("used_cost_usd", 0.0) or 0.0), 8),
+            }
+            for phase_id, phase in phase_budgets.items()
+        },
+    }
     status = manifest.get("status")
     can_control = {
         "pause": status in {"PROVISIONING", "PHASE_EXECUTING", "PHASE_VERIFYING"},
@@ -233,6 +320,8 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
         "workspace": manifest.get("workspace") or {},
         "plan": plan,
         "budget": budget,
+        "spend": spend,
+        "handoff": handoff,
         "phases": [
             {"id": phase.get("id"), "title": phase.get("title"),
              "status": "committed" if any(
@@ -262,6 +351,23 @@ def plan_detail(root: str | Path, run_id: str) -> dict[str, Any]:
         "plan_hash": plan_hash(plan) if plan else None,
         "signoff": signoff,
         "usage": usage,
+    }
+
+
+def handoff_diff(root: str | Path, run_id: str) -> dict[str, Any]:
+    """Return the handoff patch for preview. Read-only and size-capped."""
+    _runner, store = _store(root, run_id)
+    patch = store.run_dir / "handoff" / "handoff.patch"
+    if not patch.exists():
+        raise FileNotFoundError("handoff patch not found")
+    diff = patch.read_text(encoding="utf-8", errors="replace")
+    if len(diff) > 400_000:
+        diff = diff[:400_000] + "\n... [diff truncated] ...\n"
+    report = store.run_dir / "handoff" / "report.md"
+    return {
+        "run_id": run_id,
+        "diff": diff,
+        "report": report.read_text(encoding="utf-8", errors="replace") if report.exists() else "",
     }
 
 
