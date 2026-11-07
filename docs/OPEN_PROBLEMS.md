@@ -1,6 +1,6 @@
 # Open Problems — Adaptive Swarm Pipeline
 
-> Last updated: 2026-11-06
+> Last updated: 2026-11-07
 > Current release: `v2.1.0` (opt-in; `v1.0.5` remains default)
 > Purpose: capture known gaps now, triage them once, and fix them in batches
 > instead of scattering fixes through unrelated sessions.
@@ -373,13 +373,17 @@
 
 ## P2 - polish / product experience
 
-### P2-01 — notifications not wired to M4
+### P2-01 - notifications not wired to M4
 
+- **Status:** resolved - safe v2 event alerts wired to Telegram/Discord/generic webhooks
+- **Evidence:** `v2/alerts.py` emits `HANDOFF_READY`, `USAGE_WAITING`, `BUDGET_OVERRUN` and `CRASH`; every message is passed through `redact_secrets` (API keys and absolute/sensitive paths). `test_v2_alerts.py`: 5/5 PASS.
 - **Area:** operations
 - **Need:** Discord/Telegram on pause/quarantine/handoff; no secrets in message.
 
-### P2-02 — `/v2` page is standalone, not integrated in main nav
+### P2-02 - `/v2` page is standalone, not integrated in main nav
 
+- **Status:** resolved - main dashboard nav, recent handoff runs and web diff preview wired
+- **Evidence:** dashboard sidebar links to `/v2`; `/v2` links back and shows recent handoff runs, per-phase spend and a diff preview button backed by `/api/v2/runs/<id>/diff`. `test_v2_web_ui.py`: 22/22 PASS (including Node JS syntax check).
 - **Area:** UI
 - **Need:** nav entry, run history, budget sparkline, phase detail, diff links.
 
@@ -389,8 +393,10 @@
 - **Decision:** keep manual by default; if added, require separate sign-off and branch protection.
 - **Need:** documented one-command merge/rollback UX.
 
-### P2-04 — worktree cleanup/retention policy
+### P2-04 - worktree cleanup/retention policy
 
+- **Status:** resolved - `v2 prune [--days N] [--force]` implements worktree/branch retention
+- **Evidence:** `v2/prune.py` removes completed or stale isolated worktrees and `swarm/*` branches, skips active runs, keeps manifest/checkpoints/events/handoff evidence, and supports `--dry-run`. `test_v2_prune.py`: 10/10 PASS.
 - **Area:** storage
 - **Need:** retention days, archive before remove, disk quota, stale branch cleanup.
 
@@ -406,15 +412,19 @@
 - **Evidence:** `README` says v2.1.0 but v1 remains default; v2.1.0 is opt-in.
 - **Need:** clear “stable v1 / preview v2.1” matrix; migration and rollback instructions.
 
-### P2-07 — package excludes machine config by design
+### P2-07 - package excludes machine config by design
 
+- **Status:** resolved - `v2 doctor` provides the first-run preflight
+- **Evidence:** `python .agents/v2/run.py doctor` checks Git/worktree cleanliness, OpenCode CLI/model availability (DeepSeek/GLM/Nemotron free entries), Spec Kit CLI/config and prints a green/red table or JSON. `test_v2_doctor.py`: 17/17 PASS.
 - **Area:** onboarding
 - **Evidence:** zip excludes `config.json`, as intended.
 - **Need:** first-run wizard/doctor that explains `scout`, provider auth, 9router, and expected free/paid state.
 - **Related:** the narrative runbook gap is tracked in **P1-13**.
 
-### P2-08 — live usage/cost dashboard
+### P2-08 - live usage/cost dashboard
 
+- **Status:** resolved - `/v2` spend reconciliation table is live
+- **Evidence:** `run_detail` exposes estimated/used/remaining requests and cost, actual tokens and per-phase usage; the page renders it beside handoff runs and the diff preview. `test_v2_web_ui.py`: 22/22 PASS.
 - **Area:** UI
 - **Need:** per-phase actual vs estimated, provider; tokens/cost; requests; remaining reserve.
 
@@ -508,6 +518,8 @@ When the repo is installed, inspect and record:
 - 2026-11-07: Provider fallback metadata, prompt secret sanitization, context-window guard and uniform E1–E4 capability bundles landed. P0-03/P1-08/P1-10/P1-14 resolved; all P0 items are now resolved.
 - 2026-11-07: Spec Kit adoption closed end-to-end on real Git `my-project`: bridge → Usage approval → v2 worktree execution → verify 0 → checkpoint → handoff → converge. P1-05/P1-12 resolved; see `docs/SPEC_KIT_ADOPTION.md`.
 
+- 2026-11-07: P2 operator batch: `/v2` nav + spend/handoff diff, safe v2 alerts, `v2 doctor` and `v2 prune` landed; P2-01/P2-02/P2-04/P2-07/P2-08 resolved.
+
 ## Batch commit ledger
 
 | Batch | Commit | Evidence / status |
@@ -523,3 +535,8 @@ When the repo is installed, inspect and record:
 | Context | `d863ae6` | Context-window guard + overflow trim; P1-08 resolved |
 | Capabilities | `4fab16b` | Uniform E1–E4 capability bundle; P1-14 resolved |
 | Spec Kit | `b2af571` | Real Git my-project signed execution + adoption doc; P1-05/P1-12 resolved |
+| P2 UI | `ec43e01` | `/v2` nav, live spend table, handoff history + diff; P2-02/P2-08 resolved |
+| P2 UI tokens | `a71ae51` | Estimated vs actual token reconciliation; P2-08 complete |
+| P2 Alerts | `4f2af99` | Safe v2 event notifications with redaction; P2-01 resolved |
+| P2 Doctor | `61491d2` | `v2 doctor` environment preflight; P2-07 resolved |
+| P2 Prune | `dc152f6` | `v2 prune` worktree/branch retention; P2-04 resolved |
