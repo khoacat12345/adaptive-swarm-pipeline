@@ -155,6 +155,13 @@ python .agents\v2\run.py execute --run-id v2_... --free
 - `/v2` page button is **Approve Usage**.
 - `Accept handoff` is a separate end-of-run acknowledgement; it does not start
   the run or auto-merge.
+- `prepare --preset free-only` locks seats to free models and blocks paid
+  models. `prepare --preset strict` keeps four reviewers and lowers the Usage
+  gate to one request / $0.01.
+- `v2 merge --run-id <id>` is the explicit delivery step: it applies the
+  handoff patch, runs every plan `verify_command`, and commits only on exit 0.
+  `v2 rollback --run-id <id>` records and reverts that merge. Neither command
+  runs automatically during execution.
 - Preflight a new machine with `python .agents\v2\run.py doctor` (Git, worktree,
   OpenCode free models, Spec Kit). Add `--json` for automation.
 - Retain evidence but reclaim disk with `python .agents\v2\run.py prune --days 7`

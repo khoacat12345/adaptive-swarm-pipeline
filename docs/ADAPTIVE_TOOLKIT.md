@@ -1,8 +1,11 @@
 # Adaptive Toolkit — P0–P2 Lightweight Primitives
 
-> Status: implemented as dependency-free Python primitives in `.agents/v2/adaptive.py`.
-> These are **mechanism extractions**, not imports of the upstream frameworks.
-> Last updated: 2026-11-04
+> Status: implemented as dependency-free Python primitives in `.agents/v2/adaptive.py`
+> and wired into v2 E1–E4 through `.agents/v2/capability_runtime.py`.
+> Five core capabilities (repo map, ACI, failure lessons, bounded memory and
+> events) are complete for the v2.1 release-candidate scope. These are
+> **mechanism extractions**, not imports of the upstream frameworks.
+> Last updated: 2026-11-07
 
 | # | Source idea | Implemented primitive | What it does | Safety boundary |
 |---|---|---|---|---|
@@ -22,8 +25,9 @@
 - No LangGraph/DSPy/Mem0/Letta/LiteLLM/AutoGen runtime dependency.
 - No direct file writers outside `safe_writer`.
 - No automatic prompt updates.
-- No auto-merge.
-- No claim that these primitives are production-proven; the live pilot remains open.
+- No automatic merge during execution; delivery requires explicit `v2 merge`.
+- No claim that these primitives are adversarially proven; the live pilot and
+  uniform E1–E4 tests passed, and Git worktree is still not an OS sandbox.
 
 ## Integration order
 
@@ -40,10 +44,26 @@
 10. run_benchmark -> CI/eval harness
 ```
 
+## Release integration (v2.1.0 RC)
+
+The five release-critical capabilities are no longer reference-only:
+
+| Capability | Source pattern | v2 integration | Evidence |
+|---|---|---|---|
+| Repo map | aider | planner/coder context | `test_v2_planner_repo_map.py` |
+| Read-only ACI | SWE-agent | coder context + pre-apply validation | `test_v2_aci_integration.py` |
+| Failure lessons | mem0 | plan/execution hints | `test_v2_lessons_integration.py` |
+| Bounded memory | Letta | phase context budget | `test_capabilities_uniform.py` |
+| Event runtime | OpenHands | append-only event stream | `test_v2_event_state.py` |
+
+The bundle is injected uniformly into E1–E4 by `capability_runtime.py`. No
+DSPy/Mem0/Letta/LiteLLM/AutoGen runtime dependency was added.
+
 ## Acceptance
 
 ```text
 V2 ADAPTIVE: 42/42 PASS
+V2 CAPABILITIES UNIFORM: 23/23 PASS
 ```
 
 Tests cover PageRank relevance/token cap, windowed ACI and edit validation,

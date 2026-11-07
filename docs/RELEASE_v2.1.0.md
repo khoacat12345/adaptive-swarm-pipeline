@@ -1,5 +1,9 @@
 # Adaptive Swarm Pipeline v2.1.0
 
+> Historical initial v2.1.0 notes. For the current release-candidate matrix,
+> explicit merge/rollback, presets, alerts and adaptive completion, see
+> [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
+
 **Release type:** opt-in foundation release
 **Baseline:** v1.0.5 remains the default execution path
 **Specification:** [`SWARM_V2.1_SPEC.md`](SWARM_V2.1_SPEC.md)

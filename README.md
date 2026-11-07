@@ -6,9 +6,11 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **v2.1.0** — opt-in v2.1 foundation (isolation, budget, planning,
-> sign-off, execution and local controls). v1 remains the default until the
-> live free-model pilot and 8–10 hour soak are completed.
+> Status: **v2.1.0 release candidate** — opt-in isolated foundation (worktree,
+> budget, planning, sign-off, execution, delivery and local controls).
+> `v1.0.5` remains the conservative default. The live free-model pilot and the
+> 459-cycle soak evidence are available; do not treat v2 as the default path
+> until the owner accepts the release.
 > Original acceptance on Windows; Linux/macOS paths are supported and covered
 > by the cross-platform CI workflow.
 >
@@ -18,23 +20,40 @@ real machine check passes.
 
 The v2.1 path is opt-in and lives under `.agents/v2/`. It adds a guarded Git
 worktree, reserve-before-call budgets, three-seat planning, hash-bound Usage
-approval, a coder/reviewer execution engine and a local `/v2` control page.
-It does **not** auto-merge and does not replace the v1 execution path yet.
+approval, a coder/reviewer execution engine, a local `/v2` control page and
+explicit merge/rollback delivery. It does **not** auto-merge during execution;
+delivery is a separate operator command.
 
 ```bash
 python .agents/v2/run.py prepare --goal "your task" --phase P1
+python .agents/v2/run.py prepare --goal "your task" --preset free-only
+python .agents/v2/run.py prepare --goal "your task" --preset strict
 python .agents/v2/run.py plan --run-id <id> --plan plan.json
 python .agents/v2/run.py usage-approve --run-id <id>
 python .agents/v2/run.py execute --run-id <id> --free
+python .agents/v2/run.py merge --run-id <id>      # explicit, verify-gated
+python .agents/v2/run.py rollback --run-id <id>   # safe revert
 ```
+
+### Delivery and release boundary
+
+- **v1.0.5** is the default and conservative path.
+- **v2.1.0** is the opt-in release candidate: isolated worktree, four reviewers,
+  Usage gate, explicit merge/rollback, `/v2` spend dashboard, alerts, doctor and
+  prune.
+- Git worktree protects **files**, not the OS; v2 does not claim a container/VM
+  sandbox. Use an external sandbox for untrusted workloads.
+- The five adaptive capabilities (repo map, read-only ACI, failure lessons,
+  bounded tiered memory, event runtime) are integrated across v2 E1–E4.
 
 Operator guide: [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md).
 Spec Kit adoption: [`docs/SPEC_KIT_ADOPTION.md`](docs/SPEC_KIT_ADOPTION.md).
 Details: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Constitution:
 [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md). Tasks schema:
 [`docs/schemas/tasks.schema.json`](docs/schemas/tasks.schema.json). Release
-notes: [`docs/RELEASE_v2.1.0.md`](docs/RELEASE_v2.1.0.md). Known gaps and the
-next fix batches: [`docs/OPEN_PROBLEMS.md`](docs/OPEN_PROBLEMS.md). Research
+notes: [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md) (historical
+[`RELEASE_v2.1.0.md`](docs/RELEASE_v2.1.0.md)). Known gaps and status:
+[`docs/OPEN_PROBLEMS.md`](docs/OPEN_PROBLEMS.md). Research
 shortlist: [`docs/RESEARCH_BACKLOG.md`](docs/RESEARCH_BACKLOG.md). Adaptive
 primitives: [`docs/ADAPTIVE_TOOLKIT.md`](docs/ADAPTIVE_TOOLKIT.md). Integration
 plan: [`docs/SKILL_INTEGRATION_PLAN.md`](docs/SKILL_INTEGRATION_PLAN.md).

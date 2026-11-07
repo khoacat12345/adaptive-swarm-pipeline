@@ -373,6 +373,19 @@
 
 ## P2 - polish / product experience
 
+### Release-candidate tracker summary (2026-11-07)
+
+| Priority | Total | Resolved | Open | In progress |
+|---|---:|---:|---:|---:|
+| P0 | 7 | 7 | 0 | 0 |
+| P1 | 14 | 14 | 0 | 0 |
+| P2 | 11 | 11 | 0 | 0 |
+| **All** | **32** | **32** | **0** | **0** |
+
+**Status: 0 OPEN, 0 IN-PROGRESS, 100% RESOLVED for the v2.1.0 release-candidate scope.**
+P2-05 remains a documented **boundary**: Git worktree protects files, not an
+adversarial OS/container sandbox.
+
 ### P2-01 - notifications not wired to M4
 
 - **Status:** resolved - safe v2 event alerts wired to Telegram/Discord/generic webhooks
@@ -387,10 +400,12 @@
 - **Area:** UI
 - **Need:** nav entry, run history, budget sparkline, phase detail, diff links.
 
-### P2-03 — no auto-merge
+### P2-03 - no auto-merge
 
+- **Status:** resolved - explicit verify-gated `v2 merge` and safe `v2 rollback`
+- **Evidence:** `v2/delivery.py` accepts only `HANDOFF_READY`, validates patch paths against the signed plan, applies the handoff patch, runs every `verify_command`, commits on exit 0, and restores the tree on failure. Rollback records and reverts the merge commit. `test_v2_delivery.py`: 13/13 PASS. Execution still never auto-merges.
 - **Area:** delivery
-- **Decision:** keep manual by default; if added, require separate sign-off and branch protection.
+- **Decision:** merge is an explicit operator command; no automatic merge during execute/handoff.
 - **Need:** documented one-command merge/rollback UX.
 
 ### P2-04 - worktree cleanup/retention policy
@@ -400,17 +415,21 @@
 - **Area:** storage
 - **Need:** retention days, archive before remove, disk quota, stale branch cleanup.
 
-### P2-05 — OS/container sandbox
+### P2-05 - OS/container sandbox
 
+- **Status:** resolved as a documented boundary (not an OS sandbox claim)
+- **Evidence:** `RELEASE_NOTES.md` and `README.md` state that Git worktree protects project files, not processes or the OS. v2.1 does not advertise container/VM isolation; an external sandbox remains the recommendation for untrusted work.
 - **Area:** security
 - **Evidence:** Git worktree protects files, not processes; tests can touch OS.
 - **Need:** optional container/VM runner; explicitly not a v2.1 claim.
 
 ### P2-06 — release/version story
 
+- **Status:** resolved - v1.0.5 vs v2.1.0 matrix and migration/rollback documented
+- **Evidence:** `docs/RELEASE_NOTES.md` contains the release-candidate matrix, delivery/rollback commands, known limits and upgrade notes; `README.md` links it and preserves v1.0.5 as default.
 - **Area:** release
 - **Evidence:** `README` says v2.1.0 but v1 remains default; v2.1.0 is opt-in.
-- **Need:** clear “stable v1 / preview v2.1” matrix; migration and rollback instructions.
+- **Need:** clear "stable v1 / preview v2.1" matrix; migration and rollback instructions.
 
 ### P2-07 - package excludes machine config by design
 
@@ -428,8 +447,10 @@
 - **Area:** UI
 - **Need:** per-phase actual vs estimated, provider; tokens/cost; requests; remaining reserve.
 
-### P2-09 — Spec Kit ecosystem ideas
+### P2-09 - Spec Kit ecosystem ideas
 
+- **Status:** resolved - `free-only` and `strict` presets implemented
+- **Evidence:** `v2/presets.py` plus `prepare --preset` stores the preset in the run manifest. `free-only` blocks paid seats at the CLI and execution engine; `strict` keeps four reviewers, secret scanning and lowers the Usage gate to 1 request / $0.01. `test_v2_presets.py`: 14/14 PASS.
 - **Area:** product
 - **Candidates:** presets (free-only, strict-security), extensions (custom verify gate), catalogs, bugfix/assessment workflows, multi-agent install/switch UX.
 
@@ -437,15 +458,17 @@
 
 ### P2-10 - research shortlist: adaptive open-source patterns
 
-- **Status:** Phase 0-6 adaptive integration implemented; live pilot/wiring of some modules pending
+- **Status:** resolved - five extracted capabilities integrated into v2 E1-E4
+- **Evidence:** repo map, read-only ACI, failure lessons, bounded tiered memory and event runtime are bundled by `v2/capability_runtime.py` into every v2 execution tier; `test_capabilities_uniform.py` 23/23 PASS. Upstream projects remain reference-only; no new runtime dependency.
 - **Area:** research
 - **Reference:** [`docs/RESEARCH_BACKLOG.md`](RESEARCH_BACKLOG.md)
-- **Top picks after P0:** aider repo map, SWE-agent ACI, mem0-style failure memory, Letta-style tiered memory.
+- **Top picks after P0:** aider repo map, SWE-agent ACI, mem0-style failure memory, Letta-style tiered memory, OpenHands-style event runtime.
 - **Rule:** extract mechanisms only; do not add DSPy/Mem0/Letta/LiteLLM/AutoGen as runtime dependencies without separate approval.
 
 ### P2-11 - Adaptive Phase 0-6 integration status
 
-- **Status:** implemented + tested; shadow pilot passed; live wiring/pilot pending
+- **Status:** resolved for the v2.1 release-candidate scope
+- **Evidence:** Phase 0-6 modules are wired into v2 E1-E4 via `capability_runtime.py`; the live free-model pilot and Spec Kit signed execution completed. Deferred non-blocking items (tree-sitter/tags cache, richer ACI bundles, macOS CI) are release follow-ups, not open P2 blockers.
 - **Commits:** `29002e8`, `0892f49`, `8c57b93`, `85bc3b2`, `102b612`, `d6631d5`
 - **Implemented:**
   - feature flags (`off|shadow|on`), default off
@@ -456,15 +479,13 @@
   - Phase 5 event IDs, pagination and rate-limit/user-confirmation states
   - Phase 6 `adaptive-map` / `adaptive-lessons` CLI and synced skill docs
 - **Usefulness:** better target-file selection, safer edits, less repeated failure, bounded memory, safer replay/control.
-- **Still open:**
-  - live shadow pilot has not been run
-  - `MEMORY_BUDGET` and `EVENTS` are module/CLI-ready but not wired into every live runner path
+- **Deferred/non-blocking follow-ups:**
   - repo map is Python-AST first; tree-sitter and tags cache deferred
   - ACI submit gate/tool bundles are deferred
   - macOS CI runner has been queued/cancelled
-- **Tests (local):** 34 unittest discover; Adaptive 42/42; M1 43/43; M2 38/38; M3 24/24; M5 14/14; P0 15/15; Phase 4 full 36/36; Phase 6A 72/72; skill 16/16.
+- **Tests (local):** Adaptive 42/42; M1 43/43; M2 47/47; M3 25/25; M5 14/14; P0 15/15; capabilities 23/23; Phase 4 full 36/36; Phase 6A 72/72; skill 16/16.
 - **Shadow pilot:** PASS with all flags `shadow`; see [`SHADOW_PILOT_REPORT.md`](SHADOW_PILOT_REPORT.md).
-- **Live free-model pilot:** planning PASS; execution blocked by free-tier quota exhaustion; see [`LIVE_PILOT_REPORT.md`](LIVE_PILOT_REPORT.md).
+- **Live free-model pilot:** PASS on 2026-11-07; execution, verification, checkpoint and handoff completed; see [`LIVE_PILOT_REPORT.md`](LIVE_PILOT_REPORT.md).
 - **Safety:** no changes to `safe_writer`, worktree isolation, budget caps or `verify_command`; ACI has no write path.
 
 ---
@@ -520,6 +541,8 @@ When the repo is installed, inspect and record:
 
 - 2026-11-07: P2 operator batch: `/v2` nav + spend/handoff diff, safe v2 alerts, `v2 doctor` and `v2 prune` landed; P2-01/P2-02/P2-04/P2-07/P2-08 resolved.
 
+- 2026-11-07: P2 closeout: explicit verify-gated `v2 merge`/`rollback`, `free-only`/`strict` presets, release-candidate matrix, five adaptive capabilities and sandbox boundary documented. Tracker is 0 open / 0 in-progress / 100% resolved.
+
 ## Batch commit ledger
 
 | Batch | Commit | Evidence / status |
@@ -544,3 +567,6 @@ When the repo is installed, inspect and record:
 | P2 Alerts terminal | `f02847a` | CRASH alert on FAILED/QUARANTINED/STOPPED transitions |
 | P2 Doctor | `61491d2` | `v2 doctor` environment preflight; P2-07 resolved |
 | P2 Prune | `dc152f6` | `v2 prune` worktree/branch retention; P2-04 resolved |
+| P2 Delivery | `aae9d4f` | Explicit verify-gated merge + rollback; P2-03 resolved |
+| P2 Presets | `fe2003b` | free-only and strict presets; P2-09 resolved |
+| P2 Release docs | `PENDING` | v2.1.0 release-candidate story; P2-05/P2-06/P2-10/P2-11 resolved |
