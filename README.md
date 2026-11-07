@@ -58,6 +58,8 @@ python .agents/v2/run.py rollback --run-id <id>   # safe revert
   bounded tiered memory, event runtime) are integrated across v2 E1–E4.
 
 Operator guide: [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md).
+Unified engine migration plan:
+[`docs/UNIFIED_ENGINE_MASTERPLAN.md`](docs/UNIFIED_ENGINE_MASTERPLAN.md).
 Spec Kit adoption: [`docs/SPEC_KIT_ADOPTION.md`](docs/SPEC_KIT_ADOPTION.md).
 Details: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Constitution:
 [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md). Tasks schema:
