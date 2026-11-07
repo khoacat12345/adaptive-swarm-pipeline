@@ -54,6 +54,19 @@ def main() -> int:
                  "--allow-paid" in expected, "missing")
     checks.check("skill: preflight rule documented",
                  "Health preflight is mandatory" in expected, "missing")
+    checks.check("skill: invocation documented",
+                 "How to invoke" in expected and "/swarm" in expected
+                 and "@adaptive-swarm-pipeline" in expected, "missing")
+    command_path = AGENTS_DIR.parent / ".opencode" / "commands" / "swarm.md"
+    checks.check("skill: /swarm command installed", command_path.exists(),
+                 str(command_path))
+    if command_path.exists():
+        command_text = command_path.read_text(encoding="utf-8")
+        checks.check("skill: /swarm command loads skill",
+                     "adaptive-swarm-pipeline" in command_text, "missing skill reference")
+    checks.check("skill: global target documented",
+                 any(".config" in str(path) for path in sync_skill.target_paths(True)),
+                 "missing XDG global path")
 
     installed = [path for path in sync_skill.target_paths() if path.exists()]
     for path in installed:
@@ -82,6 +95,8 @@ def main() -> int:
         checks.check("docs: root README uses 600s", "600 seconds" in text, "missing")
         checks.check("docs: root README free-only opt-in",
                      "--allow-paid" in text, "missing")
+        checks.check("docs: root README documents /swarm",
+                     "/swarm" in text and "adaptive-swarm-pipeline" in text, "missing")
         checks.check("docs: root README has no stale 300s budget",
                      "300 seconds" not in text, "stale text")
 

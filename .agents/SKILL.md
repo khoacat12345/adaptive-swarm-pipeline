@@ -3,6 +3,26 @@
 The full English runbook lives in `.agents/README.md`. Read it before doing
 anything else; this file only exists so OpenCode can discover the skill.
 
+## How to invoke (OpenCode V2)
+
+- **Project-local (recommended):** keep
+  `.opencode/skills/adaptive-swarm-pipeline/SKILL.md` in the project and start
+  OpenCode from the project root. Discovery is automatic; no copy is needed.
+- **Slash command:** use `/swarm <task>` in the OpenCode TUI. The project
+  command is `.opencode/commands/swarm.md`.
+- **Explicit skill mention:** include `@adaptive-swarm-pipeline` in a prompt.
+  The skill ID is the directory name, not the display name.
+- **Natural language:** “dùng swarm để …” / “run this through the swarm” works
+  when the skill description is discoverable.
+- **User-wide install (optional):**
+  ```bash
+  python .agents/sync_skill.py --global --write
+  ```
+  For a global `/swarm` command, copy `.opencode/commands/swarm.md` to the
+  matching `~/.config/opencode/commands/` directory.
+- Verify discovery with `python .agents/sync_skill.py --check`; detailed
+  onboarding is in `docs/OPENCODE_SKILL_SETUP.md`.
+
 ## ⚠️ MANDATORY EXECUTION PROTOCOL (THIẾT QUÂN LUẬT)
 
 1. **NEVER CODE MONOLITHICALLY IN CHAT**:

@@ -28,16 +28,29 @@ description: Run, observe and harden the Adaptive Swarm Pipeline in the project'
 """
 
 
-def target_paths() -> list[Path]:
-    """Known OpenCode skill roots on Windows, Linux and macOS."""
+def target_paths(global_scope: bool = False) -> list[Path]:
+    """Known OpenCode skill roots on Windows, Linux and macOS.
+
+    Project-local is the recommended default. ``global_scope`` targets the
+    user-wide OpenCode V2 config directory (and a legacy home compatibility
+    directory) so the skill is available when OpenCode is started elsewhere.
+    """
     paths: list[Path] = []
     home = Path.home()
-    roots = [
-        HERE.parent / ".opencode" / "skills",
-        home / ".opencode" / "skills",
-        Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / "opencode" / "skills",
-        home / ".config" / "opencode" / "skills",
-    ]
+    if global_scope:
+        roots = [
+            Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+            / "opencode" / "skills",
+            home / ".opencode" / "skills",
+        ]
+    else:
+        roots = [
+            HERE.parent / ".opencode" / "skills",
+            home / ".opencode" / "skills",
+            Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+            / "opencode" / "skills",
+            home / ".config" / "opencode" / "skills",
+        ]
     for root in roots:
         path = root / SKILL_NAME / "SKILL.md"
         if path not in paths:
@@ -60,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="fail if an installed copy differs from .agents/SKILL.md")
     group.add_argument("--write", action="store_true",
                        help="write/update installed copies")
+    parser.add_argument("--global", dest="global_scope", action="store_true",
+                        help="use the user-wide OpenCode skill directory")
     args = parser.parse_args(argv)
 
     if not SOURCE.exists():
@@ -67,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     expected = render()
-    targets = target_paths()
+    targets = target_paths(global_scope=args.global_scope)
     existed = [path for path in targets if path.exists()]
     if args.write:
         written = 0

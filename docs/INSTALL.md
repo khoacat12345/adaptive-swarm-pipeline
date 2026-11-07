@@ -76,17 +76,63 @@ when models or auth change.
 
 ## OpenCode skill discovery
 
-The repository already contains:
+The repository already contains the project-local skill and the `/swarm`
+command:
 
 ```text
 .opencode/skills/adaptive-swarm-pipeline/SKILL.md
+.opencode/commands/swarm.md
 ```
 
-If you use a global skills directory, copy that folder there. OpenCode V2 on
-Linux/macOS normally discovers skills under the XDG config directory
-(`~/.config/opencode/skills/`); on this Windows machine the active path is
-`C:\Users\tuank\.opencode\skills\adaptive-swarm-pipeline`. Keep one canonical
-copy and do not edit both.
+OpenCode V2 discovers `.opencode/skills/` automatically when it is started from
+the project root. No copy is required for a fresh clone. Verify:
+
+```bash
+python3 .agents/sync_skill.py --check
+python3 .agents/tests/test_skill_consistency.py
+```
+
+Then invoke the swarm from OpenCode:
+
+```text
+/swarm <your task>
+@adaptive-swarm-pipeline <your task>
+```
+
+The skill ID is exactly `adaptive-swarm-pipeline`; the frontmatter `name` is
+only a display label. `/swarm` is provided by `.opencode/commands/swarm.md`.
+
+### Global install (optional)
+
+OpenCode V2 global skills live under:
+
+```text
+~/.config/opencode/skills/adaptive-swarm-pipeline/SKILL.md
+```
+
+On Windows that is normally:
+
+```text
+C:\Users\<you>\.config\opencode\skills\adaptive-swarm-pipeline\SKILL.md
+```
+
+Install/update the global skill with:
+
+```bash
+python3 .agents/sync_skill.py --global --write
+python3 .agents/sync_skill.py --global --check
+```
+
+To use `/swarm` from every project, also copy the command:
+
+```bash
+mkdir -p ~/.config/opencode/commands
+cp .opencode/commands/swarm.md ~/.config/opencode/commands/swarm.md
+```
+
+Keep one canonical source (`.agents/SKILL.md`), then sync; do not edit the
+installed copy by hand. Full guide:
+[`OPENCODE_SKILL_SETUP.md`](OPENCODE_SKILL_SETUP.md).
 
 ## Run
 

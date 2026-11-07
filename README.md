@@ -121,7 +121,44 @@ Copy the source `.agents/` and `.opencode/` folders into the project, then run
 python3 .agents/tests/test_phase4.py --fast
 ```
 
-Full cross-platform setup, optional skill discovery, dashboard and MCP notes:
+### OpenCode skill setup (required for `/swarm`)
+
+A fresh clone already includes the skill and command:
+
+```text
+.opencode/skills/adaptive-swarm-pipeline/SKILL.md
+.opencode/commands/swarm.md
+```
+
+Start OpenCode from the project root, then use one of:
+
+```text
+/swarm fix the failing add() test
+@adaptive-swarm-pipeline fix the failing add() test
+```
+
+Verify the installed copy any time:
+
+```powershell
+python .agents\sync_skill.py --check
+python .agents\tests\test_skill_consistency.py
+```
+
+User-wide install (optional):
+
+```powershell
+python .agents\sync_skill.py --global --write
+```
+
+If you use a global skill, copy `.opencode/commands/swarm.md` to
+`~/.config/opencode/commands/swarm.md` to keep `/swarm` available everywhere.
+Do not edit the installed skill by hand; edit `.agents/SKILL.md` and run
+`sync_skill.py --write`.
+
+Full step-by-step guide:
+**[docs/OPENCODE_SKILL_SETUP.md](docs/OPENCODE_SKILL_SETUP.md)**.
+
+Full cross-platform setup, dashboard and MCP notes:
 **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ### First task

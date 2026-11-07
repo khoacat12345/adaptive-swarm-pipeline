@@ -50,15 +50,38 @@ python .agents\preflight.py --live
 
 Free-only is the default. Paid models need `scout --write --allow-paid`.
 
-Load the OpenCode skill:
+Load the OpenCode skill. A fresh clone already has both files:
 
-```powershell
-python .agents\sync_skill.py --write
-python .agents\sync_skill.py --check
+```text
+.opencode/skills/adaptive-swarm-pipeline/SKILL.md
+.opencode/commands/swarm.md
 ```
 
+Verify them:
+
+```powershell
+python .agents\sync_skill.py --check
+python .agents\tests\test_skill_consistency.py
+```
+
+Then, from OpenCode started at the project root:
+
+```text
+/swarm fix the failing add test
+@adaptive-swarm-pipeline fix the failing add test
+```
+
+For a user-wide install:
+
+```powershell
+python .agents\sync_skill.py --global --write
+```
+
+and copy `.opencode/commands/swarm.md` to
+`~/.config/opencode/commands/swarm.md` if you want `/swarm` everywhere.
 The skill is discovery/instructions; it is not a background daemon. A coding
-task should invoke the planner.
+task should invoke the planner. See
+[`OPENCODE_SKILL_SETUP.md`](OPENCODE_SKILL_SETUP.md).
 
 ## 3. Quick task
 
