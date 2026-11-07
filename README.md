@@ -3,6 +3,13 @@
 [![tests](https://github.com/khoacat12345/adaptive-swarm-pipeline/actions/workflows/cross-platform.yml/badge.svg?branch=main)](https://github.com/khoacat12345/adaptive-swarm-pipeline/actions/workflows/cross-platform.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![OpenCode Skill](https://img.shields.io/badge/OpenCode-Skill%20Ready-success.svg)](docs/OPENCODE_SKILL_SETUP.md)
+
+**The Autonomous Multi-Agent Software Firm in Your Terminal.**
+
+Adaptive Swarm is an embeddable agent skill and verification-first execution harness for [OpenCode](https://opencode.ai) and Claude Code. Multiple AI models debate, plan, code, and review in an isolated Git worktree — with real-time Blackboard deliberation and zero risk to your repository.
+
+> **One-Command Deliberation:** Inside OpenCode, simply type `/swarm <task>` to unleash the multi-agent council.
 
 ![Adaptive Swarm dashboard](docs/dashboard.png)
 
