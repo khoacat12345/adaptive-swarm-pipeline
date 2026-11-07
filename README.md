@@ -7,7 +7,7 @@
 
 **The Autonomous Multi-Agent Software Firm in Your Terminal.**
 
-Adaptive Swarm is an embeddable agent skill and verification-first execution harness for [OpenCode](https://opencode.ai) and Claude Code. Multiple AI models debate, plan, code, and review in an isolated Git worktree — with real-time Blackboard deliberation and zero risk to your repository.
+Adaptive Swarm is an embeddable agent skill and verification-first execution harness for [OpenCode](https://opencode.ai). Multiple AI models (DeepSeek, GLM, Nemotron) debate, plan, code, and review in an isolated Git worktree — with real-time Blackboard deliberation, strict budget guards, and zero risk to your repository.
 
 > **One-Command Deliberation:** Inside OpenCode, simply type `/swarm <task>` to unleash the multi-agent council.
 
