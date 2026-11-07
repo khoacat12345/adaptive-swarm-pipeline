@@ -110,7 +110,15 @@ def main(argv: list[str] | None = None) -> int:
     handoff.add_argument("--run-id", required=True)
     handoff.add_argument("--report", default=None)
 
+    doctor = sub.add_parser("doctor", help="preflight Git, OpenCode models and Spec Kit")
+    doctor.add_argument("--json", action="store_true")
+    doctor.add_argument("--no-color", action="store_true")
+
     args = parser.parse_args(argv)
+    if args.command == "doctor":
+        from v2.doctor import main as doctor_main
+
+        return doctor_main(args.root, json_output=args.json, color=not args.no_color)
     from run_lock import LockBusy, RepoLock
     try:
         lock = RepoLock(args.root, owner="v2").acquire()
