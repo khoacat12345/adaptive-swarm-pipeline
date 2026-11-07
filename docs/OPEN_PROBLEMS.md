@@ -383,7 +383,7 @@
 ### P2-02 - `/v2` page is standalone, not integrated in main nav
 
 - **Status:** resolved - main dashboard nav, recent handoff runs and web diff preview wired
-- **Evidence:** dashboard sidebar links to `/v2`; `/v2` links back and shows recent handoff runs, per-phase spend and a diff preview button backed by `/api/v2/runs/<id>/diff`. `test_v2_web_ui.py`: 22/22 PASS (including Node JS syntax check).
+- **Evidence:** dashboard sidebar links to `/v2`; `/v2` links back and shows recent handoff runs, per-phase spend and a diff preview button backed by `/api/v2/runs/<id>/diff`. `test_v2_web_ui.py`: 23/23 PASS (including Node JS syntax check).
 - **Area:** UI
 - **Need:** nav entry, run history, budget sparkline, phase detail, diff links.
 
@@ -424,7 +424,7 @@
 ### P2-08 - live usage/cost dashboard
 
 - **Status:** resolved - `/v2` spend reconciliation table is live
-- **Evidence:** `run_detail` exposes estimated/used/remaining requests and cost, actual tokens and per-phase usage; the page renders it beside handoff runs and the diff preview. `test_v2_web_ui.py`: 22/22 PASS.
+- **Evidence:** `run_detail` exposes estimated/used/remaining requests and cost, actual tokens and per-phase usage; the page renders it beside handoff runs and the diff preview. `test_v2_web_ui.py`: 23/23 PASS.
 - **Area:** UI
 - **Need:** per-phase actual vs estimated, provider; tokens/cost; requests; remaining reserve.
 
@@ -537,6 +537,9 @@ When the repo is installed, inspect and record:
 | Spec Kit | `b2af571` | Real Git my-project signed execution + adoption doc; P1-05/P1-12 resolved |
 | P2 UI | `ec43e01` | `/v2` nav, live spend table, handoff history + diff; P2-02/P2-08 resolved |
 | P2 UI tokens | `a71ae51` | Estimated vs actual token reconciliation; P2-08 complete |
+| P2 UI syntax | `936420d` | Both dashboard scripts checked by Node |
+| P2 UI budget | `50a8885` | Remaining budget subtracts reserved calls/cost |
+| P2 Alerts paths | `e0367df` | Absolute paths with spaces are redacted |
 | P2 Alerts | `4f2af99` | Safe v2 event notifications with redaction; P2-01 resolved |
 | P2 Alerts terminal | `f02847a` | CRASH alert on FAILED/QUARANTINED/STOPPED transitions |
 | P2 Doctor | `61491d2` | `v2 doctor` environment preflight; P2-07 resolved |
