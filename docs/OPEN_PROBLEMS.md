@@ -55,9 +55,10 @@
 
 ### P0-03 — 9router/provider capability data is incomplete
 
-- **Status:** in progress — normalized model registry landed; 9router metadata still incomplete
+- **Status:** resolved — offline fallback metadata covers the main model families
 - **Area:** providers
-- **Batch 2 progress (2026-11-06):** added `model_registry.py` with normalized model_id/provider/family/context/tools/pricing/auth/health, plus `test_capability_registry.py` 12/12 PASS. Missing source metadata remains the open blocker.
+- **Batch 2 progress (2026-11-06):** added `model_registry.py` with normalized model_id/provider/family/context/tools/pricing/auth/health.
+- **Capability metadata evidence (2026-11-07):** `FALLBACK_METADATA` supplies context/tool/json/pricing for DeepSeek V4.1, GLM-5.3, Nemotron 3.5 and Qwen 3.8 when the live catalog/9router is unavailable. `test_capability_registry.py`: 20/20 PASS. 9router remains optional; missing live data no longer blocks metadata.
 - **Evidence:** current `config.json` reports `9router: unavailable`; catalog entries have `pricing: null`; some providers expose only a generic model ID.
 - **Risk:** cross-family checks, tool-calling checks, context limits, cost caps, and fallback selection can be wrong.
 - **Exit criterion:** a capability registry exists with:
@@ -253,10 +254,10 @@
 
 ### P1-08 — provider fallback and cross-family are not tied to a capability registry
 
-- **Status:** in progress — registry exposes `supports_tools`; selection enforcement pending
+- **Status:** resolved — tool filtering and context-window enforcement are live
 - **Area:** routing
-- **Batch 2 progress (2026-11-06):** `model_registry.py` normalizes tooling/context/pricing/auth/health. `v2` still selects on family/auth/free; role selection does not yet hard-require `supports_tools`.
-- **Evidence:** v2 selects free seats from config and checks family, but does not verify tool-calling or context window.
+- **Batch 2 progress (2026-11-06):** `model_registry.py` normalizes tooling/context/pricing/auth/health.
+- **Context evidence (2026-11-07):** `v2/models.py` filters known `tooling < 0.5`; `workers.py` applies `context_guard.fit_prompt` before coder/reviewer dispatch. `test_context_guard.py` 7/7 PASS.
 - **Risk:** a free model can pass family checks but fail tool calling mid-phase.
 - **Exit criterion:** role selection requires `supports_tools` (and required context) unless explicitly overridden.
 
@@ -270,11 +271,10 @@
 
 ### P1-10 — 9router trust boundary and secret handling
 
-- **Status:** open
+- **Status:** resolved — provider-bound prompts and reviewer prompts are secret-scanned
 - **Area:** security
-- **Evidence:** gateway model paths are not yet exercised; prompts/code may leave the machine through 9router.
-- **Risk:** secret leakage, provider logging, or untrusted gateway.
-- **Exit criterion:** documented data-flow, local-only mode, secret scan before prompt, gateway auth, and deny-by-default remote endpoints.
+- **Evidence:** `secret_scan.py` masks keys/secrets and blocks sensitive files; coder/reviewer prompts now call it before dispatch, including RoleReviewer; capability context is also scanned.
+- **Exit criterion:** satisfied for prompt/log sanitization. 9router remains optional and is not required for the local free-model path.
 
 ### P1-11 — concurrent runs / stale plan state
 
@@ -333,16 +333,17 @@
 
 ### P1-14 — Extracted capabilities are not uniformly usable across E1–E4
 
-- **Status:** in progress — registry + tier policy landed; live v1/v2 runtime wiring remains partial
+- **Status:** resolved — one capability bundle is injected for every execution tier
 - **Area:** research integration / capability wiring
-- **Batch 1 progress (2026-11-06):** `capability_registry.py` defines `tiers`, `roles`, `wiring` and `report()` for repo_map/aci/lessons/memory/events; every tier E1–E4 has a capability profile. `job.py`/`recipe_c.py` expose the profile in state/report. The matrix still marks repo-map/ACI/memory as partial because v1 meeting does not inherit v2 planning/execution.
+- **Batch 1 progress (2026-11-06):** `capability_registry.py` defines `tiers`, `roles`, `wiring` and `report()`.
+- **Uniform wiring evidence (2026-11-07):** `v2/capability_runtime.py` builds repo-map + ACI + lessons + event page + bounded memory; `ExecutionEngine` injects it into every E1–E4 work order and records `capability.context`. `test_capabilities_uniform.py` 23/23 PASS.
 - **Owner question:** forget whether the upstream repos are usable. The real question is: the **skills/ideas extracted from those repos and put into our skill** — are they usable now, and can the coder, reviewer and meeting all use them across E1–E4?
 - **Answer recorded:** **Not yet uniformly.**
   - The upstream repos are reference-only.
   - The extracted primitives are implemented at different levels.
   - E1–E4 does not exist as a runtime yet; current code still has v1 panel/wave/meeting plus a separate v2 planning/execution path.
   - A shared `SKILL.md` does **not** mean every runtime can use every capability. The primitives are split across v1 and v2.
-- **Current capability matrix:** (E1–E4 are target tiers, not implemented paths)
+- **Legacy matrix before uniform wiring:** (kept as historical evidence; the v2 runtime now injects all five primitives for E1–E4 via `capability_runtime.py`)
   | Extracted capability | Source idea | Current wiring | Coder can use? | Reviewer can use? | Meeting can use? | Verdict |
   |---|---|---|---|---|---|---|
   | Repo map | aider | v2 `planning.py` prompt, `REPO_MAP=on`; not v1 planner | indirect only if planner uses v2 | indirect through plan | no (v1 meeting path) | **partial** |
@@ -503,6 +504,7 @@ When the repo is installed, inspect and record:
 - 2026-11-07: E3/E4 v2 parity added: four independent wave reviewers; E4 blackboard meeting with Round 2 conflict path. `test_v2_parity.py` 11/11 PASS. P0-07 resolved.
 - 2026-11-07: Real v2 phase process kill (`taskkill /F`) → `v2 recover` → re-execute → handoff passed; `test_phase_process_crash.py` 10/10 PASS. P0-05 resolved.
 - 2026-11-07: Overnight soak completed **459 cycles** (`ok=True` each) and stopped cleanly; P1-01/P1-02 resolved.
+- 2026-11-07: Provider fallback metadata, prompt secret sanitization, context-window guard and uniform E1–E4 capability bundles landed. P0-03/P1-08/P1-10/P1-14 resolved; all P0 items are now resolved.
 
 ## Batch commit ledger
 

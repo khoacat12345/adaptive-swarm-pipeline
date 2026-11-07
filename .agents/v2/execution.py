@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping, Protocol
 
 from . import isolation
 from .budget import BudgetConfig, BudgetController
+from .capability_runtime import build_context as build_capability_context
 from .errors import (
     BudgetBlocked,
     BudgetError,
@@ -648,6 +649,28 @@ class ExecutionEngine:
             phase_result = {"phase_id": phase_id, "work_orders": [], "status": "running"}
             for work_order in phase.get("work_orders") or []:
                 work_id = str(work_order.get("id") or "work")
+                capability = build_capability_context(
+                    self.runner.root,
+                    workspace.path,
+                    str(work_order.get("objective") or ""),
+                    execution_tier,
+                    target_files=work_order.get("target_files") or [],
+                )
+                if capability.text:
+                    work_order = dict(work_order)
+                    existing = str(work_order.get("input_context") or "")
+                    work_order["input_context"] = (
+                        existing + "\n\n" + capability.text
+                    ).strip()
+                try:
+                    store.append_event("capability.context", {
+                        "tier": execution_tier,
+                        "work_order": work_id,
+                        "components": sorted(capability.components),
+                        "errors": capability.errors,
+                    })
+                except Exception:
+                    pass
                 feedback: str | None = None
                 verified = False
                 for attempt in range(0, self.max_repair_attempts + 1):

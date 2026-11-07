@@ -136,6 +136,8 @@ Plan tab is preview-only under P0-06.
 ```bash
 python3 .agents/tests/test_tiers.py
 python3 .agents/tests/test_capability_registry.py
+python3 .agents/tests/test_context_guard.py
+python3 .agents/tests/test_capabilities_uniform.py
 python3 .agents/tests/test_cost_reconciliation.py
 python3 .agents/tests/test_resilience.py
 python3 .agents/tests/test_speckit_converge.py

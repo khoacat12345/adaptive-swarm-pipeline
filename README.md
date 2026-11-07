@@ -256,6 +256,8 @@ Only the configured `chat_id` is accepted. Commands: `/status`, `/approve`,
 ```bash
 python .agents/tests/test_tiers.py        # E1-E4 / P1-P3 policy
 python .agents/tests/test_capability_registry.py
+python .agents/tests/test_context_guard.py
+python .agents/tests/test_capabilities_uniform.py
 python .agents/tests/test_cost_reconciliation.py
 python .agents/tests/test_resilience.py
 python .agents/tests/test_speckit_converge.py
