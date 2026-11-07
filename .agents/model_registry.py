@@ -21,14 +21,74 @@ class ModelCapability:
     family: str
     context_window: int | None
     supports_tools: bool | None
+    json_mode: bool | None
     pricing: dict[str, float] | None
     is_free: bool
     cost_tier: str
     auth_status: str
     health: dict[str, Any]
+    fallback_metadata: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# Offline/9router-down metadata. These are conservative capability facts used
+# only when the live catalog omits a field. They are not a billing source.
+FALLBACK_METADATA: dict[str, dict[str, Any]] = {
+    "opencode/deepseek-v4.1-flash-free": {
+        "provider": "opencode", "family": "deepseek", "context_window": 128000,
+        "supports_tools": True, "json_mode": True,
+        "pricing": {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0},
+    },
+    "opencode-go/deepseek-v4.1-flash": {
+        "provider": "opencode-go", "family": "deepseek", "context_window": 128000,
+        "supports_tools": True, "json_mode": True,
+        "pricing": {"input": 0.30, "output": 1.20, "cache_read": 0.006, "cache_write": 0.0},
+    },
+    "opencode/glm-5.3-flash-free": {
+        "provider": "opencode", "family": "glm", "context_window": 128000,
+        "supports_tools": True, "json_mode": True,
+        "pricing": {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0},
+    },
+    "opencode-go/glm-5.3": {
+        "provider": "opencode-go", "family": "glm", "context_window": 200000,
+        "supports_tools": True, "json_mode": True,
+        "pricing": {"input": 0.60, "output": 2.20, "cache_read": 0.06, "cache_write": 0.0},
+    },
+    "opencode/nemotron-3.5-super-vl-free": {
+        "provider": "opencode", "family": "nemotron", "context_window": 128000,
+        "supports_tools": True, "json_mode": False,
+        "pricing": {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0},
+    },
+    "opencode/nemotron-3.5-lightning-free": {
+        "provider": "opencode", "family": "nemotron", "context_window": 128000,
+        "supports_tools": True, "json_mode": False,
+        "pricing": {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0},
+    },
+    "opencode-go/qwen3.8-max": {
+        "provider": "opencode-go", "family": "qwen", "context_window": 1000000,
+        "supports_tools": True, "json_mode": True,
+        "pricing": {"input": 1.20, "output": 4.80, "cache_read": 0.12, "cache_write": 0.0},
+    },
+    "opencode-go/qwen3.8-flash": {
+        "provider": "opencode-go", "family": "qwen", "context_window": 128000,
+        "supports_tools": True, "json_mode": True,
+        "pricing": {"input": 0.20, "output": 0.80, "cache_read": 0.02, "cache_write": 0.0},
+    },
+}
+
+
+def fallback_for(model_id: str) -> dict[str, Any] | None:
+    model_id = str(model_id)
+    if model_id in FALLBACK_METADATA:
+        return dict(FALLBACK_METADATA[model_id])
+    lower = model_id.lower()
+    for key, value in FALLBACK_METADATA.items():
+        family = str(value.get("family") or "")
+        if family and family in lower:
+            return dict(value)
+    return None
 
 
 def config_path(root: str | Path) -> Path:
@@ -77,10 +137,13 @@ def _supports_tools(entry: Mapping[str, Any]) -> bool | None:
 
 def normalize(model_id: str, entry: Mapping[str, Any],
               health: Mapping[str, Any] | None = None) -> ModelCapability:
-    family = str(entry.get("family") or "unknown")
-    provider = str(entry.get("provider") or model_id.split("/", 1)[0])
-    pricing = _pricing(entry)
-    is_free = bool(entry.get("is_free")) or str(entry.get("cost_tier") or "") == "free"
+    fallback = fallback_for(model_id) or {}
+    merged = dict(fallback)
+    merged.update({key: value for key, value in entry.items() if value is not None})
+    family = str(merged.get("family") or "unknown")
+    provider = str(merged.get("provider") or model_id.split("/", 1)[0])
+    pricing = _pricing(merged)
+    is_free = bool(merged.get("is_free")) or str(merged.get("cost_tier") or "") == "free"
     if is_free:
         pricing = {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0}
     health_data = (health or {}).get("entries", {}).get(model_id) or {}
@@ -88,13 +151,20 @@ def normalize(model_id: str, entry: Mapping[str, Any],
         model_id=str(model_id),
         provider=provider,
         family=family,
-        context_window=entry.get("context_window"),
-        supports_tools=_supports_tools(entry),
+        context_window=merged.get("context_window"),
+        supports_tools=_supports_tools(merged),
+        json_mode=(merged.get("json_mode")
+                   if isinstance(merged.get("json_mode"), bool) else None),
         pricing=pricing,
         is_free=is_free,
-        cost_tier=str(entry.get("cost_tier") or ("free" if is_free else "unknown")),
-        auth_status=str(entry.get("auth_status") or "unknown"),
+        cost_tier=str(merged.get("cost_tier") or ("free" if is_free else "unknown")),
+        auth_status=str(merged.get("auth_status") or "unknown"),
         health=dict(health_data) if isinstance(health_data, Mapping) else {},
+        fallback_metadata=bool(fallback and (
+            entry.get("context_window") is None
+            or entry.get("pricing") is None
+            or _supports_tools(entry) is None
+        )),
     )
 
 
@@ -105,8 +175,17 @@ def load(root: str | Path) -> dict[str, ModelCapability]:
         return {}
     health = _health(root)
     models = data.get("models") if isinstance(data, Mapping) else None
-    if not isinstance(models, Mapping):
-        return {}
+    if not isinstance(models, Mapping) or not models:
+        models = {
+            model_id: {
+                **meta, "id": model_id, "auth_status": "fallback",
+                "is_free": not meta.get("pricing")
+                or not any(meta.get("pricing", {}).values()),
+                "cost_tier": "free" if not meta.get("pricing")
+                or not any(meta.get("pricing", {}).values()) else "unknown",
+            }
+            for model_id, meta in FALLBACK_METADATA.items()
+        }
     return {
         str(model_id): normalize(str(model_id), entry, health)
         for model_id, entry in models.items()

@@ -31,7 +31,10 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import context_guard
 import secret_scan
+
+_CONFIG_ROOT = Path(__file__).resolve().parent.parent
 
 if os.name == "nt":
     _NPM_BIN = os.path.join(os.environ.get("APPDATA") or "", "npm")
@@ -463,6 +466,9 @@ class OpenCodeCoder(Coder):
                    "Answer in English only.")
         prompt += self._hints_block()
         prompt, _findings = secret_scan.scan_text(prompt, filename="prompt")
+        prompt = context_guard.fit_prompt(
+            prompt, self.model, root=_CONFIG_ROOT,
+        ).text
         try:
             raw = self.runner(prompt)
             text, usage = raw if isinstance(raw, tuple) else (raw, {})
@@ -705,6 +711,9 @@ class AgenticCoder(Coder):
         if feedback:
             prompt += f"\nLAN TRUOC THAT BAI, SUA THEO PHAN HOI NAY:\n{feedback}\n"
         prompt, prompt_findings = secret_scan.scan_text(prompt, filename="prompt")
+        prompt = context_guard.fit_prompt(
+            prompt, self.model, root=_CONFIG_ROOT,
+        ).text
         if prompt_findings:
             self.secrets_blocked.append({"file": "prompt", "kind": "content",
                                          "count": len(prompt_findings),
@@ -1129,7 +1138,13 @@ class RoleReviewer(Reviewer):
                level: int, sink) -> dict:
         self.calls += 1
         try:
-            data = parse_json_object(self.runner(self._prompt(work_order, diff)))
+            prompt, _ = secret_scan.scan_text(
+                self._prompt(work_order, diff), filename="role-reviewer",
+            )
+            prompt = context_guard.fit_prompt(
+                prompt, self.model, root=_CONFIG_ROOT,
+            ).text
+            data = parse_json_object(self.runner(prompt))
             reasons = [str(item) for item in (data.get("reasons") or [])][:6]
             verdict = ("approve" if str(data.get("verdict", "")).lower().startswith("approve")
                        else "reject")

@@ -15,6 +15,7 @@ if str(AGENTS_DIR) not in sys.path:
     sys.path.insert(0, str(AGENTS_DIR))
 
 import model_registry  # noqa: E402
+import secret_scan  # noqa: E402
 
 ROOT = Path(tempfile.gettempdir()) / "opencode" / "model_registry_tests"
 
@@ -97,6 +98,32 @@ def main() -> int:
     report = model_registry.report(root)
     checks.check("registry: report count", report["count"] == 2, report)
     checks.check("registry: report free count", report["free"] == 1, report)
+
+    partial = model_registry.normalize(
+        "opencode/deepseek-v4.1-flash-free",
+        {"id": "opencode/deepseek-v4.1-flash-free"},
+        {},
+    )
+    checks.check("registry: offline fallback context",
+                 partial.context_window == 128000, partial.as_dict())
+    checks.check("registry: offline fallback tools", partial.supports_tools is True,
+                 partial.as_dict())
+    checks.check("registry: offline fallback json", partial.json_mode is True,
+                 partial.as_dict())
+    checks.check("registry: fallback flag", partial.fallback_metadata is True,
+                 partial.as_dict())
+    checks.check("registry: fallback family", partial.family == "deepseek",
+                 partial.as_dict())
+
+    clean, findings = secret_scan.scan_text(
+        "token='sk-ant-abcdefghijklmnopqrstuvwx' and password='hunter2hunter2'"
+    )
+    checks.check("security: secret is redacted",
+                 "sk-ant-" not in clean and "hunter2hunter2" not in clean, clean)
+    checks.check("security: redaction findings exist", len(findings) >= 1, findings)
+    checks.check("security: redaction never logs raw value",
+                 all("sk-ant-abcdefghijklmnopqrstuvwx" not in str(item)
+                     for item in findings), findings)
     print(f"MODEL REGISTRY: {checks.passed}/{checks.total} PASS")
     for failure in checks.failures:
         print(f"  FAIL {failure}")
