@@ -233,11 +233,11 @@
 
 ### P1-05 - Spec Kit bridge is partially implemented
 
-- **Status:** in progress — real my-project bridge pilot passed; signed execution not run because my-project is not a Git worktree
+- **Status:** resolved — real Git my-project signed v2 execution passed end-to-end
 - **Area:** process/integration
 - **Batch 4 progress (2026-11-06):** created `C:\Users\tuank\my-project\specs\000-p0-06-pilot` with spec.md + plan.md + tasks.yaml; `bridge_spec_kit()` produced a valid `MasterPlan.json` with phase `P1`.
-- **Needed:** put the feature in a Git worktree and run sign-off/execution.
-- **Exit criterion:** a bridge converts a Spec Kit `spec.md` + `plan.md` + `tasks.md` into a valid `MasterPlan.json`, then runs through v2 sign-off and execution.
+- **End-to-end evidence (2026-11-07):** initialized Git, ran `prepare -> bridge -> usage-approve -> execute -> verify -> checkpoint -> handoff` on `my-project`; run `v2_20261107T045042_561bf2`, checkpoint `58ac699e...`, main `demo.txt=value=1` unchanged, worktree `value=2`, verify exit 0, converge `ok=true`. See [`SPEC_KIT_ADOPTION.md`](SPEC_KIT_ADOPTION.md).
+- **Exit criterion:** satisfied.
 
 ### P1-06 — constitution / converge are missing
 
@@ -288,8 +288,9 @@
 
 ### P1-12 - Spec Kit adoption plan
 
-- **Status:** approved; P0 in progress
+- **Status:** resolved — adoption flow documented and closed
 - **Area:** process/integration
+- **Adoption doc:** [`SPEC_KIT_ADOPTION.md`](SPEC_KIT_ADOPTION.md) records `Specify -> Plan -> Tasks -> Bridge -> v2 Execution -> Converge`, artifact hashes, commands and safety boundaries.
 - **Decision:** borrow Spec Kit's process contracts, not its execution model.
 - **Take now (P0):**
   - `constitution.md` + constitution hash bound into sign-off.
@@ -505,6 +506,7 @@ When the repo is installed, inspect and record:
 - 2026-11-07: Real v2 phase process kill (`taskkill /F`) → `v2 recover` → re-execute → handoff passed; `test_phase_process_crash.py` 10/10 PASS. P0-05 resolved.
 - 2026-11-07: Overnight soak completed **459 cycles** (`ok=True` each) and stopped cleanly; P1-01/P1-02 resolved.
 - 2026-11-07: Provider fallback metadata, prompt secret sanitization, context-window guard and uniform E1–E4 capability bundles landed. P0-03/P1-08/P1-10/P1-14 resolved; all P0 items are now resolved.
+- 2026-11-07: Spec Kit adoption closed end-to-end on real Git `my-project`: bridge → Usage approval → v2 worktree execution → verify 0 → checkpoint → handoff → converge. P1-05/P1-12 resolved; see `docs/SPEC_KIT_ADOPTION.md`.
 
 ## Batch commit ledger
 
@@ -520,3 +522,4 @@ When the repo is installed, inspect and record:
 | Providers | `09788c2` | Offline fallback metadata + secret sanitization; P0-03/P1-10 resolved |
 | Context | `d863ae6` | Context-window guard + overflow trim; P1-08 resolved |
 | Capabilities | `4fab16b` | Uniform E1–E4 capability bundle; P1-14 resolved |
+| Spec Kit | `b2af571` | Real Git my-project signed execution + adoption doc; P1-05/P1-12 resolved |

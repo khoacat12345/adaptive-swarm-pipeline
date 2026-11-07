@@ -29,6 +29,7 @@ python .agents/v2/run.py execute --run-id <id> --free
 ```
 
 Operator guide: [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md).
+Spec Kit adoption: [`docs/SPEC_KIT_ADOPTION.md`](docs/SPEC_KIT_ADOPTION.md).
 Details: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Constitution:
 [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md). Tasks schema:
 [`docs/schemas/tasks.schema.json`](docs/schemas/tasks.schema.json). Release
