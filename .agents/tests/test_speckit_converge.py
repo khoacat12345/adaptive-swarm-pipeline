@@ -82,6 +82,15 @@ def main() -> int:
         checks.check("converge: verify evidence recorded",
                      good["verify_evidence"][0]["status"] == "pass", good)
 
+        (root / ".agents" / "tmp" / "v2").mkdir(parents=True, exist_ok=True)
+        (root / ".agents" / "tmp" / "v2" / "runtime.tmp").write_text(
+            "runtime state\n", encoding="utf-8")
+        runtime_ok = converge(root, plan, worktree=root, test_evidence=[])
+        checks.check("converge: .agents runtime ignored",
+                     runtime_ok["ok"] is True
+                     and ".agents/tmp/v2/runtime.tmp" not in runtime_ok["changed_files"],
+                     runtime_ok)
+
         bad_verify = converge(root, plan, worktree=root, test_evidence=[
             {"command": "verify", "exit_code": 1},
         ])

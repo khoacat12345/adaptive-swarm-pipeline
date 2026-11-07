@@ -37,7 +37,12 @@ def _changed_files(worktree: Path, base_sha: str) -> list[str]:
     result = _git(worktree, "diff", "--name-only", base_sha)
     if result.returncode != 0:
         return []
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    # Runtime evidence (backups/tmp/ledger/v2 state) is not implementation
+    # drift. It lives under .agents/ and is never part of the product diff.
+    return [
+        line.strip() for line in result.stdout.splitlines()
+        if line.strip() and not line.strip().replace("\\", "/").startswith(".agents/")
+    ]
 
 
 def converge(
