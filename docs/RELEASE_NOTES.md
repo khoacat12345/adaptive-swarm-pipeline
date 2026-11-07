@@ -82,6 +82,22 @@ Deferred, non-blocking improvements (tree-sitter/tags cache, richer ACI tool
 bundles, macOS CI runner) are tracked in `OPEN_PROBLEMS.md` but are not release
 blockers for the v2.1.0 candidate.
 
+## OpenCode skill setup for new users
+
+A fresh clone already includes the project-local skill and `/swarm` command:
+
+```text
+.opencode/skills/adaptive-swarm-pipeline/SKILL.md
+.opencode/commands/swarm.md
+```
+
+From the project root, run OpenCode and use `/swarm <task>` or
+`@adaptive-swarm-pipeline <task>`. Verify with
+`python .agents/sync_skill.py --check`; for user-wide install use
+`python .agents/sync_skill.py --global --write`. See
+[`OPENCODE_SKILL_SETUP.md`](OPENCODE_SKILL_SETUP.md) for Windows/Linux paths,
+ZIP/copy instructions and troubleshooting.
+
 ## Verification
 
 ```text
