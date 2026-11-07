@@ -148,7 +148,7 @@ function renderSpend(spend) {
   $('spendBody').innerHTML = `
     <tr><td>Requests / calls</td><td align="right">${fmt(spend.estimated_requests)}</td><td align="right">${fmt(spend.used_requests)}</td><td align="right">${fmt(spend.remaining_requests)}</td></tr>
     <tr><td>Cost (USD)</td><td align="right">${fmt(spend.estimated_cost_usd)}</td><td align="right">${fmt(spend.used_cost_usd)}</td><td align="right">${fmt(spend.remaining_cost_usd)}</td></tr>
-    <tr><td>Tokens (actual)</td><td align="right">-</td><td align="right">${fmt(spend.used_tokens)}</td><td align="right">-</td></tr>`;
+    <tr><td>Tokens (estimated vs actual)</td><td align="right">${fmt(spend.estimated_tokens)}</td><td align="right">${fmt(spend.used_tokens)}</td><td align="right">${fmt(spend.remaining_tokens)}</td></tr>`;
   const phases = Object.entries(spend.phases || {});
   $('phaseSpend').textContent = phases.length ? ('per-phase: ' + phases.map(([id, p]) => `${id} ${p.used_requests || 0} calls / $${p.used_cost_usd || 0}`).join(' | ')) : '';
 }
@@ -275,6 +275,15 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
     used_cost = float(global_budget.get("used_cost_usd", 0.0) or 0.0)
     max_requests = int(config_global.get("max_requests", 0) or 0)
     max_cost = float(config_global.get("max_cost_usd", 0.0) or 0.0)
+    estimated_tokens = sum(
+        int((phase.get("budget") or {}).get("tokens", 0)
+            or (phase.get("budget") or {}).get("token_budget", 0) or 0)
+        for phase in (plan.get("phases") or [])
+    )
+    if not estimated_tokens and plan:
+        # Plan-size heuristic only; actual tokens always come from usage data.
+        estimated_tokens = max(1, len(json.dumps(plan, ensure_ascii=False)) // 4)
+    used_tokens = int(global_budget.get("used_tokens", 0) or 0)
     spend = {
         "estimated_requests": sum(
             int((phase.get("budget") or {}).get("requests", 0) or 0)
@@ -284,9 +293,11 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
             float((phase.get("budget") or {}).get("cost_usd", 0.0) or 0.0)
             for phase in (plan.get("phases") or [])
         ),
+        "estimated_tokens": estimated_tokens,
         "used_requests": used_requests,
         "used_cost_usd": round(used_cost, 8),
-        "used_tokens": int(global_budget.get("used_tokens", 0) or 0),
+        "used_tokens": used_tokens,
+        "remaining_tokens": max(0, estimated_tokens - used_tokens),
         "max_requests": max_requests,
         "max_cost_usd": max_cost,
         "remaining_requests": max(0, max_requests - used_requests),

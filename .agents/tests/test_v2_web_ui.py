@@ -66,6 +66,8 @@ def main() -> int:
         checks += 1; assert detail["spend"]["used_requests"] == 3
         checks += 1; assert detail["spend"]["remaining_requests"] == 7
         checks += 1; assert detail["spend"]["used_tokens"] == 4096
+        checks += 1; assert detail["spend"]["estimated_tokens"] > 0
+        checks += 1; assert detail["spend"]["remaining_tokens"] >= 0
         checks += 1; assert detail["spend"]["phases"]["P1"]["used_cost_usd"] == 0.02
         checks += 1; assert detail["handoff"]["ready"] is True
 
@@ -78,7 +80,7 @@ def main() -> int:
 
         page = web.page()
         for marker in ("Back to Dashboard", "Spend reconciliation", "Recent handoff runs",
-                       "Preview handoff diff", "Tokens (actual)", "Estimated", "Actual / used"):
+                       "Preview handoff diff", "Tokens (estimated vs actual)", "Estimated", "Actual / used"):
             checks += 1; assert marker in page, marker
         checks += 1; assert "/api/v2/runs/" in page and "/diff" in page
 
