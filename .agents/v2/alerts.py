@@ -11,8 +11,8 @@ from typing import Any
 import notify
 import secret_scan
 
-_WIN_PATH = re.compile(r"[A-Za-z]:\\[^\s\"'<>]+")
-_POSIX_PATH = re.compile(r"(?<![\w.])/(?:home|Users|tmp|var|etc)/[^\s\"'<>]+")
+_WIN_PATH = re.compile(r"(?i)\b[A-Z]:\\[^\r\n\"'<>]*")
+_POSIX_PATH = re.compile(r"(?<![\w.])/(?:home|Users|tmp|var|etc)/[^\r\n\"'<>]*")
 EVENT_LABELS = {
     "HANDOFF_READY": "Run completed and handoff is ready",
     "USAGE_WAITING": "Run is waiting for Usage approval",

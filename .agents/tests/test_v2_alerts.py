@@ -38,7 +38,7 @@ def main() -> int:
                     "status": event,
                     "phase_id": "P1",
                     "reason": "api_key='sk-ant-abcdefghijklmnopqrstuvwxyz' "
-                              r"at C:\Users\tuank\secret\id_rsa",
+                              r"at C:\Users\tuank\secret folder\id_rsa",
                 },
                 config={"enabled": True},
             )
