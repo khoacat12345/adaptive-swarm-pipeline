@@ -110,6 +110,16 @@ def main(argv: list[str] | None = None) -> int:
     handoff.add_argument("--run-id", required=True)
     handoff.add_argument("--report", default=None)
 
+    merge = sub.add_parser("merge", help="apply a HANDOFF_READY patch after verify")
+    merge.add_argument("--run-id", required=True)
+    merge.add_argument("--message", default=None)
+    merge.add_argument("--verify-timeout", type=int, default=300)
+    merge.add_argument("--dry-run", action="store_true")
+
+    rollback = sub.add_parser("rollback", help="revert a previous v2 merge")
+    rollback.add_argument("--run-id", required=True)
+    rollback.add_argument("--message", default=None)
+
     doctor = sub.add_parser("doctor", help="preflight Git, OpenCode models and Spec Kit")
     doctor.add_argument("--json", action="store_true")
     doctor.add_argument("--no-color", action="store_true")
@@ -143,6 +153,27 @@ def main(argv: list[str] | None = None) -> int:
         worktree_root=args.worktree_root,
         require_clean=True,
     )
+
+    if args.command == "merge":
+        from v2.delivery import merge as merge_handoff
+
+        result = merge_handoff(
+            args.root, args.run_id, state_root=args.state_root,
+            message=args.message, verify_timeout=args.verify_timeout,
+            dry_run=args.dry_run,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "rollback":
+        from v2.delivery import rollback as rollback_merge
+
+        result = rollback_merge(
+            args.root, args.run_id, state_root=args.state_root,
+            message=args.message,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
 
     if args.command == "adaptive-map":
         from v2.adaptive_flags import load_flags
