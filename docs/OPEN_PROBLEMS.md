@@ -538,5 +538,6 @@ When the repo is installed, inspect and record:
 | P2 UI | `ec43e01` | `/v2` nav, live spend table, handoff history + diff; P2-02/P2-08 resolved |
 | P2 UI tokens | `a71ae51` | Estimated vs actual token reconciliation; P2-08 complete |
 | P2 Alerts | `4f2af99` | Safe v2 event notifications with redaction; P2-01 resolved |
+| P2 Alerts terminal | `f02847a` | CRASH alert on FAILED/QUARANTINED/STOPPED transitions |
 | P2 Doctor | `61491d2` | `v2 doctor` environment preflight; P2-07 resolved |
 | P2 Prune | `dc152f6` | `v2 prune` worktree/branch retention; P2-04 resolved |

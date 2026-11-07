@@ -155,6 +155,12 @@ python .agents\v2\run.py execute --run-id v2_... --free
 - `/v2` page button is **Approve Usage**.
 - `Accept handoff` is a separate end-of-run acknowledgement; it does not start
   the run or auto-merge.
+- Preflight a new machine with `python .agents\v2\run.py doctor` (Git, worktree,
+  OpenCode free models, Spec Kit). Add `--json` for automation.
+- Retain evidence but reclaim disk with `python .agents\v2\run.py prune --days 7`
+  (add `--dry-run` first, `--force` for completed runs younger than N days).
+  Prune removes only isolated worktrees and `swarm/*` branches; manifests,
+  checkpoints, events, budget and handoff patch/report stay in the run ledger.
 
 ## 7. Approval matrix
 
