@@ -32,7 +32,7 @@ context.
   python .agents\v2\run.py merge --run-id <id>
   python .agents\v2\run.py rollback --run-id <id>
   ```
-  Merge accepts only `HANDOFF_READY`, validates every patched path against the
+  Merge accepts `HANDOFF_READY` or accepted `DONE` runs, validates every patched path against the
   signed plan, runs every `verify_command`, and commits only after exit code 0.
   If verification fails, the tree is restored. Rollback uses a safe Git revert
   of the recorded merge commit.
