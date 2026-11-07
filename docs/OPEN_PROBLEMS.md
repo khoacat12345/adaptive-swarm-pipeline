@@ -569,4 +569,4 @@ When the repo is installed, inspect and record:
 | P2 Prune | `dc152f6` | `v2 prune` worktree/branch retention; P2-04 resolved |
 | P2 Delivery | `aae9d4f` | Explicit verify-gated merge + rollback; P2-03 resolved |
 | P2 Presets | `fe2003b` | free-only and strict presets; P2-09 resolved |
-| P2 Release docs | `PENDING` | v2.1.0 release-candidate story; P2-05/P2-06/P2-10/P2-11 resolved |
+| P2 Release docs | `140e9c6` | v2.1.0 release-candidate story; P2-05/P2-06/P2-10/P2-11 resolved |
