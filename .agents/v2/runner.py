@@ -54,13 +54,18 @@ class V2Runner:
             if not plan_path.exists():
                 raise ManifestError(f"run has no plan: {run_id}")
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        # v2 execution is always a four-reviewer/War-Room path.
+        # v2 execution is always a four-reviewer/War-Room path. Strict preset
+        # lowers the Usage gate so even a small run gets an explicit decision.
+        from .presets import strict_thresholds
+
+        thresholds = strict_thresholds(store.load().get("preset"))
         return approval_policy.evaluate(
             plan,
             mode="panel",
             reviewer="wave",
             models=[],
             root=self.root,
+            thresholds=thresholds,
         )
 
     def assert_usage(self, run_id: str) -> dict[str, Any]:
@@ -78,8 +83,13 @@ class V2Runner:
         phase_ids: list[str] | None = None,
         budget_config: BudgetConfig | dict[str, Any] | None = None,
         min_free_bytes: int = 512 * 1024 * 1024,
+        preset: str | None = None,
     ) -> dict[str, Any]:
         """Create a manifest, a guarded worktree, and a persisted budget."""
+        from .presets import config_for, normalize
+
+        preset_name = normalize(preset)
+        preset_config = config_for(preset_name)
         main = isolation.git_root(self.root)
         # Check the main tree before writing any run-state files into it.
         if self.require_clean:
@@ -117,6 +127,8 @@ class V2Runner:
                 plan_hash=None,
                 status="CREATED",
                 signoff_token=signoff_token,
+                preset=preset_name,
+                preset_config=preset_config,
             )
             store.transition("preflight_ok")
             store.append_event(
@@ -124,6 +136,8 @@ class V2Runner:
                 {
                     "workspace": workspace.as_dict(),
                     "budget_hash": budget.config_hash,
+                    "preset": preset_name,
+                    "preset_config": preset_config,
                 },
             )
             first_phase = next(iter(config.phases), None)
@@ -132,6 +146,8 @@ class V2Runner:
                 "state_root": str(self.state_root),
                 "workspace": workspace.as_dict(),
                 "budget": budget.summary(first_phase),
+                "preset": preset_name,
+                "preset_config": preset_config,
                 "manifest": store.summary(),
                 "signoff_token": signoff_token,
                 "usage_token": signoff_token,

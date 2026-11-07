@@ -617,6 +617,16 @@ class ExecutionEngine:
         missing = [role for role in REVIEW_ROLES if role not in reviewers]
         if missing:
             raise ExecutionError(f"missing reviewers: {', '.join(missing)}")
+        manifest = store.load()
+        if manifest.get("preset") == "free-only":
+            paid = [
+                seat.model for seat in [coder, *reviewers.values()]
+                if not seat.is_free
+            ]
+            if paid:
+                raise ExecutionError(
+                    "free-only preset blocks paid seats: " + ", ".join(paid)
+                )
         coder_family = coder.family or model_family(coder.model)
         for role in REVIEW_ROLES:
             seat = reviewers[role]

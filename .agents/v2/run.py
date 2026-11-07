@@ -47,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
     prep.add_argument("--run-id", default=None)
     prep.add_argument("--phase", action="append", default=None)
     prep.add_argument("--budget", default=None, help="JSON budget config")
+    prep.add_argument("--preset", choices=("free-only", "strict"), default=None,
+                      help="free-only locks seats to free models; strict lowers the Usage gate")
     prep.add_argument("--pretty", action="store_true")
 
     status = sub.add_parser("status")
@@ -212,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
             run_id=args.run_id,
             phase_ids=phases,
             budget_config=_budget_config(args.budget, phases),
+            preset=args.preset,
         )
         indent = 2 if args.pretty else None
         print(json.dumps(result, ensure_ascii=False, indent=indent))
@@ -277,11 +280,33 @@ def main(argv: list[str] | None = None) -> int:
         from v2.execution import ExecutionEngine
         from v2.models import load_config
 
+        from v2.models import is_free
+        from v2.presets import free_only as preset_free_only
+
+        store = runner.load(args.run_id)
+        preset = store.load().get("preset")
+        preset_locks_free = preset_free_only(preset)
         config = None
         try:
             config = load_config(args.root)
         except Exception:
             config = None
+        if preset_locks_free and (args.coder_model or args.reviewer):
+            explicit = ([args.coder_model] if args.coder_model else [])
+            explicit += [
+                item.split("=", 1)[1] for item in args.reviewer if "=" in item
+            ]
+            paid = [
+                model for model in explicit
+                if not (is_free(model, config) if config is not None
+                        else str(model).lower().endswith("-free"))
+            ]
+            if paid:
+                raise SystemExit(
+                    "free-only preset blocks paid models: " + ", ".join(paid)
+                )
+        if preset_locks_free and not args.coder_model and not args.reviewer:
+            args.free = True
         reviewer_models: dict[str, str] = {}
         coder_model = args.coder_model
         if args.free:
@@ -304,7 +329,6 @@ def main(argv: list[str] | None = None) -> int:
                    if not reviewer_models.get(role)]
         if missing:
             raise SystemExit(f"missing reviewer models: {', '.join(missing)}")
-        store = runner.load(args.run_id)
         coder, reviewers = build_worker_seats(
             coder_model=coder_model,
             reviewer_models=reviewer_models,
@@ -313,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.timeout,
             config=config,
             paid_cost_usd=args.paid_cost,
-            free_only=args.free,
+            free_only=bool(args.free or preset_locks_free),
         )
         result = ExecutionEngine(runner).execute(
             args.run_id, coder=coder, reviewers=reviewers
