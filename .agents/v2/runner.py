@@ -183,6 +183,15 @@ class V2Runner:
             "plan.submitted",
             {"plan_hash": validated["plan_hash"], "phase_ids": validated["phase_ids"]},
         )
+        try:
+            from .alerts import notify_event
+
+            notify_event(self.root, "USAGE_WAITING", {
+                "run_id": run_id, "status": store.load().get("status"),
+                "plan_hash": validated["plan_hash"],
+            })
+        except Exception:
+            pass
         return {
             "run_id": run_id,
             "status": store.load().get("status"),

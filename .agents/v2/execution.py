@@ -759,6 +759,16 @@ class ExecutionEngine:
                             self.runner.pause(run_id, reason=f"reviewer unavailable: {str(exc)[:300]}")
                         except Exception:
                             pass
+                        try:
+                            from .alerts import notify_event
+
+                            notify_event(self.runner.root, "CRASH", {
+                                "run_id": run_id, "status": "PAUSED",
+                                "phase_id": phase_id,
+                                "reason": f"reviewer unavailable: {str(exc)[:300]}",
+                            })
+                        except Exception:
+                            pass
                         raise
                     except (SecurityVeto, TestIntegrityError, CrossFamilyError, NoProgressError) as exc:
                         self._record_lesson(
@@ -782,12 +792,22 @@ class ExecutionEngine:
                         except Exception:
                             pass
                         raise
-                    except BudgetError:
+                    except BudgetError as exc:
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("M3 budget stop")
                             except Exception:
                                 pass
+                        try:
+                            from .alerts import notify_event
+
+                            notify_event(self.runner.root, "BUDGET_OVERRUN", {
+                                "run_id": run_id, "status": "CRASH",
+                                "phase_id": phase_id,
+                                "reason": str(exc)[:300],
+                            })
+                        except Exception:
+                            pass
                         raise
                     except ExecutionError as exc:
                         self._record_lesson(
@@ -838,6 +858,16 @@ class ExecutionEngine:
                 store.transition("next_phase")
 
         handoff = self.runner.handoff(run_id)
+        try:
+            from .alerts import notify_event
+
+            notify_event(self.runner.root, "HANDOFF_READY", {
+                "run_id": run_id,
+                "status": store.load().get("status") or "HANDOFF_READY",
+                "requests": requests,
+            })
+        except Exception:
+            pass
         return ExecutionResult(
             run_id=run_id,
             status=store.load().get("status") or "HANDOFF_READY",
