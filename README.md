@@ -1,5 +1,9 @@
 # Adaptive Swarm Pipeline
 
+[![tests](https://github.com/khoacat12345/adaptive-swarm-pipeline/actions/workflows/cross-platform.yml/badge.svg?branch=main)](https://github.com/khoacat12345/adaptive-swarm-pipeline/actions/workflows/cross-platform.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+
 ![Adaptive Swarm dashboard](docs/dashboard.png)
 
 A **verification-first** coding harness for [OpenCode](https://opencode.ai):
