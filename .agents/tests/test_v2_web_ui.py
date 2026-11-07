@@ -52,7 +52,8 @@ def main() -> int:
         (run_dir / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
         budget = {
             "config": {"global": {"max_requests": 10, "max_cost_usd": 0.5}},
-            "global": {"used_requests": 3, "used_cost_usd": 0.02, "used_tokens": 4096},
+            "global": {"used_requests": 3, "used_cost_usd": 0.02, "used_tokens": 4096,
+                       "reserved_requests": 1, "reserved_cost_usd": 0.01},
             "phases": {"P1": {"used_requests": 3, "used_cost_usd": 0.02}},
         }
         (run_dir / "budget.json").write_text(json.dumps(budget), encoding="utf-8")
@@ -64,7 +65,8 @@ def main() -> int:
         detail = web.run_detail(root, "run-demo")
         checks += 1; assert detail["spend"]["estimated_requests"] == 5
         checks += 1; assert detail["spend"]["used_requests"] == 3
-        checks += 1; assert detail["spend"]["remaining_requests"] == 7
+        checks += 1; assert detail["spend"]["remaining_requests"] == 6
+        checks += 1; assert detail["spend"]["remaining_cost_usd"] == 0.47
         checks += 1; assert detail["spend"]["used_tokens"] == 4096
         checks += 1; assert detail["spend"]["estimated_tokens"] > 0
         checks += 1; assert detail["spend"]["remaining_tokens"] >= 0

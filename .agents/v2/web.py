@@ -148,6 +148,7 @@ function renderSpend(spend) {
   $('spendBody').innerHTML = `
     <tr><td>Requests / calls</td><td align="right">${fmt(spend.estimated_requests)}</td><td align="right">${fmt(spend.used_requests)}</td><td align="right">${fmt(spend.remaining_requests)}</td></tr>
     <tr><td>Cost (USD)</td><td align="right">${fmt(spend.estimated_cost_usd)}</td><td align="right">${fmt(spend.used_cost_usd)}</td><td align="right">${fmt(spend.remaining_cost_usd)}</td></tr>
+    <tr><td>Reserved (in flight)</td><td align="right">-</td><td align="right">${fmt(spend.reserved_requests)} calls / $${fmt(spend.reserved_cost_usd)}</td><td align="right">-</td></tr>
     <tr><td>Tokens (estimated vs actual)</td><td align="right">${fmt(spend.estimated_tokens)}</td><td align="right">${fmt(spend.used_tokens)}</td><td align="right">${fmt(spend.remaining_tokens)}</td></tr>`;
   const phases = Object.entries(spend.phases || {});
   $('phaseSpend').textContent = phases.length ? ('per-phase: ' + phases.map(([id, p]) => `${id} ${p.used_requests || 0} calls / $${p.used_cost_usd || 0}`).join(' | ')) : '';
@@ -273,6 +274,8 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
     phase_budgets = budget.get("phases") or {}
     used_requests = int(global_budget.get("used_requests", 0) or 0)
     used_cost = float(global_budget.get("used_cost_usd", 0.0) or 0.0)
+    reserved_requests = int(global_budget.get("reserved_requests", 0) or 0)
+    reserved_cost = float(global_budget.get("reserved_cost_usd", 0.0) or 0.0)
     max_requests = int(config_global.get("max_requests", 0) or 0)
     max_cost = float(config_global.get("max_cost_usd", 0.0) or 0.0)
     estimated_tokens = sum(
@@ -298,10 +301,12 @@ def run_detail(root: str | Path, run_id: str) -> dict[str, Any]:
         "used_cost_usd": round(used_cost, 8),
         "used_tokens": used_tokens,
         "remaining_tokens": max(0, estimated_tokens - used_tokens),
+        "reserved_requests": reserved_requests,
+        "reserved_cost_usd": round(reserved_cost, 8),
         "max_requests": max_requests,
         "max_cost_usd": max_cost,
-        "remaining_requests": max(0, max_requests - used_requests),
-        "remaining_cost_usd": round(max(0.0, max_cost - used_cost), 8),
+        "remaining_requests": max(0, max_requests - used_requests - reserved_requests),
+        "remaining_cost_usd": round(max(0.0, max_cost - used_cost - reserved_cost), 8),
         "phases": {
             phase_id: {
                 "used_requests": int((phase.get("used_requests", 0) or 0)),
