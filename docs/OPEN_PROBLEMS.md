@@ -517,3 +517,6 @@ When the repo is installed, inspect and record:
 | 4 | `6740e82` | Converge + Spec Kit bridge pilot + runtime stub; P1-06/P1-07 resolved; P1-05 in progress |
 | 5 | `fa2a359` | Live free-model v2 pilot; P0-01/P1-03/P1-13 resolved |
 | Deep wiring | `5475b59` | Per-call spend reconciliation, tool metadata filter, soak runner PID 6236; P0-02/P0-04 resolved; soak in progress |
+| Providers | `09788c2` | Offline fallback metadata + secret sanitization; P0-03/P1-10 resolved |
+| Context | `d863ae6` | Context-window guard + overflow trim; P1-08 resolved |
+| Capabilities | `4fab16b` | Uniform E1–E4 capability bundle; P1-14 resolved |
