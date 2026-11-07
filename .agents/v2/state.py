@@ -264,6 +264,17 @@ class RunStore:
                     "reason": details.get("reason"),
                 },
             )
+            if next_state in {"FAILED", "QUARANTINED", "STOPPED"}:
+                try:
+                    from .alerts import notify_event
+
+                    notify_event(self.root, "CRASH", {
+                        "run_id": self.run_id,
+                        "status": next_state,
+                        "reason": details.get("reason") or event,
+                    })
+                except Exception:
+                    pass
             return manifest
 
     def assert_state(self, *allowed: str) -> dict[str, Any]:
