@@ -439,6 +439,135 @@ class ExecutionEngine:
                 )
         return findings
 
+    def _review_meeting(
+        self,
+        store: Any,
+        budget: BudgetController,
+        phase_id: str,
+        phase: Mapping[str, Any],
+        work_order: Mapping[str, Any],
+        diff: str,
+        reviewers: Mapping[str, ExecutionSeat],
+        coder_family: str,
+        verify: Mapping[str, Any],
+    ) -> list[ReviewFinding]:
+        """E4: run the v1 blackboard meeting protocol through v2 seats."""
+        from types import SimpleNamespace
+
+        from core.meeting import MeetingContext, MeetingOrchestrator
+
+        seating: dict[str, Any] = {}
+        engine = self
+
+        class MeetingSeat:
+            def __init__(self, seat: ExecutionSeat):
+                self.seat = seat
+
+            def review(self, order, *, diff, new_content="", old_content="",
+                       level=1, sink=None):
+                if self.seat.family == coder_family:
+                    raise CrossFamilyError(
+                        f"reviewer {self.seat.role} family equals coder family"
+                    )
+                payload = engine._call(
+                    budget, phase_id, self.seat,
+                    lambda: self.seat.backend.review(
+                        self.seat.role,
+                        diff=diff,
+                        work_order=dict(work_order),
+                        phase=dict(phase),
+                    ),
+                ) or {}
+                verdict = str(payload.get("verdict") or "error").lower()
+                reasons = [str(item) for item in (payload.get("evidence") or
+                                                   payload.get("reasons") or [])]
+                if verdict == "error":
+                    raise ReviewerUnavailable(
+                        f"reviewer {self.seat.role} infrastructure failure"
+                    )
+                if verdict not in {"approve", "reject", "abstain"}:
+                    verdict = "reject"
+                return {
+                    "verdict": verdict,
+                    "reasons": reasons,
+                    "evidence_refs": [],
+                    "model": self.seat.model,
+                }
+
+        for role, seat in reviewers.items():
+            if role not in REVIEW_ROLES:
+                continue
+            if seat.family == coder_family:
+                raise CrossFamilyError(
+                    f"reviewer {role} family equals coder family {coder_family}"
+                )
+            seating[role] = MeetingSeat(seat)
+
+        def sink(event_type: str, data: dict, status: str = "info") -> None:
+            try:
+                store.append_event(event_type, data)
+            except Exception:
+                pass
+
+        order = SimpleNamespace(
+            task_id=str(work_order.get("id") or "work"),
+            objective=str(work_order.get("objective") or ""),
+            level=int(work_order.get("level", 2) or 2),
+            run_id=str(store.run_id),
+        )
+        orchestrator = MeetingOrchestrator(
+            seating, event_sink=sink, run_id=str(store.run_id),
+        )
+        context = MeetingContext(
+            work_order=order,
+            brief=str(work_order.get("objective") or ""),
+            diff=diff,
+            new_content="",
+            old_content="",
+            level=order.level,
+            verify_result={"exit_code": int(verify.get("exit_code", 0) or 0)},
+        )
+        orchestrator.open(order, context)
+        round1 = orchestrator.run_round1(order, context, sink=sink)
+        if round1.unavailable:
+            raise ReviewerUnavailable(
+                "meeting reviewer unavailable: " + ", ".join(round1.unavailable)
+            )
+        if not round1.all_approved:
+            participants = orchestrator.participants_for_rebuttal(round1.conflicts)
+            if participants:
+                round2 = orchestrator.run_round2(
+                    order, context, participants, sink=sink,
+                )
+                if not round2.all_approved:
+                    raise ExecutionError(
+                        "meeting rejected after Round 2: "
+                        + "; ".join(
+                            reason for finding in round2.findings
+                            for reason in (finding.get("reasons") or [])
+                        )[:500]
+                    )
+                round1 = round2
+            else:
+                raise ExecutionError("meeting rejected without a rebuttal participant")
+
+        findings: list[ReviewFinding] = []
+        for item in round1.findings:
+            role = str(item.get("role") or "")
+            verdict = str(item.get("verdict") or "reject").lower()
+            reasons = [str(value) for value in (item.get("reasons") or [])]
+            if verdict == "reject" and role == "security":
+                raise SecurityVeto("meeting security veto: " + "; ".join(reasons)[:500])
+            severity = "blocker" if role == "security" else "high"
+            findings.append(ReviewFinding(
+                role=role,
+                verdict=verdict,
+                severity=severity if verdict == "reject" else "low",
+                evidence=reasons,
+                required_change=reasons[0] if reasons else "",
+            ))
+        return findings
+
     # ------------------------------------------------------------------
     # Public execution
     # ------------------------------------------------------------------
@@ -508,6 +637,10 @@ class ExecutionEngine:
         repair_count = 0
         last_signature: tuple[str, str] | None = None
         repeated = 0
+        execution_tier = str(
+            plan.get("execution_tier") or plan.get("tier") or "E3"
+        ).upper()
+        meeting_mode = execution_tier == "E4" or bool(plan.get("meeting_mode"))
 
         for phase_index, phase in enumerate(phases):
             phase_id = str(phase["id"])
@@ -566,15 +699,21 @@ class ExecutionEngine:
                                 {"id": work_id, "status": "failed", "attempt": attempt + 1}
                             )
                             continue
-                        findings = self._review(
-                            budget,
-                            phase_id,
-                            phase,
-                            work_order,
-                            diff,
-                            reviewers,
-                            coder_family,
-                        )
+                        if meeting_mode:
+                            findings = self._review_meeting(
+                                store, budget, phase_id, phase, work_order,
+                                diff, reviewers, coder_family, verify,
+                            )
+                        else:
+                            findings = self._review(
+                                budget,
+                                phase_id,
+                                phase,
+                                work_order,
+                                diff,
+                                reviewers,
+                                coder_family,
+                            )
                         tx.commit()
                         tx = None
                         verified = True
