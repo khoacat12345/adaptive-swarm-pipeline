@@ -114,11 +114,22 @@ def main(argv: list[str] | None = None) -> int:
     doctor.add_argument("--json", action="store_true")
     doctor.add_argument("--no-color", action="store_true")
 
+    prune = sub.add_parser("prune", help="remove stale/completed v2 worktrees")
+    prune.add_argument("--days", type=float, default=7.0)
+    prune.add_argument("--force", action="store_true")
+    prune.add_argument("--dry-run", action="store_true")
+
     args = parser.parse_args(argv)
     if args.command == "doctor":
         from v2.doctor import main as doctor_main
 
         return doctor_main(args.root, json_output=args.json, color=not args.no_color)
+    if args.command == "prune":
+        from v2.prune import prune as prune_runs
+
+        result = prune_runs(args.root, days=args.days, force=args.force, dry_run=args.dry_run)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["ok"] else 1
     from run_lock import LockBusy, RepoLock
     try:
         lock = RepoLock(args.root, owner="v2").acquire()
