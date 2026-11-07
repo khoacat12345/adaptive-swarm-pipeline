@@ -259,6 +259,8 @@ python .agents/tests/test_capability_registry.py
 python .agents/tests/test_cost_reconciliation.py
 python .agents/tests/test_resilience.py
 python .agents/tests/test_speckit_converge.py
+python .agents/tests/test_v2_parity.py
+python .agents/tests/test_phase_process_crash.py
 python .agents/tests/test_phase4.py       # observation layer
 python .agents/tests/test_level3.py       # multi-file transaction + regressions
 python .agents/tests/test_phase5.py        # router + fallback reviewer + regressions

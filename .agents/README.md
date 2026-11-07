@@ -100,6 +100,7 @@ python3 .agents/v2/run.py prepare --goal "..." --phase P1
 python3 .agents/v2/run.py plan --run-id v2_... --plan plan.json
 python3 .agents/v2/run.py usage-approve --run-id v2_...
 python3 .agents/v2/run.py execute --run-id v2_... --free
+python3 .agents/v2/run.py recover --run-id v2_...   # after a killed phase
 ```
 
 `signoff` remains an alias for one release; `usage-approve` is the new explicit
@@ -138,6 +139,8 @@ python3 .agents/tests/test_capability_registry.py
 python3 .agents/tests/test_cost_reconciliation.py
 python3 .agents/tests/test_resilience.py
 python3 .agents/tests/test_speckit_converge.py
+python3 .agents/tests/test_v2_parity.py
+python3 .agents/tests/test_phase_process_crash.py
 python3 .agents/tests/test_approval_policy.py
 python3 .agents/tests/test_usage_gate.py
 python3 .agents/tests/test_protocol.py

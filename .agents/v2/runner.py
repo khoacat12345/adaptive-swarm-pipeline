@@ -283,6 +283,40 @@ class V2Runner:
         store = self.load(run_id)
         return store.transition("stop", reason=reason)
 
+    def recover(self, run_id: str) -> dict[str, Any]:
+        """Recover a process-killed phase back to a re-executable state.
+
+        Any open safe_writer journal is rolled back in the guarded worktree
+        before the state machine is reset. This never touches the main tree.
+        """
+        store = self.load(run_id)
+        manifest = store.load()
+        status = str(manifest.get("status") or "")
+        if status == "PROVISIONING":
+            return {"run_id": run_id, "status": status, "recovered": False}
+        if status not in {"PHASE_EXECUTING", "PHASE_VERIFYING"}:
+            raise StateTransitionError(
+                f"recover requires an executing/verifying phase, got {status}"
+            )
+        workspace = self.workspace(run_id)
+        import safe_writer  # type: ignore
+
+        recovered = safe_writer.recover_open_transactions(
+            workspace.path, log=False,
+        )
+        store.transition("recover", reason="process kill recovery")
+        store.append_event("run.recovered", {
+            "from": status,
+            "transactions": recovered,
+            "worktree": str(workspace.path),
+        })
+        return {
+            "run_id": run_id,
+            "status": store.load().get("status"),
+            "recovered": True,
+            "transactions": recovered,
+        }
+
     def accept_handoff(self, run_id: str) -> dict[str, Any]:
         store = self.load(run_id)
         return store.transition("user_accepts")

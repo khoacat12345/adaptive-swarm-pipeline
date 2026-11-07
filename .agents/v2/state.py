@@ -51,6 +51,8 @@ TRANSITIONS: dict[tuple[str, str], str] = {
     ("AWAITING_SIGNOFF", "sign_off"): "PROVISIONING",
     ("PROVISIONING", "worktree_ready"): "PHASE_EXECUTING",
     ("PHASE_EXECUTING", "verify_start"): "PHASE_VERIFYING",
+    ("PHASE_EXECUTING", "recover"): "PROVISIONING",
+    ("PHASE_VERIFYING", "recover"): "PROVISIONING",
     ("PHASE_VERIFYING", "verify_pass"): "PHASE_COMMITTED",
     ("PHASE_VERIFYING", "repair"): "PHASE_EXECUTING",
     ("PHASE_VERIFYING", "verify_fail_exhausted"): "QUARANTINED",

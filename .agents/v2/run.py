@@ -103,6 +103,9 @@ def main(argv: list[str] | None = None) -> int:
     converge = sub.add_parser("converge")
     converge.add_argument("--run-id", required=True)
 
+    recover = sub.add_parser("recover")
+    recover.add_argument("--run-id", required=True)
+
     handoff = sub.add_parser("handoff")
     handoff.add_argument("--run-id", required=True)
     handoff.add_argument("--report", default=None)
@@ -283,6 +286,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
+
+    if args.command == "recover":
+        result = runner.recover(args.run_id)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
 
     if args.command == "handoff":
         result = runner.handoff(args.run_id, report=args.report)

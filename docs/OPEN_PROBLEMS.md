@@ -76,9 +76,10 @@
 
 ### P0-05 — long-run crash/resume is not process-tested
 
-- **Status:** in progress — real transaction crash/restore + repo lock tested; v2 phase-kill parity still pending
+- **Status:** resolved — real v2 phase process kill + recover + handoff passed
 - **Area:** overnight reliability
-- **Batch 3 progress (2026-11-06):** `test_resilience.py` kills a child process after a transaction write and proves `recover_open_transactions()` restores exact bytes (8/8 PASS). The repo lock is also tested. V2 phase-process kill/resume remains open.
+- **Batch 3 progress (2026-11-06):** `test_resilience.py` kills a child process after a transaction write and proves `recover_open_transactions()` restores exact bytes (8/8 PASS).
+- **Process-kill evidence (2026-11-07):** `test_phase_process_crash.py` spawns a real v2 phase, kills it with `taskkill /F`, calls `v2 recover`, re-executes, and proves checkpoint/handoff/main isolation/no extra worktree files (10/10 PASS).
 - **Evidence:** state transitions and checkpoint records are unit-tested; there is no test that kills the runner process mid-phase and resumes it in a new process.
 - **Risk:** duplicate writes, stuck locks, or lost checkpoints under a real crash.
 - **Exit criterion:** kill runner after write/before verify and after verify/before checkpoint; new process resumes safely; no duplicate file version.
@@ -145,7 +146,8 @@
 
 ### P0-07 — Four-tier execution/planner model, mandatory planner, and M2 tracking
 
-- **Status:** in progress — tier/planner policy, planner council primitive and M2 compact timeline landed; E3/E4 live-path parity tests pending
+- **Status:** resolved — E3 wave and E4 meeting parity pass on v2; tier/planner/timeline policy landed
+- **Batch 5 parity evidence (2026-11-07):** `test_v2_parity.py` 11/11 PASS: E3 uses four independent wave reviewers; E4 opens the blackboard meeting, records transcript/votes, and runs Round 2 on conflict. Planner P2/P3 and compact E2 timeline are recorded in state/ledger.
 - **Batch 1 progress (2026-11-06):**
   - Added `tier_policy.py` (E1–E4, P1–P3, deterministic selection).
   - Added `capability_registry.py` for per-tier capability policy/wiring truth.
@@ -198,7 +200,8 @@
 
 ### P1-01 — 8–10 hour soak not executed
 
-- **Status:** in progress — 8-hour soak runner restarted 2026-11-07 00:23 (PID 6236)
+- **Status:** in progress — 8-hour soak runner restarted 2026-11-07 00:23; 459-cycle result recorded
+- **Batch 5 note:** previous overnight run completed 459 cycles PASS; the current run is a renewed 8-hour observation.
 - **Area:** M5 soak
 - **Soak evidence:** `.agents/soak_runner.py` started in background (`--mode fake --hours 8 --interval 60 --keep-awake`), heartbeat in `docs/SOAK_LOG.md`. Live pilot remains separately proven. Tool: [`../.agents/soak_runner.py`](../.agents/soak_runner.py).
 - **Evidence:** M5 uses a multi-phase synthetic soak and fake clock; no wall-clock long run.
@@ -207,7 +210,8 @@
 
 ### P1-02 — Windows sleep/lock/session behavior
 
-- **Status:** in progress — soak runner uses Windows SetThreadExecutionState keep-awake; 8h observation pending
+- **Status:** in progress — SetThreadExecutionState keep-awake active; physical lock/sleep observation pending
+- **Batch 5 note:** 459-cycle overnight run completed without process death; keep-awake remains enabled in the current soak.
 - **Area:** overnight reliability
 - **Soak evidence:** start command used `--keep-awake`; log in `docs/SOAK_LOG.md`. A physical lock/sleep test still needs operator observation.
 - **Evidence:** worktree/verify are tested on Windows in CI; active overnight sleep/power policy is not.
@@ -496,6 +500,8 @@ When the repo is installed, inspect and record:
 - 2026-11-07: Batch 3 added `run_lock.py` and real child-process transaction crash recovery; P1-11 resolved, P1-04 resolved, P0-05 in progress.
 - 2026-11-07: Batch 4 added `v2/converge.py`, `v2/run.py converge`, a my-project bridge pilot and `ClaudeCodeRuntimeStub`; P1-06/P1-07 resolved, P1-05 in progress.
 - 2026-11-07: Batch 5 live free-model v2 phase passed: `prepare -> plan -> usage-approve -> execute -> verify -> checkpoint -> handoff`; main unchanged, worktree changed, 4 reviewer approvals, checkpoint `c7ac85c...`. P0-01/P1-03/P1-13 resolved. Full local regression: 637 checks/assertions PASS across the listed suites.
+- 2026-11-07: E3/E4 v2 parity added: four independent wave reviewers; E4 blackboard meeting with Round 2 conflict path. `test_v2_parity.py` 11/11 PASS. P0-07 resolved.
+- 2026-11-07: Real v2 phase process kill (`taskkill /F`) → `v2 recover` → re-execute → handoff passed; `test_phase_process_crash.py` 10/10 PASS. P0-05 resolved.
 
 ## Batch commit ledger
 
