@@ -87,15 +87,15 @@ def main() -> int:
         dashboard = (AGENTS_DIR / "dashboard_ui.html").read_text(encoding="utf-8")
         checks += 1; assert "href='/v2'" in dashboard or 'href="/v2"' in dashboard
 
-        script = re.search(r"<script>(.*)</script>", page, re.DOTALL)
-        checks += 1; assert script is not None
-        script_path = root / "v2_page.js"
-        script_path.write_text(script.group(1), encoding="utf-8")
         node = shutil.which("node")
         if node:
-            result = subprocess.run([node, "--check", str(script_path)],
-                                    capture_output=True, text=True, timeout=30)
-            checks += 1; assert result.returncode == 0, result.stderr
+            for label, script_text in (("v2", re.search(r"<script>(.*)</script>", page, re.DOTALL).group(1)),
+                                       ("dashboard", re.search(r"<script[^>]*>(.*)</script>", dashboard, re.DOTALL).group(1))):
+                script_path = root / f"{label}_page.js"
+                script_path.write_text(script_text, encoding="utf-8")
+                result = subprocess.run([node, "--check", str(script_path)],
+                                        capture_output=True, text=True, timeout=30)
+                checks += 1; assert result.returncode == 0, result.stderr
         print(f"V2 WEB UI: {checks}/{checks} PASS")
         return 0
     finally:
