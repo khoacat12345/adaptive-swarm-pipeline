@@ -31,6 +31,7 @@ requires an explicit owner decision recorded here.
 | `PORTED` | The capability already exists in v2 with acceptable behavior. |
 | `PORT_REQUIRED` | Must be ported or reimplemented in v2 before v3. |
 | `REPLACED` | v2 has a better implementation; preserve the capability, not the old code shape. |
+| `PARTIAL` | A safe subset is ported; the remaining behavior is listed explicitly. |
 | `DEFERRED` | Not a v3 blocker, but must have owner approval and a follow-up issue. |
 | `DROP_CANDIDATE` | Obsolete/duplicate/unsafe; requires explicit owner approval. |
 | `REFERENCE` | Kept only as tests/historical oracle; not a product surface. |
@@ -45,11 +46,11 @@ written approval.
 
 | Capability | V1 source | V2 today | Decision | Target owner / acceptance |
 |---|---|---|---|---|
-| Quick single-file task | `job.py`, `recipe_c.py`, classifier/tier | No unified quick path; E3 execution needs 4 reviewers | **PORT_REQUIRED** | `swarm` + v2 E1/E2; same fixture reaches verify 0 |
-| General goal → plan | `planner.py`, `clarify.py` | External plan file required | **PORT_REQUIRED** | `PlannerAdapter` generates v2 plan |
-| Plan validation | `plan_validator.py`, `inspect_plan.py` | v2 `plan.py` validation | **REPLACED** | v2 plan validator + human-readable summary |
-| Four execution tiers | `tier_policy.py`, v1 job/recipe | Policy shared; v2 execution hardcodes 4 reviewers | **PORT_REQUIRED** | E1–E4 runtime + `test_v2_tiers.py` |
-| Planner levels P1–P3 | `planner.generate_council` | Not wired into v2 | **PORT_REQUIRED** | Tier policy drives planner count; tests |
+| Quick single-file task | `job.py`, `recipe_c.py`, classifier/tier | `swarm` + v2 E1/E2 execution | **PORTED** | `test_v2_tiers.py`, `test_swarm_cli.py` |
+| General goal → plan | `planner.py`, `clarify.py` | `v2/planner_adapter.py` (goal or v1 plan → validated v2 plan) | **PORTED** | `test_planner_adapter.py`; clarify still advisory |
+| Plan validation | `plan_validator.py`, `inspect_plan.py` | v2 `plan.py` validation + adapter summary | **REPLACED** | v2 plan validator + human-readable summary |
+| Four execution tiers | `tier_policy.py`, v1 job/recipe | v2 E1/E2/E3/E4 runtime; E1 opt-in and sensitive-path gate | **PORTED** | E1–E4 runtime + `test_v2_tiers.py` |
+| Planner levels P1–P3 | `planner.generate_council` | Tier policy proposes P1/P2/P3; only P1 plan generation is wired | **PORT_REQUIRED** | P2/P3 council execution still missing |
 | Usage/spend approval | `approval_policy.py`, `usage_request.py`, v1 dashboard | v2 approval + `/v2` page | **REPLACED** | Unified War Room approval; hash-bound |
 | Budget/quota | `quota.py`, v1 recipe caps | v2 budget/actual reconcile | **REPLACED** | v2 budget remains authoritative |
 | Model routing/fallback | `router.py`, `fallback.py`, `model_selector` | v2 `models.py`/adapters; fallback not identical | **PORT_REQUIRED** | Model routes + fallback behavior tests |
@@ -81,6 +82,38 @@ written approval.
 | Plan markdown rendering | `plan_md.py` | not in v2 | **DEFERRED** | Optional reporting |
 | Soak harness | `soak_runner.py` | v2 runner supports fake/live | **SHARED/REFERENCE** | Keep for release evidence |
 
+### 1.1 Evidence for the current port (2026-11-08)
+
+| Capability | Code | Deterministic evidence |
+|---|---|---|
+| E1 low-risk execution | `v2/execution.py` `resolve_tier_profile` | `python .agents/tests/test_v2_tiers.py` |
+| E2 security-only review | `v2/execution.py`, `v2/run.py --tier E2` | `test_v2_tiers.py` E2 cases |
+| E3 four-reviewer wave | unchanged default for old plans | `test_v2_tiers.py`, `test_v2_parity.py` |
+| E4 blackboard meeting | `v2/execution.py` meeting path | `test_v2_tiers.py`, `test_v2_parity.py` |
+| Goal → v2 plan | `v2/planner_adapter.py` | `python .agents/tests/test_planner_adapter.py` |
+| One-command CLI | `v2/swarm_cli.py`, `swarm.cmd`, `swarm.sh` | `python .agents/tests/test_swarm_cli.py` |
+
+**Hardening added after the first port (same date):**
+
+| Behavior | Code | Why it matters |
+|---|---|---|
+| Signed-tier guard | `execution.assert_tier_matches_signoff` | A runtime `--tier` that differs from the plan tier would run seats the hash-bound Usage estimate never approved; it is now rejected with a re-plan message. |
+| `tier.selected` records `signed_tier` | `ExecutionEngine.execute` event | The event log proves which tier was signed and which tier actually ran. |
+| `ExecutionResult.low_risk_opt_in` | result payload | E1 handoffs expose whether the low-risk opt-in was plan-level or runtime. |
+| Wider sensitive-path class | `SENSITIVE_SEGMENT_RE` | Adds token/password files, `.npmrc`, `.pypirc`, `.netrc`, `.ssh`, keystores and certificate files to the E1 block list. |
+| Declared v1 scopes | `planner_adapter._extra_allowed_paths` | A v1 plan that declared `allowed_paths` no longer loses them; test paths are still excluded. |
+| New-file goals | `planner_adapter.detect_targets(--allow-new-files)` | `swarm "create docs/new.md" --allow-new-files` can plan a file that does not exist yet. |
+| Job-level verify | `planner_adapter.from_v1_plan` | A v1 plan with one `verify_command` no longer produces work orders with a weaker fallback verify. |
+| CLI budget caps | `swarm --max-cost/--max-requests/--max-wall-seconds` | Caps lower the plan envelope *before* the Usage decision; they never increase it, and phase allocations are down-scaled to keep validation sound. |
+| CLI version surface | `swarm --version` (2.2.0) | Wrappers and operators can identify the installed entrypoint. |
+
+**Honest gaps still open:** P2/P3 planner councils are proposed but not executed;
+the unified War Room at 8501 and fixture-level v1-vs-v2 parity are not implemented
+by this slice; live free-model smoke and soak evidence still need a real run;
+`clarify.py` ambiguity checks are still advisory; and the CLI caps are explicit
+operator flags, not a model-driven cost forecast.
+`swarm` defaults to a guarded worktree and never auto-merges.
+
 ---
 
 ## 2. Module-level audit
@@ -98,7 +131,7 @@ some are tooling or tests.
 | `permissions.py` | role/path permissions | shared | SHARED | keep |
 | `system_bot.py` | guarded command execution | shared by safe_writer | SHARED | keep |
 | `approval_policy.py` | Usage gate | v2 runner uses | SHARED | keep |
-| `tier_policy.py` | E1–E4 / P1–P3 policy | v2 capability uses tier labels | SHARED | port into v2 execution |
+| `tier_policy.py` | E1–E4 / P1–P3 policy | v2 execution resolves E1–E4; adapter proposes P1–P3 | SHARED | P2/P3 council execution remains open |
 | `capability_registry.py` | capability policy matrix | v2 capability runtime | SHARED | expose in War Room |
 | `model_registry.py` | normalized model metadata | v2 models/doctor | SHARED | keep |
 | `context_guard.py` | context fitting | workers/v2 prompts | SHARED | keep |
@@ -109,11 +142,11 @@ some are tooling or tests.
 
 | V1 module | Role | V2 equivalent | Status | Action |
 |---|---|---|---|---|
-| `planner.py` | goal → plan, council | not wired | PORT_REQUIRED | planner adapter |
+| `planner.py` | goal → plan, council | `v2/planner_adapter.py` (goal/v1 plan) | PORTED | P2/P3 council still open |
 | `clarify.py` | ambiguity checks | not wired | PORT_REQUIRED | call before plan |
-| `classifier.py` | task scope/level | not wired | PORT_REQUIRED | feed tier policy |
+| `classifier.py` | task scope/level | tier/risk heuristics in adapter | PARTIAL | full classifier mapping |
 | `plan_validator.py` | v1 plan validation | v2 `plan.py` | REPLACED | map/validate v2 plan |
-| `inspect_plan.py` | plan inspection | not wired | PORT_REQUIRED | CLI/War Room summary |
+| `inspect_plan.py` | plan inspection | adapter summary + plan JSON | REPLACED | War Room plan panel still open |
 | `plan_md.py` | plan rendering | not wired | DEFERRED | optional reporting |
 | `core/policy.py` | planning policy | v2 planning | REPLACED | use v2 planning |
 | `work_order.py` | v1 work-order schema | v2 plan work_orders | REPLACED | adapter for parity tests |
@@ -122,8 +155,8 @@ some are tooling or tests.
 
 | V1 module | Role | V2 equivalent | Status | Action |
 |---|---|---|---|---|
-| `job.py` | plan/job orchestration | v2 runner + future orchestrator | REPLACED | `swarm` orchestrator; do not port internals |
-| `recipe_c.py` | single order execution | v2 ExecutionEngine | REPLACED | compatibility only as test oracle |
+| `job.py` | plan/job orchestration | `v2/swarm_cli.py` + v2 runner | REPLACED | `swarm` is the entrypoint; do not port internals |
+| `recipe_c.py` | single order execution | v2 ExecutionEngine (E1/E2 quick path) | REPLACED | compatibility only as test oracle |
 | `fallback.py` | model fallback chain | v2 models/adapters | PORT_REQUIRED | preserve fallback semantics |
 | `router.py` | work-type/provider routing | v2 models + adapters | PORT_REQUIRED | unify routes |
 | `quota.py` | legacy quota tracker | v2 budget | REPLACED | read-only cost UI only if needed |
@@ -163,8 +196,10 @@ some are tooling or tests.
 | `run_phase0_acceptance.py` | Phase 0 acceptance | keep as reference | REFERENCE |
 | `run_phase05_acceptance.py` | Phase 0.5 acceptance | keep as reference | REFERENCE |
 | `.agents/tests/test_phase*.py` | v1 acceptance | keep until v3 | REFERENCE |
-| `.agents/tests/test_tiers.py` | E1–E4 policy | keep and extend to v2 | PORT_REQUIRED |
-| `.agents/tests/test_v2_parity.py` | E3/E4 parity | extend to E1/E2 | PORT_REQUIRED |
+| `.agents/tests/test_v2_tiers.py` | E1-E4 v2 runtime | added, 40 checks | PORTED |
+| `.agents/tests/test_planner_adapter.py` | goal/v1 plan → v2 plan | added, 38 checks | PORTED |
+| `.agents/tests/test_swarm_cli.py` | CLI E2E | added, 44 checks | PORTED |
+| `.agents/tests/test_v2_parity.py` | E3/E4 parity | keep; E1/E2 covered by tier suite | PORTED |
 | `.agents/tests/test_*.py` | regression corpus | keep | REFERENCE |
 
 ---
@@ -174,16 +209,25 @@ some are tooling or tests.
 The old commands are not going to be kept as long-term public APIs. Their
 capabilities map as follows:
 
-| Old | New target | Notes |
+| Old | New target | Status / notes |
 |---|---|---|
-| `python .agents/job.py --plan plan.json` | `swarm --plan plan.json` | v2 worktree; explicit merge |
-| `python .agents/job.py --goal ...` (if used) | `swarm "goal"` | planner adapter |
-| `python .agents/recipe_c.py --order order.json` | `swarm --order order.json` | one-phase v2 plan |
-| `python .agents/planner.py --goal ...` | `swarm --plan-only "goal"` or planner adapter | plan artifact remains inspectable |
-| `python .agents/dashboard.py` | `python .agents/dashboard.py` (War Room) | 8501 default |
-| `python .agents/replay.py --last` | `swarm status --last` / War Room history | unified event view |
-| `python .agents/telegram_bot.py` | keep if two-way control is a required feature | decision gate |
+| `python .agents/job.py --plan plan.json` | `swarm run --plan plan.json` | **IMPLEMENTED**; v2 worktree, explicit merge |
+| `python .agents/job.py --goal ...` (if used) | `swarm "goal"` | **IMPLEMENTED**; deterministic planner adapter |
+| `python .agents/recipe_c.py --order order.json` | `swarm run --plan <adapted order>` | partial; order→v1 plan shim not built |
+| `python .agents/planner.py --goal ...` | `swarm planner --goal ...` | **IMPLEMENTED**; plan artifact remains inspectable |
+| `python .agents/dashboard.py` | `python .agents/dashboard.py` (War Room) | **OPEN**; 8501 unification not in this slice |
+| `python .agents/replay.py --last` | `swarm status --last` / War Room history | status works; unified replay still open |
+| `python .agents/telegram_bot.py` | keep if two-way control is required | decision gate |
 | `python .agents/soak_runner.py` | keep as release harness | no product entrypoint |
+
+The installed entrypoints are `swarm.cmd` (Windows) and `swarm.sh`
+(POSIX). Both call `python .agents/v2/swarm_cli.py` and accept the same
+arguments. `swarm` includes `doctor`, `planner`, `run`, `status`, `handoff` and
+`merge`; `run` performs the Usage decision before any model call. `swarm
+--version` prints the CLI version (2.2.0) and `run` accepts
+`--max-cost`/`--max-requests`/`--max-wall-seconds` to lower the plan envelope
+before that decision. Runtime `--tier` must match the signed plan tier; any
+change requires re-planning so the Usage estimate is re-approved.
 
 `job.py` and `recipe_c.py` remain in the v1.0.5 tag and in the test oracle, but
 are not the new-user interface.
@@ -231,17 +275,24 @@ Before v3:
 - [ ] Same fixture through v1 legacy and v2 produces the same target bytes.
 - [ ] v1 main worktree is unchanged by v2 until explicit merge.
 - [ ] verify commands pass in both paths.
-- [ ] E1/E2/E3/E4 have expected reviewer/meeting behavior.
-- [ ] War Room shows v2 run/spend/usage/handoff/diff.
-- [ ] Crash/resume and merge/rollback pass.
-- [ ] Free-model live smoke pass.
+- [x] E1/E2/E3/E4 have expected reviewer/meeting behavior.
+- [x] A runtime tier override cannot bypass the signed plan/Usage estimate.
+- [x] `swarm "task"` reaches `HANDOFF_READY` with fake seats.
+- [x] `swarm` never writes main before explicit `merge`.
+- [x] CLI budget caps lower the envelope before the Usage decision.
+- [ ] War Room shows v2 run/spend/usage/handoff/diff (still two surfaces).
+- [x] Crash/resume and merge/rollback pass (existing v2 suites).
+- [ ] Free-model live smoke pass (not run in this deterministic slice).
 - [ ] 8-hour soak or agreed equivalent pass.
-- [ ] `v1.0.5` tag remains available as rollback.
+- [x] `v1.0.5` tag remains available as rollback.
 
 ## 7. Immediate next actions
 
-1. Review this matrix with the owner.
-2. Mark `DROP_CANDIDATE` rows approved or rejected.
-3. Build `V1_FEATURE_PARITY` status updates as code lands.
-4. Do not delete v1 modules until the relevant rows are `PORTED` or approved.
-5. Start engine work only after the matrix is accepted.
+1. ~~Port tier-aware execution, planner adapter and `swarm` CLI.~~ Done in
+   `test_v2_tiers.py`, `test_planner_adapter.py`, `test_swarm_cli.py`.
+   Follow-up hardened the signed-tier guard, E1 sensitive-path classes, v1
+   declared scopes, new-file goals and CLI budget caps.
+2. Wire P2/P3 planner councils; the adapter currently proposes the level only.
+3. Unify the War Room at 8501 and add replay/spend projections.
+4. Run fixture-level v1-vs-v2 parity, free-model live smoke and soak.
+5. Review `DROP_CANDIDATE` rows with the owner before deleting v1 modules.

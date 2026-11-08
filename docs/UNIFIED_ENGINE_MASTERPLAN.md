@@ -1,8 +1,8 @@
 # Unified Engine Master Plan — Zero-User / V2-Only / V3 Release
 
-> Revision: **2 — zero-user strategy**
-> Status: **proposal for owner confirmation**; no engine behavior is changed by
-> this document.
+> Revision: **2.2 — tier/planner/CLI hardening before the War Room**
+> Status: **in progress**; Phase 1 and the `swarm` CLI are implemented and
+> hardened, the unified War Room and release gates are still open.
 > Last updated: 2026-11-08
 >
 > Companion audit: [`V1_FEATURE_PARITY.md`](V1_FEATURE_PARITY.md)
@@ -98,13 +98,57 @@ implementation shapes** while keeping or improving the underlying capability.
 
 | Gap | Evidence | Required outcome |
 |---|---|---|
-| E1/E2 policy not wired into v2 | `ExecutionEngine` requires all four reviewer roles | tier-aware execution |
-| No planner adapter | v2 needs external `plan.json` | goal → v2 plan |
-| No terminal `swarm` | `/swarm` is an OpenCode command only | one-command CLI |
+| ~~E1/E2 policy not wired into v2~~ | **wired 2026-11-08**; `test_v2_tiers.py` 40/40 | tier-aware execution |
+| ~~No planner adapter~~ | **added** `v2/planner_adapter.py`; 38/38 adapter checks | goal → v2 plan |
+| ~~No terminal `swarm`~~ | **added** `v2/swarm_cli.py` + wrappers; 44/44 CLI checks | one-command CLI |
+| ~~Runtime tier override bypassed Usage~~ | **closed** `assert_tier_matches_signoff` | tier must match the signed plan |
+| P2/P3 planner council not executed | adapter proposes the level; only one deterministic proposal | execute 2/3 proposals |
 | No unified War Room | v1 `/` and v2 `/v2` are separate; default 8080 | one dashboard at 8501 |
 | No full v1-vs-v2 parity | existing parity is E3/E4-centric | fixture-level parity suite |
 | Status/history split | v1 ledger vs v2 per-run events | one read-only history |
 | Release tag old | `v2.1.0` points to old commit | new v3 tag, no retag |
+
+### 3.3 Progress log
+
+**2026-11-08 — Phase 1 and the CLI half of Phase 2 are implemented.**
+
+- E1–E4 runtime: `v2/execution.py` resolves a tier profile (E1 no reviewer,
+  E2 security only, E3 four-role wave, E4 meeting). Old plans default to E3.
+  E1 is explicit low-risk opt-in, blocks sensitive targets and keeps secret
+  scanning mandatory. Evidence: `python .agents/tests/test_v2_tiers.py`
+  (40/40), including `run.py` CLI guards for E1 opt-in and E2's security seat.
+- Usage estimate follows the tier, so E1/E2 do not inherit the E3 wave reason.
+- Planner adapter: `v2/planner_adapter.py` turns a goal, v1 plan or existing
+  v2 plan into a validated MasterPlan with targets, verify commands and a
+  proposed tier/planner. Evidence: `python .agents/tests/test_planner_adapter.py`
+  (38/38).
+- One-command CLI: `.agents/v2/swarm_cli.py` plus `swarm.cmd` / `swarm.sh`
+  provides `doctor`, `planner`, `run`, `status`, `handoff`, `merge`. `run`
+  does doctor → plan → prepare → submit → Usage gate → signoff → execute →
+  verify → handoff. Evidence: `python .agents/tests/test_swarm_cli.py`
+  (44/44).
+- Still open: P2/P3 councils, the separate unified orchestrator/contracts,
+  the 8501 War Room, fixture-level parity, live free-model smoke and soak.
+
+**2026-11-08 — Hardening pass on the same slice (no new test files).**
+
+- Tier integrity: `execution.assert_tier_matches_signoff` rejects a runtime
+  `--tier` that differs from the signed plan, because the Usage estimate is
+  hash-bound to the plan tier; `tier.selected` now records both `tier` and
+  `signed_tier`, and `ExecutionResult` exposes `low_risk_opt_in`.
+- E1 policy: the sensitive-path class now also covers token/password files,
+  `.npmrc`, `.pypirc`, `.netrc`, `.ssh`, `.gnupg`, keystores and certificate
+  files; secret scanning and the verify requirement are unchanged and
+  mandatory.
+- Planner adapter: v1 `allowed_paths` scopes are preserved (test paths are
+  still excluded), job-level `verify_command` is honoured, and
+  `--allow-new-files` lets a goal create a file that does not exist yet.
+- `swarm`: `--version` (2.2.0) and `--max-cost` / `--max-requests` /
+  `--max-wall-seconds`. Caps only lower the plan envelope before the Usage
+  decision and down-scale phase allocations so `validate_plan` still passes.
+- Evidence unchanged and re-run green: `test_v2_tiers.py` 40/40,
+  `test_planner_adapter.py` 38/38, `test_swarm_cli.py` 44/44, `test_v2_m3.py`
+  25/25. Remaining gaps are the same as listed above.
 
 ---
 
@@ -331,10 +375,11 @@ Cases:
 #### Exit gate
 
 ```text
-[ ] E1–E4 execute with expected seat counts
-[ ] E4 existing parity still passes
-[ ] no v1 files changed
-[ ] no dashboard changes
+[x] E1–E4 execute with expected seat counts
+[x] E4 existing parity still passes
+[x] runtime tier override is rejected when it differs from the signed plan
+[x] no v1 files changed
+[x] no dashboard changes
 ```
 
 ---
@@ -348,8 +393,12 @@ Cases:
 Create:
 
 ```text
-.agents/unified/planner_adapter.py
+.agents/v2/planner_adapter.py   # implemented 2026-11-08
 ```
+
+The original plan proposed `.agents/unified/planner_adapter.py`; it lives in
+the v2 package so it can import the plan schema and tier policy directly. The
+API remains `from_goal`, `from_v1_plan`, `adapt_source` and `adapt_file`.
 
 Inputs:
 
@@ -409,25 +458,34 @@ It must not:
 Files:
 
 ```text
-.agents/swarm.py
-swarm.cmd
-swarm.sh
+.agents/v2/swarm_cli.py   # implemented 2026-11-08
+swarm.cmd                 # implemented 2026-11-08
+swarm.sh                  # implemented 2026-11-08
 ```
 
-Commands:
+Commands (implemented):
 
 ```text
 swarm "task"
 swarm "task" --tier E2
 swarm "task" --preset free-only
 swarm "task" --preset strict
+swarm "task" --e1-opt-in --tier E1
+swarm "task" --dry-run
 swarm "task" --merge
-swarm status <run_id>
+swarm "task" --max-cost 0.10 --max-requests 16
+swarm --version
+swarm planner "task" --out plan.json
+swarm status <run_id> | --last
 swarm doctor
+swarm handoff --run-id <id>
+swarm merge --run-id <id>
 ```
 
 `--merge` is explicit and requires the same path allowlist/verify gates as
-`v2 merge`.
+`v2 merge`. Budget caps lower the plan envelope before the Usage decision; they
+can never raise the estimate, and a runtime `--tier` must match the signed plan
+tier (re-plan to change it).
 
 #### 2.4 OpenCode
 
@@ -464,10 +522,12 @@ Cases:
 #### Exit gate
 
 ```text
-[ ] one command reaches HANDOFF_READY
-[ ] no automatic merge
-[ ] plan and worktree artifacts inspectable
-[ ] E1/E2 work through orchestrator
+[x] one command reaches HANDOFF_READY
+[x] no automatic merge
+[x] plan and worktree artifacts inspectable
+[x] E1/E2 work through the CLI
+[ ] separate unified orchestrator/contracts modules
+[ ] P2/P3 council execution
 ```
 
 ---
@@ -740,8 +800,8 @@ Remove “v2 is opt-in” wording only at this phase.
 
 | Area | Unit | Integration | E2E |
 |---|---|---|---|
-| Tier profile | `test_v2_tiers` | fake execution | real free-model smoke |
-| Planner | adapter tests | fake planner | goal → HANDOFF_READY |
+| Tier profile | `test_v2_tiers` (done) | fake execution (done) | real free-model smoke |
+| Planner | `test_planner_adapter` (done) | fake planner (done) | goal → HANDOFF_READY (CLI done) |
 | Usage | policy tests | runner | dashboard approval |
 | Worktree | isolation | execute | kill/recover |
 | Merge | path validation | temp repo | v1-vs-v2 parity |

@@ -13,6 +13,8 @@
 !/LICENSE
 !/dashboard.cmd
 !/dashboard.sh
+!/swarm.cmd
+!/swarm.sh
 !/docs/
 !/.github/
 !/.gitignore
