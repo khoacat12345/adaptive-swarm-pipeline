@@ -92,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
     execute.add_argument("--paid-cost", type=float, default=0.0,
                          help="max USD estimate per paid call; paid models stay blocked at 0")
     execute.add_argument("--timeout", type=int, default=300)
+    execute.add_argument("--tier", choices=("E1", "E2", "E3", "E4"), default=None,
+                         help="execution tier; must match the signed plan tier "
+                              "(defaults to that tier, or E3 for legacy plans)")
+    execute.add_argument("--e1-opt-in", dest="e1_opt_in", action="store_true",
+                         help="explicit low-risk opt-in required to run tier E1")
 
     adaptive_map = sub.add_parser("adaptive-map")
     adaptive_map.add_argument("--task", required=True)
@@ -283,7 +288,23 @@ def main(argv: list[str] | None = None) -> int:
         from v2.models import is_free
         from v2.presets import free_only as preset_free_only
 
+        from v2.execution import assert_tier_matches_signoff, resolve_tier_profile
+
         store = runner.load(args.run_id)
+        plan_path = store.run_dir / "plan.json"
+        if not plan_path.exists():
+            raise SystemExit("run has no plan")
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        try:
+            profile = resolve_tier_profile(
+                plan, tier=args.tier, low_risk_opt_in=args.e1_opt_in,
+            )
+            assert_tier_matches_signoff(plan, profile, requested_tier=args.tier)
+        except Exception as exc:  # noqa: BLE001
+            raise SystemExit(str(exc)) from exc
+        if args.e1_opt_in and profile.tier != "E1":
+            raise SystemExit("--e1-opt-in only applies to tier E1")
+        required_roles = profile.reviewer_roles
         preset = store.load().get("preset")
         preset_locks_free = preset_free_only(preset)
         config = None
@@ -325,10 +346,11 @@ def main(argv: list[str] | None = None) -> int:
             reviewer_models[role.strip()] = model.strip()
         if not coder_model:
             raise SystemExit("execute needs --coder-model or --free")
-        missing = [role for role in ("security", "qa", "perf", "docs")
-                   if not reviewer_models.get(role)]
+        missing = [role for role in required_roles if not reviewer_models.get(role)]
         if missing:
-            raise SystemExit(f"missing reviewer models: {', '.join(missing)}")
+            raise SystemExit(
+                f"{profile.tier} requires reviewer model(s): {', '.join(missing)}"
+            )
         coder, reviewers = build_worker_seats(
             coder_model=coder_model,
             reviewer_models=reviewer_models,
@@ -340,7 +362,11 @@ def main(argv: list[str] | None = None) -> int:
             free_only=bool(args.free or preset_locks_free),
         )
         result = ExecutionEngine(runner).execute(
-            args.run_id, coder=coder, reviewers=reviewers
+            args.run_id,
+            coder=coder,
+            reviewers=reviewers,
+            tier=profile.tier,
+            low_risk_opt_in=args.e1_opt_in,
         )
         print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
         return 0

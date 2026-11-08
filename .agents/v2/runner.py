@@ -54,18 +54,30 @@ class V2Runner:
             if not plan_path.exists():
                 raise ManifestError(f"run has no plan: {run_id}")
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        # v2 execution is always a four-reviewer/War-Room path. Strict preset
-        # lowers the Usage gate so even a small run gets an explicit decision.
+        # The Usage estimate follows the signed execution tier. Old plans
+        # without a tier remain the four-reviewer wave, preserving behavior.
         from .presets import strict_thresholds
 
+        tier = str(
+            plan.get("execution_tier") or plan.get("tier") or "E3"
+        ).strip().upper()
+        if tier == "E1":
+            mode, reviewer = "panel", "none"
+        elif tier == "E2":
+            mode, reviewer = "panel", "llm"
+        elif tier == "E4":
+            mode, reviewer = "meeting", "meeting"
+        else:
+            mode, reviewer = "panel", "wave"
         thresholds = strict_thresholds(store.load().get("preset"))
         return approval_policy.evaluate(
             plan,
-            mode="panel",
-            reviewer="wave",
+            mode=mode,
+            reviewer=reviewer,
             models=[],
             root=self.root,
             thresholds=thresholds,
+            multi_phase=len(plan.get("phases") or []) > 1,
         )
 
     def assert_usage(self, run_id: str) -> dict[str, Any]:

@@ -43,6 +43,37 @@ SECRET_RE = re.compile(
     re.IGNORECASE,
 )
 REVIEW_ROLES = ("security", "qa", "perf", "docs")
+TIER_ORDER = ("E1", "E2", "E3", "E4")
+TIER_REVIEWERS: dict[str, tuple[str, ...]] = {
+    "E1": (),
+    "E2": ("security",),
+    "E3": REVIEW_ROLES,
+    "E4": REVIEW_ROLES,
+}
+TIER_PLANNERS = {"E1": "P1", "E2": "P1", "E3": "P2", "E4": "P3"}
+SENSITIVE_SEGMENT_RE = re.compile(
+    r"^(?:"
+    r"\.env(?:\..*)?"
+    r"|\.npmrc"
+    r"|\.pypirc"
+    r"|\.netrc"
+    r"|\.ssh"
+    r"|\.gnupg"
+    r"|secrets?(?:\..*)?"
+    r"|tokens?(?:\..*)?"
+    r"|credentials?(?:\..*)?"
+    r"|passwords?(?:\..*)?"
+    r"|passwd"
+    r"|id_(?:rsa|ed25519|ecdsa)"
+    r"|[^/]*\.(?:pem|key|p12|pfx|crt|cer|jks|keystore|gpg)"
+    r"|auth(?:z|entication|orization)?(?:\..*)?"
+    r"|security(?:\..*)?"
+    r"|permissions?(?:\..*)?"
+    r"|crypto(?:\..*)?"
+    r"|payments?(?:\..*)?"
+    r")$",
+    re.IGNORECASE,
+)
 
 
 class CoderBackend(Protocol):
@@ -101,6 +132,140 @@ class ReviewFinding:
             severity=severity,
             evidence=[str(item) for item in (payload.get("evidence") or [])],
             required_change=str(payload.get("required_change") or ""),
+        )
+
+
+@dataclass(frozen=True)
+class TierProfile:
+    """Runtime review policy for one execution tier.
+
+    The policy is intentionally small and explicit: E1 has no independent
+    reviewer, E2 has one security reviewer, E3 has the four-role panel and E4
+    uses the same panel through the blackboard meeting protocol.
+    """
+
+    tier: str
+    reviewer_roles: tuple[str, ...]
+    planner: str
+    meeting: bool
+    low_risk_only: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "tier": self.tier,
+            "reviewer_roles": list(self.reviewer_roles),
+            "planner": self.planner,
+            "meeting": self.meeting,
+            "low_risk_only": self.low_risk_only,
+        }
+
+
+def normalize_tier(value: Any, *, default: str = "E3") -> str:
+    tier = str(value or default).strip().upper()
+    if tier not in TIER_ORDER:
+        raise ExecutionError(f"unknown execution tier: {value!r}")
+    return tier
+
+
+def signed_tier(plan: Mapping[str, Any]) -> str:
+    """The tier recorded in the signed plan, defaulting to the E3 wave."""
+    return normalize_tier(plan.get("execution_tier") or plan.get("tier") or "E3")
+
+
+def tier_profile(tier: str) -> TierProfile:
+    tier = normalize_tier(tier)
+    return TierProfile(
+        tier=tier,
+        reviewer_roles=TIER_REVIEWERS[tier],
+        planner=TIER_PLANNERS[tier],
+        meeting=tier == "E4",
+        low_risk_only=tier == "E1",
+    )
+
+
+def tier_reviewer_roles(tier: str) -> tuple[str, ...]:
+    return tier_profile(tier).reviewer_roles
+
+
+def is_sensitive_path(relative: str) -> bool:
+    """True when a target path belongs to a security-sensitive file class."""
+    text = str(relative or "").replace("\\", "/").strip("/")
+    if not text:
+        return False
+    if text == ".agents/config.json":
+        return True
+    return any(SENSITIVE_SEGMENT_RE.match(part) for part in text.split("/"))
+
+
+def sensitive_targets(plan: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+    found: list[tuple[str, str, str]] = []
+    for phase in plan.get("phases") or []:
+        phase_id = str(phase.get("id") or "")
+        for work_order in phase.get("work_orders") or []:
+            work_id = str(work_order.get("id") or "work")
+            for relative in work_order.get("target_files") or []:
+                if is_sensitive_path(str(relative)):
+                    found.append((phase_id, work_id, str(relative)))
+    return found
+
+
+def resolve_tier_profile(
+    plan: Mapping[str, Any],
+    *,
+    tier: str | None = None,
+    low_risk_opt_in: bool = False,
+) -> TierProfile:
+    """Resolve and enforce the tier policy for a signed plan.
+
+    Old plans without a tier default to E3 so their existing four-reviewer
+    behavior never changes silently. E1 is strictly opt-in and may not touch a
+    sensitive path; that decision is made before the coder is called.
+    """
+    profile = tier_profile(tier or signed_tier(plan))
+    if profile.low_risk_only:
+        plan_opt_in = plan.get("low_risk_opt_in") is True
+        if not plan_opt_in and not low_risk_opt_in:
+            raise ExecutionError(
+                "E1 requires explicit low-risk opt-in: pass --e1-opt-in or set "
+                "low_risk_opt_in=true in the signed plan"
+            )
+        blocked = sensitive_targets(plan)
+        if blocked:
+            detail = ", ".join(
+                f"{phase}/{work}:{path}" for phase, work, path in blocked[:8]
+            )
+            raise ExecutionError(f"E1 low-risk policy blocks sensitive target(s): {detail}")
+        for phase in plan.get("phases") or []:
+            for work_order in phase.get("work_orders") or []:
+                if not str(work_order.get("verify_command") or "").strip():
+                    raise ExecutionError(
+                        "E1 requires a verify_command for every work order"
+                    )
+    return profile
+
+
+def assert_tier_matches_signoff(
+    plan: Mapping[str, Any],
+    profile: TierProfile,
+    *,
+    requested_tier: str | None,
+) -> None:
+    """Fail closed when a runtime tier override bypasses the signed estimate.
+
+    The Usage approval is hash-bound to the plan, and the plan's tier decides
+    the reviewer count in that estimate. Allowing ``--tier`` to select a
+    different tier afterwards would run seats the user never approved, so the
+    override must re-plan and re-sign instead.
+    """
+    if requested_tier is None:
+        return
+    signed = signed_tier(plan)
+    requested = normalize_tier(requested_tier)
+    if requested != signed:
+        raise ExecutionError(
+            f"runtime tier {requested} differs from the signed plan tier {signed}; "
+            "re-plan and re-approve the Usage estimate instead of overriding "
+            "the reviewed tier"
         )
 
 
@@ -183,11 +348,19 @@ class ExecutionResult:
     requests: int
     repairs: int
     handoff: dict[str, Any] | None = None
+    tier: str = "E3"
+    planner: str = "P2"
+    reviewer_roles: tuple[str, ...] = REVIEW_ROLES
+    low_risk_opt_in: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "status": self.status,
+            "tier": self.tier,
+            "planner": self.planner,
+            "reviewer_roles": list(self.reviewer_roles),
+            "low_risk_opt_in": self.low_risk_opt_in,
             "phases": self.phases,
             "checkpoints": self.checkpoints,
             "requests": self.requests,
@@ -410,9 +583,10 @@ class ExecutionEngine:
         diff: str,
         reviewers: Mapping[str, ExecutionSeat],
         coder_family: str,
+        roles: tuple[str, ...] = REVIEW_ROLES,
     ) -> list[ReviewFinding]:
         findings: list[ReviewFinding] = []
-        for role in REVIEW_ROLES:
+        for role in roles:
             seat = reviewers.get(role)
             if seat is None:
                 raise ExecutionError(f"missing reviewer seat: {role}")
@@ -606,6 +780,8 @@ class ExecutionEngine:
         *,
         coder: ExecutionSeat,
         reviewers: Mapping[str, ExecutionSeat],
+        tier: str | None = None,
+        low_risk_opt_in: bool = False,
     ) -> ExecutionResult:
         store, plan, _, workspace = self._load(run_id)
         store.assert_state("PROVISIONING")
@@ -614,26 +790,44 @@ class ExecutionEngine:
             self.runner.assert_usage(run_id)
         except approval_policy.ApprovalError as exc:
             raise ExecutionError(f"usage approval: {exc}") from exc
-        missing = [role for role in REVIEW_ROLES if role not in reviewers]
+        profile = resolve_tier_profile(
+            plan, tier=tier, low_risk_opt_in=low_risk_opt_in,
+        )
+        assert_tier_matches_signoff(plan, profile, requested_tier=tier)
+        required_roles = profile.reviewer_roles
+        missing = [role for role in required_roles if role not in reviewers]
         if missing:
-            raise ExecutionError(f"missing reviewers: {', '.join(missing)}")
+            raise ExecutionError(
+                f"{profile.tier} requires reviewer seat(s): {', '.join(missing)}"
+            )
         manifest = store.load()
+        active_seats = [coder] + [reviewers[role] for role in required_roles]
         if manifest.get("preset") == "free-only":
-            paid = [
-                seat.model for seat in [coder, *reviewers.values()]
-                if not seat.is_free
-            ]
+            paid = [seat.model for seat in active_seats if not seat.is_free]
             if paid:
                 raise ExecutionError(
                     "free-only preset blocks paid seats: " + ", ".join(paid)
                 )
         coder_family = coder.family or model_family(coder.model)
-        for role in REVIEW_ROLES:
+        for role in required_roles:
             seat = reviewers[role]
             if (seat.family or model_family(seat.model)) == coder_family:
                 raise CrossFamilyError(
                     f"reviewer {role} must be a different family from coder {coder_family}"
                 )
+        try:
+            store.append_event("tier.selected", {
+                "tier": profile.tier,
+                "signed_tier": signed_tier(plan),
+                "planner": profile.planner,
+                "reviewer_roles": list(profile.reviewer_roles),
+                "meeting": profile.meeting,
+                "low_risk_opt_in": bool(
+                    low_risk_opt_in or plan.get("low_risk_opt_in") is True
+                ),
+            })
+        except Exception:
+            pass
 
         budget = self._budget(store, plan)
         test_hashes = self._snapshot_tests(workspace.path, plan)
@@ -648,10 +842,11 @@ class ExecutionEngine:
         repair_count = 0
         last_signature: tuple[str, str] | None = None
         repeated = 0
-        execution_tier = str(
-            plan.get("execution_tier") or plan.get("tier") or "E3"
-        ).upper()
-        meeting_mode = execution_tier == "E4" or bool(plan.get("meeting_mode"))
+        execution_tier = profile.tier
+        meeting_mode = profile.meeting or bool(plan.get("meeting_mode"))
+        active_reviewers = {
+            role: reviewers[role] for role in required_roles if role in reviewers
+        }
 
         for phase_index, phase in enumerate(phases):
             phase_id = str(phase["id"])
@@ -735,18 +930,23 @@ class ExecutionEngine:
                         if meeting_mode:
                             findings = self._review_meeting(
                                 store, budget, phase_id, phase, work_order,
-                                diff, reviewers, coder_family, verify,
+                                diff, active_reviewers, coder_family, verify,
                             )
-                        else:
+                        elif required_roles:
                             findings = self._review(
                                 budget,
                                 phase_id,
                                 phase,
                                 work_order,
                                 diff,
-                                reviewers,
+                                active_reviewers,
                                 coder_family,
+                                roles=required_roles,
                             )
+                        else:
+                            # E1 is an explicit, low-risk opt-in: verify and
+                            # secret scanning still run, but no independent seat.
+                            findings = []
                         tx.commit()
                         tx = None
                         verified = True
@@ -886,4 +1086,10 @@ class ExecutionEngine:
             requests=requests,
             repairs=repairs,
             handoff=handoff,
+            tier=profile.tier,
+            planner=profile.planner,
+            reviewer_roles=profile.reviewer_roles,
+            low_risk_opt_in=bool(
+                low_risk_opt_in or plan.get("low_risk_opt_in") is True
+            ),
         )
