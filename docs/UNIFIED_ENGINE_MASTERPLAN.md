@@ -1,8 +1,8 @@
 # Unified Engine Master Plan — Zero-User / V2-Only / V3 Release
 
-> Revision: **2.3 — unified contracts/orchestrator and P1–P3 councils**
-> Status: **in progress**; Phases 1 and 2 are implemented and hardened, the
-> unified War Room and release gates are still open.
+> Revision: **2.4 — unified War Room (state reader, API, one-page UI)**
+> Status: **in progress**; Phases 1, 2 and 3 are implemented and hardened; the
+> release gates (parity fixtures, live smoke, soak) are still open.
 > Last updated: 2026-11-09
 >
 > Companion audit: [`V1_FEATURE_PARITY.md`](V1_FEATURE_PARITY.md)
@@ -103,7 +103,7 @@ implementation shapes** while keeping or improving the underlying capability.
 | ~~No terminal `swarm`~~ | **added** `v2/swarm_cli.py` + wrappers; 44/44 CLI checks | one-command CLI |
 | ~~Runtime tier override bypassed Usage~~ | **closed** `assert_tier_matches_signoff` | tier must match the signed plan |
 | ~~P2/P3 planner council not executed~~ | **closed 2026-11-09**; `planner_adapter.run_planning_council` executes 2 P2 / 3 P3 seats with optional model backends | P1–P3 are real and tested |
-| No unified War Room | v1 `/` and v2 `/v2` are separate; default 8080 | one dashboard at 8501 |
+| ~~No unified War Room~~ | **closed 2026-11-09**; `unified/state.py`, `unified/api.py` and the one-page War Room at 8501 | one dashboard at 8501 |
 | No full v1-vs-v2 parity | existing parity is E3/E4-centric | fixture-level parity suite |
 | Status/history split | v1 ledger vs v2 per-run events | one read-only history |
 | Release tag old | `v2.1.0` points to old commit | new v3 tag, no retag |
@@ -182,6 +182,31 @@ councils, order shim).**
   38/38, swarm CLI 44/44, tiers 40/40, v2 M3 25/25.
 - Still open: unified War Room at 8501, fixture-level v1-vs-v2 parity, live
   free-model smoke, soak, and the advisory-only `clarify.py` wiring.
+
+**2026-11-09 — Phase 3 (Unified War Room) is implemented and tested.**
+
+- Unified state reader: `.agents/unified/state.py` projects v2 manifests/events
+  and an optional **read-only** v1 ledger adapter into one JSON-safe shape:
+  status/stage/timeline, tier, planner, budget/spend/tokens, verify commands and
+  last exit, Usage approval, handoff/merge/rollback, checkpoints and warnings.
+  It never writes either source and redacts every projected string. Evidence:
+  `python -m compileall .agents/unified/state.py` plus the Phase 4 dashboard
+  checks (below).
+- Unified API: `.agents/unified/api.py` provides `GET /api/unified/runs`,
+  `GET /api/unified/runs/<id>`, `.../events`, `.../diff` and
+  `POST /api/unified/{usage/approve,merge,rollback,control}`. `dashboard.py`
+  wires the routes, keeps the server on loopback (a non-loopback `--host` is
+  clamped), requires the per-run token for every write, redacts responses and
+  enforces `MAX_DIFF_BYTES = 400000` on the exact bytes returned.
+- One-page UI: `.agents/dashboard_ui.html` now includes a War Room view with
+  the run timeline, tier/planner badges, spend panel, Usage approval card,
+  E4 blackboard Round 1/2, handoff diff plus explicit Merge/Rollback, and run
+  history (v2 + read-only v1). The dashboard default is **8501**;
+  `--port 8080` keeps working and `dashboard.cmd`/`dashboard.sh` use 8501.
+- Evidence re-run green: unified dashboard 34/34, Phase 4 36/36, v2 M3 25/25,
+  v2 web UI 23/23, meeting UI 31/31.
+- Still open: fixture-level v1-vs-v2 parity, live free-model smoke, the 8-hour
+  soak, and the advisory-only `clarify.py` wiring.
 
 ---
 
@@ -649,6 +674,12 @@ Panels:
 - `--port 8080` supported for muscle memory.
 - `/v2` remains an alias/redirect, not a second product.
 
+Implemented 2026-11-09: `dashboard.DEFAULT_PORT = 8501`, the wrappers start on
+8501, and `/v2` plus the old `/api/runs` surface remain as aliases so existing
+bookmarks do not become a separate product. `test_phase4.py`,
+`test_v2_web_ui.py` and `test_meeting_ui.py` pin the loopback server, token
+handling, redaction, diff cap and UI contract.
+
 #### 3.5 Tests
 
 - mixed history;
@@ -664,10 +695,10 @@ Panels:
 #### Exit gate
 
 ```text
-[ ] one URL shows all run data
-[ ] E4 meeting visible
-[ ] diff/merge/rollback usable
-[ ] no second dashboard
+[x] one URL shows all run data
+[x] E4 meeting visible
+[x] diff/merge/rollback usable
+[x] no second dashboard
 ```
 
 ---
@@ -713,7 +744,6 @@ test_unified_contracts.py
 test_unified_planner.py
 test_unified_orchestrator.py
 test_swarm_cli.py
-test_unified_dashboard.py
 test_v1_v2_parity.py
 ```
 
@@ -946,8 +976,8 @@ Each commit:
 - [x] Planner P1–P3 works from a goal (deterministic council; model seats opt-in).
 - [x] Unified contracts and orchestrator own the CLI pipeline (no auto-merge).
 - [ ] Main stays unchanged until explicit merge.
-- [ ] Merge/rollback work from CLI and War Room.
-- [ ] One dashboard at 8501.
+- [x] Merge/rollback work from CLI and War Room.
+- [x] One dashboard at 8501.
 - [ ] v1 feature parity matrix has no unapproved loss.
 - [ ] All 48+ suites pass.
 - [ ] Free-model live smoke passes.

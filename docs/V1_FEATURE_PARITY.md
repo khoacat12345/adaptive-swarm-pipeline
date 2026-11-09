@@ -51,7 +51,7 @@ written approval.
 | Plan validation | `plan_validator.py`, `inspect_plan.py` | v2 `plan.py` validation + adapter summary | **REPLACED** | v2 plan validator + human-readable summary |
 | Four execution tiers | `tier_policy.py`, v1 job/recipe | v2 E1/E2/E3/E4 runtime; E1 opt-in and sensitive-path gate | **PORTED** | E1–E4 runtime + `test_v2_tiers.py` |
 | Planner levels P1–P3 | `planner.generate_council` | `v2/planner_adapter.run_planning_council`: one P1 seat, two P2 seats (proposal + critique), three P3 seats; optional model backends | **PORTED** | `test_planner_adapter.py`; `test_unified_orchestrator.py` council cases |
-| Usage/spend approval | `approval_policy.py`, `usage_request.py`, v1 dashboard | v2 approval + `/v2` page | **REPLACED** | Unified War Room approval; hash-bound |
+| Usage/spend approval | `approval_policy.py`, `usage_request.py`, v1 dashboard | v2 approval + Unified War Room approval card | **PORTED** | `test_phase4.py`, hash-bound |
 | Budget/quota | `quota.py`, v1 recipe caps | v2 budget/actual reconcile | **REPLACED** | v2 budget remains authoritative |
 | Model routing/fallback | `router.py`, `fallback.py`, `model_selector` | v2 `models.py`/adapters; fallback not identical | **PORT_REQUIRED** | Model routes + fallback behavior tests |
 | Provider/catalog preflight | `preflight.py`, `scout.py` | `unified/orchestrator.py` runs `doctor` before planning/model calls; live `preflight.check_live` route checks are not yet unified | **PARTIAL** | preflight gate exists; live route cross-check still open |
@@ -64,17 +64,17 @@ written approval.
 | ACI read-only tools | v1 partial | v2 capability runtime | **PORTED** | ACI integration tests |
 | Failure lessons | `memory.py` + v2 lessons | v2 lesson runtime | **PORTED** | Lesson integration tests |
 | Bounded memory | v1 memory | v2 context runtime | **PORTED** | Memory cap tests |
-| Event/observation stream | v1 ledger | v2 event runtime + per-run events | **PORT_REQUIRED** | Unified history projection |
-| Dashboard run view | `dashboard.py`, `team_view.py` | v1 `/` and v2 `/v2` separate | **REPLACED** | One War Room at 8501 |
-| Cost/token report | `cost_report.py`, quota | v2 `/v2` spend panel | **PORT_REQUIRED** | Spend panel includes v2 actuals |
-| Replay / history | `replay.py`, ledger | v2 events only, no replay UI | **PORT_REQUIRED** | Unified history + replay |
-| Draft/apply preview | v1 drafts/backups | v2 handoff diff | **REPLACED** | Handoff preview + optional draft history |
-| Pause/resume/stop | v1 job controls | v2 runner controls | **PORTED** | Control API tests |
+| Event/observation stream | v1 ledger | v2 event runtime + `unified/state.py` read model | **PORTED** | `test_phase4.py`; v1 ledger read-only |
+| Dashboard run view | `dashboard.py`, `team_view.py` | Unified War Room at 8501 (v2 state + v1 history) | **REPLACED** | `test_phase4.py`, `test_v2_web_ui.py` |
+| Cost/token report | `cost_report.py`, quota | War Room spend panel (estimated vs actual, tokens, calls) | **PORTED** | War Room spend panel |
+| Replay / history | `replay.py`, ledger | War Room run history + paged event stream + read-only v1 ledger adapter | **PORTED** | `test_phase4.py`, `test_v2_web_ui.py` |
+| Draft/apply preview | v1 drafts/backups | v2 handoff diff + explicit merge/rollback | **REPLACED** | Handoff preview + War Room delivery |
+| Pause/resume/stop | v1 job controls | v2 runner controls + War Room control API | **PORTED** | Control API tests |
 | Telegram alerts | `telegram_bot.py`, `notify.py` | v2 safe alerts | **PORTED** | Redaction + event tests |
 | Two-way Telegram bot | `telegram_bot.py` | not in v2 | **PORT_REQUIRED** | Keep `/status`, `/approve`, controls or explicitly drop |
 | Blackboard meeting | `core/meeting.py`, v1 wave | v2 E4 meeting | **PORTED** | E4 parity tests |
 | Merge to main | manual/v1 apply | v2 `merge` explicit | **REPLACED** | v2 merge + rollback tests |
-| Handoff diff | v1 diff/backups | v2 `/v2` diff button | **PORTED** | War Room diff |
+| Handoff diff | v1 diff/backups | v2 handoff diff + War Room Merge/Rollback | **PORTED** | War Room diff/delivery |
 | Presets | not in v1 | v2 free-only/strict | **PORTED** | Preset tests |
 | Doctor/prune | not in v1 | v2 doctor/prune | **PORTED** | CLI tests |
 | Benchmark/eval tooling | `benchmark.py`, `eval_suite.py` | not in v2 | **DEFERRED** | Owner approves non-blocker |
@@ -85,8 +85,9 @@ written approval.
 ### 1.1 Evidence for the current port (2026-11-08)
 
 > Validation snapshot (2026-11-09): contracts 40/40, orchestrator 63/63,
-> planner adapter 38/38, swarm CLI 44/44, v2 tiers 40/40, v2 M3 25/25. All
-> commands exit 0; no existing test file was edited.
+> planner adapter 38/38, swarm CLI 44/44, v2 tiers 40/40, v2 M3 25/25,
+> Phase 4 36/36, v2 web UI 23/23. All commands exit 0; no existing test file
+> was edited.
 
 | Capability | Code | Deterministic evidence |
 |---|---|---|
@@ -100,6 +101,9 @@ written approval.
 | Unified contracts | `unified/contracts.py` | `python .agents/tests/test_unified_contracts.py` (40 checks) |
 | Unified orchestrator | `unified/orchestrator.py` (CLI delegates) | `python .agents/tests/test_unified_orchestrator.py` (63 checks) |
 | One-command CLI | `v2/swarm_cli.py`, `swarm.cmd`, `swarm.sh` | `python .agents/tests/test_swarm_cli.py` |
+| Unified state reader | `unified/state.py` (v2 + read-only v1 ledger) | `python -m compileall .agents/unified/state.py`; dashboard smoke |
+| Unified War Room API | `unified/api.py`, `dashboard.py` routes | `python .agents/tests/test_phase4.py` |
+| One-page War Room | `dashboard_ui.html`, default port 8501 | `test_v2_web_ui.py`, `test_meeting_ui.py` |
 
 **Hardening added after the first port (same date):**
 
@@ -115,12 +119,13 @@ written approval.
 | CLI budget caps | `swarm --max-cost/--max-requests/--max-wall-seconds` | Caps lower the plan envelope *before* the Usage decision; they never increase it, and phase allocations are down-scaled to keep validation sound. |
 | CLI version surface | `swarm --version` (2.2.0) | Wrappers and operators can identify the installed entrypoint. |
 
-**Honest gaps still open:** the unified War Room at 8501 and fixture-level
-v1-vs-v2 parity are not implemented by this slice; live free-model smoke and
-soak evidence still need a real run; `clarify.py` ambiguity checks are still
-advisory; the unified preflight uses `doctor` but the live route catalog check
-(`preflight.check_live`) is not wired into the orchestrator yet; and the CLI
-caps are explicit operator flags, not a model-driven cost forecast.
+**Honest gaps still open:** fixture-level v1-vs-v2 parity is not implemented by
+this slice; live free-model smoke and soak evidence still need a real run;
+`clarify.py` ambiguity checks are still advisory; the unified preflight uses
+`doctor` but the live route catalog check (`preflight.check_live`) is not wired
+into the orchestrator yet; and the CLI caps are explicit operator flags, not a
+model-driven cost forecast. The War Room is implemented; its v1 rows are a
+read-only history projection, not a second execution path.
 `swarm` defaults to a guarded worktree and never auto-merges; the orchestrator
 has no merge path at all.
 
@@ -181,13 +186,13 @@ some are tooling or tests.
 
 | V1 module | Role | V2 equivalent | Status | Action |
 |---|---|---|---|---|
-| `dashboard.py` | v1 dashboard / API | v2 `/v2` + unified API | REPLACED | build War Room |
-| `team_view.py` | team/status view | not unified | PORT_REQUIRED | War Room data |
-| `cost_report.py` | cost report | v2 spend panel | PORT_REQUIRED | War Room spend |
-| `replay.py` | replay ledger | v2 events | PORT_REQUIRED | unified history/replay |
+| `dashboard.py` | v1 dashboard / API | unified API + one-page War Room at 8501 | REPLACED | War Room implemented |
+| `team_view.py` | team/status view | War Room history/status cards | PORTED | War Room data |
+| `cost_report.py` | cost report | War Room spend panel | PORTED | War Room spend |
+| `replay.py` | replay ledger | War Room run history + paged events; v1 ledger read-only | PORTED | unified history |
 | `ledger.py` | v1 event ledger | v2 per-run events | SHARED | state bridge read-only |
 | `schema.py` | v1 event schema | v2 schema | SHARED/PORT | normalize |
-| `usage_request.py` | usage request surface | v2 approval | REPLACED | War Room approval |
+| `usage_request.py` | usage request surface | v2 approval + War Room card | REPLACED | War Room approval |
 | `notify.py` | one-way webhooks | v2 alerts | SHARED | keep |
 | `telegram_bot.py` | two-way bot | v2 alerts only | PORT_REQUIRED | decide keep/drop |
 | `soak_runner.py` | soak evidence | v2 runner | REFERENCE | retain release evidence |
@@ -207,6 +212,9 @@ some are tooling or tests.
 | `.agents/unified/orchestrator.py` | preflight → plan/council → Usage → execute → verify/checkpoint/handoff | NEW / REPLACES CLI INTERNALS | `test_unified_orchestrator.py` 63/63 |
 | `v2/planner_adapter.run_planning_council` | P1/P2/P3 council with deterministic and model seats | NEW | `test_planner_adapter.py`, orchestrator council cases |
 | `v2/planner_adapter.from_order` | v1 `order.json` → validated v2 plan | NEW / COMPATIBILITY SHIM | orchestrator order cases |
+| `.agents/unified/state.py` | v2 state + read-only v1 ledger projection (status/tier/planner/spend/verify/handoff/warnings) | NEW / REPLACES SPLIT STATE | compileall + Phase 4 |
+| `.agents/unified/api.py` | unified GET/POST routes with token, redaction, loopback and diff cap | NEW / WAR ROOM API | `test_phase4.py` |
+| `.agents/dashboard_ui.html` War Room view | timeline, badges, spend, usage, blackboard, diff/merge/rollback, history | NEW / ONE DASHBOARD | `test_v2_web_ui.py`, `test_meeting_ui.py` |
 
 ### Tests / acceptance references
 
@@ -234,8 +242,8 @@ capabilities map as follows:
 | `python .agents/job.py --goal ...` (if used) | `swarm "goal"` | **IMPLEMENTED**; deterministic planner adapter |
 | `python .agents/recipe_c.py --order order.json` | `swarm run --order order.json` | **IMPLEMENTED**; `from_order` shim maps the validated order to a v2 plan, worktree and explicit merge |
 | `python .agents/planner.py --goal ...` | `swarm planner --goal ...` | **IMPLEMENTED**; plan artifact remains inspectable |
-| `python .agents/dashboard.py` | `python .agents/dashboard.py` (War Room) | **OPEN**; 8501 unification not in this slice |
-| `python .agents/replay.py --last` | `swarm status --last` / War Room history | status works; unified replay still open |
+| `python .agents/dashboard.py` | `python .agents/dashboard.py` (War Room) | **IMPLEMENTED**; default 8501, `/v2` alias kept |
+| `python .agents/replay.py --last` | `swarm status --last` / War Room history | status + unified history implemented |
 | `python .agents/telegram_bot.py` | keep if two-way control is required | decision gate |
 | `python .agents/soak_runner.py` | keep as release harness | no product entrypoint |
 
@@ -268,6 +276,8 @@ These are not ports; they are intentional replacements:
 - Adaptive repo-map/ACI/lessons/memory/events.
 - `/v2` spend and handoff preview.
 - Doctor, prune, alerts and presets.
+- One War Room at 8501 that reads v2 state and v1 history without a second
+  execution path.
 
 ## 5. What may be dropped only with owner approval
 
@@ -304,7 +314,7 @@ Before v3:
 - [x] CLI budget caps lower the envelope before the Usage decision.
 - [x] P2/P3 planning councils execute and validate before selection.
 - [x] v1 `order.json` maps to a v2 plan without re-implementing recipe logic.
-- [ ] War Room shows v2 run/spend/usage/handoff/diff (still two surfaces).
+- [x] War Room shows v2 run/spend/usage/handoff/diff (one surface at 8501).
 - [x] Crash/resume and merge/rollback pass (existing v2 suites).
 - [ ] Free-model live smoke pass (not run in this deterministic slice).
 - [ ] 8-hour soak or agreed equivalent pass.
@@ -318,6 +328,9 @@ Before v3:
    declared scopes, new-file goals and CLI budget caps.
 2. ~~Wire P2/P3 planner councils.~~ Done in `run_planning_council`; optional
    model seats are available through `--planner-model`.
-3. Unify the War Room at 8501 and add replay/spend projections.
+3. ~~Unify the War Room at 8501 and add replay/spend projections.~~ Done in
+   `unified/state.py`, `unified/api.py` and the War Room view; verified by
+   `test_phase4.py` (36/36), `test_v2_web_ui.py` (23/23) and
+   `test_meeting_ui.py` (31/31).
 4. Run fixture-level v1-vs-v2 parity, free-model live smoke and soak.
 5. Review `DROP_CANDIDATE` rows with the owner before deleting v1 modules.
