@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Open the Adaptive Swarm dashboard on Linux/macOS.
+# Open the Unified War Room on Linux/macOS (loopback only).
 set -eu
 dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$dir"
-exec python3 .agents/dashboard.py --root . --port 8080 --open
+exec python3 .agents/dashboard.py --root . --port 8501 --open

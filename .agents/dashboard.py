@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Web Dashboard (Task 4.3) - quan sat pipeline bang trinh duyet, 0 framework.
+"""Web Dashboard / Unified War Room - quan sat pipeline bang trinh duyet.
 
-    python .agents/dashboard.py --port 8080
+    python .agents/dashboard.py                  # http://127.0.0.1:8501
+    python .agents/dashboard.py --port 8080      # alias cho thoi quen cu
     python .agents/dashboard.py --root C:\\du-an --port 9000
 
 Chi dung thu vien chuan (`http.server`). Doc truc tiep:
@@ -12,11 +13,19 @@ Chi dung thu vien chuan (`http.server`). Doc truc tiep:
     <root>/.agents/draft/         (ban nhap cua Coder -> diff)
 
 API:
-    GET /                     SPA (dark mode, 3 cot)
-    GET /api/runs             danh sach run + tong hop
-    GET /api/runs/<run_id>    timeline + event chuan hoa
-    GET /api/diff?run_id=...  diff ban goc vs ban da ghi / ban nhap
-    GET /api/health           trang thai server + so run
+    GET /                              SPA (War Room, dark mode)
+    GET /v2                            alias trang Usage/sign-off v2
+    GET /api/unified/runs              run v2 (va v1 read-only) da chuan hoa
+    GET /api/unified/runs/<id>         detail: tier/planner/spend/verify/handoff
+    GET /api/unified/runs/<id>/events  event phan trang
+    GET /api/unified/runs/<id>/diff    handoff diff (size cap)
+    POST /api/unified/usage/approve    Usage approval (can token)
+    POST /api/unified/merge            merge handoff (can token, explicit)
+    POST /api/unified/rollback         rollback merge (can token)
+    POST /api/unified/control          pause/resume/stop/accept/recover (token)
+    GET /api/runs                      API v1 (giu cho tuong thich noi bo)
+    GET /api/diff?run_id=...           diff ban goc vs ban da ghi / ban nhap
+    GET /api/health                    trang thai server + so run
 
 Server chi bind 127.0.0.1 (khong mo ra mang).
 """
@@ -38,7 +47,7 @@ import schema
 
 MAX_CONTENT_BYTES = 200_000
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8080
+DEFAULT_PORT = 8501
 _GENERATE_LOCK = threading.Lock()
 
 
@@ -354,7 +363,14 @@ def make_handler(root: Path, ledger: Path):
                 self._json({"error": "forbidden host"}, 403)
                 return
             try:
-                if route == "/":
+                if route == "/api/unified/runs" or route == "/api/unified/summary" \
+                        or route.startswith("/api/unified/runs/"):
+                    from unified import api as unified_api
+
+                    status, payload = unified_api.handle_get(
+                        root, route, parse_qs(parsed.query))
+                    self._json(payload, status)
+                elif route == "/":
                     self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
                 elif route == "/v2":
                     from v2 import web as v2_web
@@ -559,7 +575,12 @@ def make_handler(root: Path, ledger: Path):
                     return
                 raw = self.rfile.read(length) if length else b""
                 payload = json.loads(raw.decode("utf-8") or "{}")
-                if route in ("/api/v2/signoff", "/api/v2/usage/approve"):
+                if route.startswith("/api/unified/"):
+                    from unified import api as unified_api
+
+                    status, result = unified_api.handle_post(root, route, payload)
+                    self._json(result, status)
+                elif route in ("/api/v2/signoff", "/api/v2/usage/approve"):
                     from v2 import web as v2_web
                     from v2.errors import PlanChangedError, StateTransitionError
                     try:
@@ -724,7 +745,14 @@ def make_server(port: int = DEFAULT_PORT, *, root=".", ledger=None,
                 host: str = DEFAULT_HOST) -> ThreadingHTTPServer:
     root_path = Path(root).resolve()
     ledger_path = Path(ledger).resolve() if ledger else ledger_for(root_path)
-    server = ThreadingHTTPServer((host, int(port)), make_handler(root_path, ledger_path))
+    # C1: the War Room is a local-only surface.  A caller that asks for
+    # 0.0.0.0/"::" is clamped to loopback instead of exposing tokens/actions.
+    bind_host = str(host or DEFAULT_HOST).strip().lower()
+    if bind_host not in ("127.0.0.1", "localhost", "::1", "[::1]"):
+        bind_host = DEFAULT_HOST
+    if bind_host in ("localhost",):
+        bind_host = DEFAULT_HOST
+    server = ThreadingHTTPServer((bind_host, int(port)), make_handler(root_path, ledger_path))
     server.daemon_threads = True
     return server
 

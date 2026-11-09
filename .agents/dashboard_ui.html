@@ -2503,6 +2503,34 @@
         left: 64px
       }
     }
+    /* Unified War Room (v2 runs + v1 history) */
+    .uw-badge { font-size: 10px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim) }
+    .uw-badge.e { color: #8bd3ff; border-color: #2d6385 }
+    .uw-badge.p { color: #ffd98a; border-color: #6b5522 }
+    .uw-badge.ok { color: var(--ok); border-color: #1f6146 }
+    .uw-badge.bad { color: var(--bad); border-color: #6b2b33 }
+    .uw-tl { display: flex; gap: 6px; flex-wrap: wrap }
+    .uw-step { flex: 1; min-width: 110px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel2) }
+    .uw-step b { display: block; font-size: 11px }
+    .uw-step span { font-size: 10px; color: var(--dim2) }
+    .uw-step.done { border-color: #1f6146 }
+    .uw-step.active { border-color: var(--accent); box-shadow: 0 0 0 1px #2d6385 inset }
+    .uw-step.pending { opacity: .6 }
+    .uw-run { display: flex; gap: 8px; align-items: center; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; margin-bottom: 6px }
+    .uw-run:hover { border-color: #2d6385 }
+    .uw-run.active { border-color: var(--accent); background: #0d2233 }
+    .uw-run .grow, .uw-tl .grow { flex: 1 }
+    .uw-table { width: 100%; border-collapse: collapse; font-size: 11px }
+    .uw-table th, .uw-table td { border-bottom: 1px solid var(--line); padding: 5px 6px; text-align: left }
+    .uw-table td.n { text-align: right }
+    .uw-msg { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px 10px; margin: 7px 0; background: var(--panel2) }
+    .uw-msg .head { font-size: 10px; color: var(--dim2); display: flex; gap: 8px; flex-wrap: wrap }
+    .uw-msg .body { margin-top: 4px; white-space: pre-wrap; font: 11px/1.5 Consolas, monospace }
+    .uw-warn { border: 1px solid #6b5522; background: #2a2110; color: #ffd98a; border-radius: 8px; padding: 7px 9px; margin: 4px 0; font-size: 11px }
+    .uw-warn.bad { border-color: #6b2b33; background: #2a1216; color: #ffb0b0 }
+    .uw-pre { background: #050b12; border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 420px; overflow: auto; white-space: pre-wrap; font: 11px/1.5 Consolas, monospace }
+    .uw-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center }
+    .uw-actions input { min-width: 250px }
   </style>
 </head>
 
@@ -2522,6 +2550,12 @@
             <rect x="14" y="14" width="7" height="7" rx="1.5" />
           </svg>
           <span>Overview</span></button>
+        <button data-view="unified">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 5h16M4 12h10M4 19h16" />
+            <circle cx="18" cy="12" r="2" />
+          </svg>
+          <span>War Room</span></button>
         <button data-view="plan">
           <svg viewBox="0 0 24 24">
             <path d="M9 6h11M9 12h11M9 18h11" />
@@ -2611,7 +2645,82 @@
         </div>
       </section>
 
-      <!-- PLAN (intelligence + subtasks) -->
+      <!-- UNIFIED WAR ROOM (v2 state + read-only v1 history) -->
+      <section class="view" id="view-unified">
+        <div class="grid g2">
+          <div class="card">
+            <div class="spread" style="margin-bottom:8px">
+              <h2 style="margin:0">War Room</h2>
+              <button class="btn ghost" onclick="uwLoadRuns()">Refresh</button>
+            </div>
+            <div class="row" style="margin-bottom:8px">
+              <input id="uwSearch" placeholder="filter run id or goal" oninput="uwRenderRunList()">
+              <button class="btn" onclick="uwLoadRuns()">Reload</button>
+            </div>
+            <div id="uwRunList" class="muted">Loading unified runs...</div>
+            <h3 style="margin:14px 0 6px">Run history</h3>
+            <div id="uwHistory" class="muted">No history.</div>
+          </div>
+          <div class="card">
+            <div class="spread" style="margin-bottom:8px">
+              <h2 id="uwGoal" style="margin:0">Select a run</h2>
+              <span id="uwStatus" class="pill">-</span>
+            </div>
+            <div class="row" style="gap:8px;margin-bottom:10px">
+              <span id="uwTier" class="uw-badge e">Tier -</span>
+              <span id="uwPlanner" class="uw-badge p">Planner -</span>
+              <span id="uwPhase" class="muted mono"></span>
+              <span id="uwSource" class="uw-badge">source -</span>
+            </div>
+            <div id="uwTimeline" class="uw-tl"></div>
+            <div id="uwWarnings" style="margin-top:8px"></div>
+            <h3 style="margin:14px 0 6px">Spend panel</h3>
+            <div id="uwSpend" class="muted">No spend data.</div>
+            <h3 style="margin:14px 0 6px">Usage approval</h3>
+            <div id="uwUsage" class="muted">No Usage request.</div>
+            <div class="uw-actions" style="margin-top:10px">
+              <input id="uwToken" type="password" placeholder="run token from prepare output" autocomplete="off">
+              <button class="btn primary" id="uwApprove" onclick="uwAction('usage/approve')">Approve Usage</button>
+              <button class="btn" id="uwPause" onclick="uwAction('control','pause')">Pause</button>
+              <button class="btn" id="uwResume" onclick="uwAction('control','resume')">Resume</button>
+              <button class="btn" id="uwStop" onclick="uwAction('control','stop')">Stop</button>
+              <button class="btn" id="uwAccept" onclick="uwAction('control','accept')">Accept handoff</button>
+            </div>
+            <div id="uwMsg" class="muted" style="margin-top:8px"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:14px">
+          <div class="spread" style="margin-bottom:6px">
+            <h3 style="margin:0">E4 Blackboard - Round 1 / Round 2</h3>
+            <span id="uwMeetingStats" class="muted mono"></span>
+          </div>
+          <div id="uwBlackboard" class="muted">No E4 meeting for this run.</div>
+        </div>
+
+        <div class="card" style="margin-top:14px">
+          <div class="spread" style="margin-bottom:6px">
+            <h3 style="margin:0">Handoff diff + delivery</h3>
+            <span id="uwDiffCap" class="muted mono"></span>
+          </div>
+          <div class="uw-actions">
+            <button class="btn" id="uwDiffBtn" onclick="uwLoadDiff()">Preview handoff diff</button>
+            <button class="btn primary" id="uwMergeBtn" onclick="uwAction('merge')">Merge (explicit)</button>
+            <button class="btn" id="uwRollbackBtn" onclick="uwAction('rollback')">Rollback</button>
+          </div>
+          <div id="uwHandoffInfo" class="muted" style="margin-top:8px"></div>
+          <pre id="uwDiff" class="uw-pre" style="margin-top:10px">Select a handoff run.</pre>
+        </div>
+
+        <div class="card" style="margin-top:14px">
+          <div class="spread" style="margin-bottom:6px">
+            <h3 style="margin:0">Run timeline events</h3>
+            <button class="btn ghost" id="uwMoreBtn" onclick="uwLoadEvents()">Load more</button>
+          </div>
+          <div id="uwEvents" class="muted">No events.</div>
+        </div>
+      </section>
+
       <section class="view" id="view-plan">
         <div class="card">
           <div class="spread" style="margin-bottom:8px">
@@ -2973,6 +3082,7 @@
         section.classList.toggle('active', section.id === 'view-' + view));
       const titles = {
         overview: ['Overview', 'Plan, agents, verify and report'],
+        unified: ['War Room', 'Unified v2 runs, spend, usage, blackboard and delivery'],
         plan: ['Plan', 'Intelligence, subtasks and approval'],
         warroom: ['War room', 'Five agents, one Lead, live state'],
         verify: ['Verify', 'The real machine decides what passes'],
@@ -2998,6 +3108,7 @@
       if (view === 'workspaces') loadWorkspaces();
       if (view === 'quota') renderUsage();
       if (view === 'chat') renderChat();
+      if (view === 'unified') uwLoadRuns(true);
       if (['overview', 'plan'].includes(view)) render();
       if (view === 'overview') ensureWarRun();
     }
@@ -5166,13 +5277,232 @@
       } catch (error) { toast(error.message); }
     }
 
+    /* ---------- Unified War Room ---------- */
+    const uwState = { runs: [], selected: null, detail: null, cursor: null, loading: false };
+    function uwTone(status) {
+      const value = String(status || '');
+      if (['DONE', 'HANDOFF_READY', 'PHASE_COMMITTED'].includes(value)) return 'ok';
+      if (['FAILED', 'QUARANTINED', 'STOPPED', 'BLOCKED'].includes(value)) return 'bad';
+      if (['AWAITING_SIGNOFF', 'AWAITING_USAGE', 'PAUSED', 'RATE_LIMITED'].includes(value)) return 'warn';
+      return '';
+    }
+    function uwRenderRunList() {
+      const box = $('#uwRunList');
+      const needle = ($('#uwSearch').value || '').trim().toLowerCase();
+      const runs = uwState.runs.filter((run) =>
+        !needle || String(run.run_id || '').toLowerCase().includes(needle)
+        || String(run.goal || '').toLowerCase().includes(needle));
+      if (!runs.length) { box.innerHTML = '<span class="muted">No runs yet. Start with: swarm "your goal"</span>'; return; }
+      box.innerHTML = '';
+      for (const run of runs) {
+        const el = document.createElement('div');
+        el.className = 'uw-run' + (uwState.selected === run.run_id ? ' active' : '');
+        el.innerHTML = `<span class="uw-badge ${run.source === 'v1' ? '' : 'e'}">${esc(run.source || 'v2')}</span>
+          <b class="mono">${esc(run.run_id)}</b><span class="grow muted">${esc(String(run.goal || '').slice(0, 70))}</span>
+          ${run.tier ? `<span class="uw-badge e">${esc(run.tier)}</span>` : ''}
+          <span class="pill ${uwTone(run.status) === 'bad' ? 'bad' : uwTone(run.status) === 'ok' ? 'ok' : ''}">${esc(run.status || '?')}</span>`;
+        el.onclick = () => uwSelect(run.run_id);
+        box.appendChild(el);
+      }
+    }
+    function uwRenderHistory(summary) {
+      const box = $('#uwHistory');
+      const rows = uwState.runs.slice(0, 25);
+      if (!rows.length) { box.textContent = 'No history.'; return; }
+      const counts = (summary && summary.counts) || {};
+      const chips = Object.entries(counts).map(([status, count]) =>
+        `<span class="uw-badge">${esc(status)} ${count}</span>`).join(' ');
+      box.innerHTML = `<div style="margin-bottom:6px">${chips || ''}</div>` + rows.map((run) => `
+        <div class="uw-run" onclick="uwSelect('${esc(run.run_id)}')">
+          <span class="mono">${esc(run.run_id)}</span><span class="grow muted">${esc(run.updated_at || '')}</span>
+          <span class="uw-badge">${esc(run.source || 'v2')}</span><span class="pill">${esc(run.status || '?')}</span>
+        </div>`).join('');
+    }
+    async function uwLoadRuns(keepSelection = false) {
+      if (uwState.loading) return;
+      uwState.loading = true;
+      try {
+        const data = await api('/api/unified/runs?include_v1=1');
+        uwState.runs = data.runs || [];
+        if (!keepSelection || !uwState.selected) {
+          const first = uwState.runs[0];
+          uwState.selected = first ? first.run_id : null;
+        }
+        uwRenderRunList();
+        uwRenderHistory(data.summary || {});
+        if (uwState.selected) await uwSelect(uwState.selected, true);
+      } catch (error) {
+        $('#uwRunList').innerHTML = `<span class="bad">${esc(error.message)}</span>`;
+      } finally {
+        uwState.loading = false;
+      }
+    }
+    async function uwSelect(runId, silent = false) {
+      if (!runId) return;
+      uwState.selected = runId;
+      uwRenderRunList();
+      try {
+        const [detail, events] = await Promise.all([
+          api('/api/unified/runs/' + encodeURIComponent(runId)),
+          api('/api/unified/runs/' + encodeURIComponent(runId) + '/events?limit=50')
+        ]);
+        uwState.detail = detail;
+        uwState.cursor = events.next_cursor;
+        uwRenderDetail(detail);
+        uwRenderEvents(events.items || [], false);
+      } catch (error) {
+        if (!silent) $('#uwMsg').innerHTML = `<span class="bad">${esc(error.message)}</span>`;
+      }
+    }
+    function uwRenderDetail(data) {
+      $('#uwGoal').textContent = data.goal || data.run_id || 'Run';
+      $('#uwStatus').textContent = data.status || '?';
+      $('#uwStatus').className = 'pill ' + uwTone(data.status);
+      $('#uwTier').textContent = 'Tier ' + (data.tier || '-');
+      $('#uwTier').className = 'uw-badge ' + (data.tier ? 'e' : '');
+      $('#uwPlanner').textContent = 'Planner ' + (data.planner || '-');
+      $('#uwPlanner').className = 'uw-badge ' + (data.planner ? 'p' : '');
+      $('#uwPhase').textContent = data.current_phase ? ('phase ' + data.current_phase) : '';
+      $('#uwSource').textContent = 'source ' + (data.source || 'v2');
+      const steps = data.timeline || [];
+      $('#uwTimeline').innerHTML = steps.map((step) => `
+        <div class="uw-step ${esc(step.state || 'pending')}">
+          <b>${esc(step.label || step.id)}</b><span>${esc(step.state || 'pending')}</span>
+        </div>`).join('');
+      const warnings = data.warnings || [];
+      $('#uwWarnings').innerHTML = warnings.length
+        ? warnings.map((text) => `<div class="uw-warn ${/exceed|missing|differs|expired|invalid|no plan/i.test(text) ? 'bad' : ''}">${esc(text)}</div>`).join('')
+        : '<span class="muted" style="font-size:11px">No warnings.</span>';
+      uwRenderSpend(data.spend || {});
+      uwRenderUsage(data.usage || {}, data.can_control || {});
+      const handoff = data.handoff || {};
+      $('#uwHandoffInfo').textContent = handoff.ready
+        ? `patch ${handoff.patch_bytes || 0} bytes${handoff.merged ? ' - merged ' + (handoff.merge?.merge_sha || '') : ''}${handoff.rolled_back ? ' - rolled back' : ''}`
+        : 'No handoff patch for this run.';
+      $('#uwMergeBtn').disabled = !(data.can_control || {}).merge;
+      $('#uwRollbackBtn').disabled = !(data.can_control || {}).rollback;
+      $('#uwDiffBtn').disabled = !handoff.ready;
+      uwRenderBlackboard(data.blackboard || {});
+    }
+    function uwRenderSpend(spend) {
+      const fmt = (value) => value === undefined || value === null ? '-' : String(value);
+      $('#uwSpend').innerHTML = `<table class="uw-table">
+        <thead><tr><th>Metric</th><th>Estimated</th><th>Actual / used</th><th>Remaining</th></tr></thead>
+        <tbody>
+          <tr><td>Calls / requests</td><td>${fmt(spend.estimated_requests)}</td><td>${fmt(spend.used_requests)} (reserved ${fmt(spend.reserved_requests)})</td><td>${fmt(spend.remaining_requests)}</td></tr>
+          <tr><td>Cost (USD)</td><td>${fmt(spend.estimated_cost_usd)}</td><td>${fmt(spend.used_cost_usd)} (reserved ${fmt(spend.reserved_cost_usd)})</td><td>${fmt(spend.remaining_cost_usd)}</td></tr>
+          <tr><td>Tokens</td><td>${fmt(spend.estimated_tokens)}</td><td>${fmt(spend.used_tokens)}</td><td>${fmt(spend.remaining_tokens)}</td></tr>
+        </tbody></table>`;
+    }
+    function uwRenderUsage(usage, caps) {
+      const reasons = (usage.reasons || []).map((item) => `<span class="uw-badge">${esc(item)}</span>`).join(' ');
+      const estimate = usage.estimate || {};
+      $('#uwUsage').innerHTML = `<div class="row" style="gap:8px;flex-wrap:wrap">
+        <span class="uw-badge ${usage.status === 'approved' ? 'ok' : usage.status === 'invalid' || usage.status === 'expired' ? 'bad' : ''}">${esc(usage.status || 'waiting')}</span>
+        ${reasons}
+        <span class="muted">${usage.approved_by ? 'by ' + esc(usage.approved_by) : ''}</span>
+        <span class="muted mono">${usage.plan_hash ? 'plan ' + esc(String(usage.plan_hash).slice(0, 12)) : ''}</span>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:4px">
+        estimate: ${esc(String(estimate.requests ?? '-'))} calls / $${esc(String(estimate.cost_usd ?? '-'))} / ${esc(String(estimate.wall_seconds ?? '-'))}s
+      </div>
+      ${usage.error ? `<div class="uw-warn bad">${esc(usage.error)}</div>` : ''}`;
+      $('#uwApprove').disabled = !caps.usage_approve;
+      $('#uwPause').disabled = !caps.pause;
+      $('#uwResume').disabled = !caps.resume;
+      $('#uwStop').disabled = !caps.stop;
+      $('#uwAccept').disabled = !caps.accept;
+    }
+    function uwRenderBlackboard(blackboard) {
+      const rounds = blackboard.rounds || [];
+      const stats = blackboard.stats || {};
+      $('#uwMeetingStats').textContent = stats.messages
+        ? `${stats.messages} messages / rounds ${(stats.rounds || []).join(', ')} / verdict ${stats.verdict || '-'}`
+        : '';
+      if (!rounds.length) {
+        $('#uwBlackboard').innerHTML = '<span class="muted">No E4 meeting for this run.</span>';
+        return;
+      }
+      $('#uwBlackboard').innerHTML = rounds.map((round) => `
+        <div style="margin-bottom:10px">
+          <div class="row"><b>Round ${esc(round.round)}</b><span class="muted">${(round.messages || []).length} messages</span></div>
+          ${(round.messages || []).map((message) => `
+            <div class="uw-msg">
+              <div class="head"><b>${esc(message.sender || '?')}</b><span>-> ${esc((message.recipients || []).join(', '))}</span>
+                <span class="uw-badge">${esc(message.kind || 'message')}</span><span>${esc(message.timestamp || '')}</span></div>
+              <div class="body">${esc(message.body || '')}</div>
+            </div>`).join('')}
+          ${round.decision ? `<div class="uw-warn ${round.decision.verdict === 'reject' ? 'bad' : ''}">Round decision: ${esc(round.decision.verdict || '-')} ${esc((round.decision.reasons || []).join('; '))}</div>` : ''}
+        </div>`).join('');
+    }
+    function uwRenderEvents(items, append) {
+      const box = $('#uwEvents');
+      if (!append || !box.querySelector('.uw-event')) box.innerHTML = '';
+      if (!items.length) {
+        if (!append) box.innerHTML = '<span class="muted">No events.</span>';
+        $('#uwMoreBtn').disabled = true;
+        return;
+      }
+      for (const event of items) {
+        const row = document.createElement('div');
+        row.className = 'uw-msg uw-event';
+        const data = event.data || {};
+        row.innerHTML = `<div class="head"><b>${esc(event.event_type || 'event')}</b>
+          <span class="uw-badge">${esc(event.status || 'info')}</span>
+          <span>${esc(event.timestamp || '')}</span><span class="mono">${esc(event.phase_id || '')}</span></div>
+          <div class="body">${esc(JSON.stringify(data).slice(0, 1200))}</div>`;
+        box.appendChild(row);
+      }
+      $('#uwMoreBtn').disabled = !uwState.cursor;
+    }
+    async function uwLoadEvents() {
+      if (!uwState.selected || !uwState.cursor) return;
+      try {
+        const data = await api('/api/unified/runs/' + encodeURIComponent(uwState.selected)
+          + '/events?limit=50&cursor=' + encodeURIComponent(uwState.cursor));
+        uwState.cursor = data.next_cursor;
+        uwRenderEvents(data.items || [], true);
+      } catch (error) { $('#uwMsg').innerHTML = `<span class="bad">${esc(error.message)}</span>`; }
+    }
+    async function uwLoadDiff() {
+      if (!uwState.selected) return;
+      const box = $('#uwDiff');
+      box.textContent = 'Loading diff...';
+      try {
+        const data = await api('/api/unified/runs/' + encodeURIComponent(uwState.selected) + '/diff');
+        box.textContent = data.diff || '(empty patch)';
+        $('#uwDiffCap').textContent = `${data.returned_bytes || 0}/${data.cap_bytes || 0} bytes${data.truncated ? ' (truncated)' : ''}`;
+      } catch (error) { box.textContent = 'Error: ' + error.message; }
+    }
+    async function uwAction(kind, action) {
+      if (!uwState.selected) { toast('Select a run first'); return; }
+      const token = $('#uwToken').value || '';
+      if (!token) { toast('Run token is required for write actions'); return; }
+      if ((kind === 'merge' || kind === 'rollback') && !confirm(kind + ' is explicit. Continue?')) return;
+      const body = { run_id: uwState.selected, token };
+      if (kind === 'control') body.action = action;
+      if (kind === 'merge') body.dry_run = false;
+      $('#uwMsg').textContent = kind + '...';
+      try {
+        const data = await api('/api/unified/' + kind, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        $('#uwMsg').innerHTML = `<span class="ok">${esc(kind)} -> ${esc(data.status || data.merge_sha || 'ok')}</span>`;
+        await uwSelect(uwState.selected, true);
+        await uwLoadRuns(true);
+      } catch (error) {
+        $('#uwMsg').innerHTML = `<span class="bad">${esc(error.message)}</span>`;
+      }
+    }
+
     /* ---------- nav ---------- */
     document.querySelectorAll('.nav button').forEach((button) =>
       button.addEventListener('click', () => switchView(button.dataset.view)));
     $('#goal').addEventListener('keydown', (event) => { if (event.key === 'Enter') planGoal(); });
     $('#opinion').addEventListener('keydown', (event) => { if (event.key === 'Enter') sendOpinion(); });
 
-    const VIEWS = ['overview', 'plan', 'chat', 'workspaces', 'quota', 'drafts', 'settings'];
+    const VIEWS = ['overview', 'unified', 'plan', 'chat', 'workspaces', 'quota', 'drafts', 'settings'];
     const STAGE_TABS = { warroom: 'warroom', verify: 'verify', report: 'report', done: 'report' };
     const initialView = (location.hash || '#overview').slice(1);
     const runParam = new URLSearchParams(location.search).get('run');
@@ -5191,6 +5521,7 @@
     refreshAll();
     setInterval(() => {
       if (!document.hidden && !state.replayTimer) refreshAll();
+      if (!document.hidden && state.view === 'unified') uwLoadRuns(true);
     }, 3000);
   </script>
 </body>
