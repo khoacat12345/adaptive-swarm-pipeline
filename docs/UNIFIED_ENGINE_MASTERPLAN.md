@@ -1,9 +1,9 @@
 # Unified Engine Master Plan — Zero-User / V2-Only / V3 Release
 
-> Revision: **2.2 — tier/planner/CLI hardening before the War Room**
-> Status: **in progress**; Phase 1 and the `swarm` CLI are implemented and
-> hardened, the unified War Room and release gates are still open.
-> Last updated: 2026-11-08
+> Revision: **2.3 — unified contracts/orchestrator and P1–P3 councils**
+> Status: **in progress**; Phases 1 and 2 are implemented and hardened, the
+> unified War Room and release gates are still open.
+> Last updated: 2026-11-09
 >
 > Companion audit: [`V1_FEATURE_PARITY.md`](V1_FEATURE_PARITY.md)
 >
@@ -102,7 +102,7 @@ implementation shapes** while keeping or improving the underlying capability.
 | ~~No planner adapter~~ | **added** `v2/planner_adapter.py`; 38/38 adapter checks | goal → v2 plan |
 | ~~No terminal `swarm`~~ | **added** `v2/swarm_cli.py` + wrappers; 44/44 CLI checks | one-command CLI |
 | ~~Runtime tier override bypassed Usage~~ | **closed** `assert_tier_matches_signoff` | tier must match the signed plan |
-| P2/P3 planner council not executed | adapter proposes the level; only one deterministic proposal | execute 2/3 proposals |
+| ~~P2/P3 planner council not executed~~ | **closed 2026-11-09**; `planner_adapter.run_planning_council` executes 2 P2 / 3 P3 seats with optional model backends | P1–P3 are real and tested |
 | No unified War Room | v1 `/` and v2 `/v2` are separate; default 8080 | one dashboard at 8501 |
 | No full v1-vs-v2 parity | existing parity is E3/E4-centric | fixture-level parity suite |
 | Status/history split | v1 ledger vs v2 per-run events | one read-only history |
@@ -127,8 +127,9 @@ implementation shapes** while keeping or improving the underlying capability.
   does doctor → plan → prepare → submit → Usage gate → signoff → execute →
   verify → handoff. Evidence: `python .agents/tests/test_swarm_cli.py`
   (44/44).
-- Still open: P2/P3 councils, the separate unified orchestrator/contracts,
-  the 8501 War Room, fixture-level parity, live free-model smoke and soak.
+- Still open at that point (closed 2026-11-09: P2/P3 councils and the separate
+  unified orchestrator/contracts): the 8501 War Room, fixture-level parity,
+  live free-model smoke and soak.
 
 **2026-11-08 — Hardening pass on the same slice (no new test files).**
 
@@ -149,6 +150,38 @@ implementation shapes** while keeping or improving the underlying capability.
 - Evidence unchanged and re-run green: `test_v2_tiers.py` 40/40,
   `test_planner_adapter.py` 38/38, `test_swarm_cli.py` 44/44, `test_v2_m3.py`
   25/25. Remaining gaps are the same as listed above.
+
+**2026-11-09 — Phase 2 architecture is complete (contracts, orchestrator,
+councils, order shim).**
+
+- Contracts: `.agents/unified/contracts.py` defines `UnifiedRequest`,
+  `UnifiedResult`, `PreflightStatus`, `PlanDecision` and `RunProgress` as
+  dependency-free dataclasses with JSON-safe `as_dict()` output. The result
+  shape deliberately has **no** merge action. Evidence:
+  `python .agents/tests/test_unified_contracts.py` (40/40).
+- Orchestrator: `.agents/unified/orchestrator.py` now owns the whole pipeline
+  (preflight → normalize/classify → tier/planner and council → plan validation →
+  v2 prepare → Usage gate → signoff/execute → verify/checkpoint/handoff →
+  `UnifiedResult`). `swarm_cli.py` is a parser/printer around it. Preflight is
+  recorded before any planner or model seat; a required Usage decision returns
+  `AWAITING_USAGE` before a seat exists; the orchestrator has no merge path.
+  Evidence: `python .agents/tests/test_unified_orchestrator.py` (63/63),
+  including the C1 invariants.
+- Planner councils: `planner_adapter.run_planning_council` executes one P1 seat,
+  two P2 seats (proposal + critique) or three P3 seats. The deterministic path
+  keeps the selected plan hash stable; `--planner-model` seats are executed
+  through `v2.planning.OpenCodePlanner`, and every proposal still passes
+  `validate_plan`. Evidence: `test_planner_adapter.py` 38/38 and the council
+  cases in `test_unified_orchestrator.py`.
+- v1 order shim: `planner_adapter.from_order` maps a validated v1
+  `order.json`/Work Order to a v2 plan without re-implementing recipe logic;
+  `swarm run --order order.json` and `swarm planner --order order.json` use it.
+  Evidence: `test_unified_orchestrator.py` order cases and
+  `test_swarm_cli.py` 44/44.
+- Regression set re-run green: contracts 40/40, orchestrator 63/63, adapter
+  38/38, swarm CLI 44/44, tiers 40/40, v2 M3 25/25.
+- Still open: unified War Room at 8501, fixture-level v1-vs-v2 parity, live
+  free-model smoke, soak, and the advisory-only `clarify.py` wiring.
 
 ---
 
@@ -196,6 +229,8 @@ swarm "task" --preset strict
 swarm "task" --tier E2
 swarm "task" --merge        # explicit, never default
 swarm "task" --dry-run
+swarm "task" --council --planner-model <provider/model>
+swarm run --order order.json
 swarm status <run_id>
 swarm doctor
 ```
@@ -420,9 +455,21 @@ Rules:
 - On planning failure, do not create a worktree/model call.
 - Preserve the plan as a reviewable artifact.
 
+Council execution (implemented 2026-11-09): `run_planning_council` executes one
+P1 seat, two P2 seats (proposal + critique) or three P3 seats. The deterministic
+path produces one reviewable proposal per seat and keeps the selected plan hash
+stable (council metadata lives in `_meta`, which is excluded from the hash).
+When `--planner-model` is supplied, each seat is executed through
+`v2.planning.OpenCodePlanner` and every model proposal must still pass
+`validate_plan` before it can be selected.
+
+v1 order shim (implemented 2026-11-09): `from_order` accepts a validated v1
+`order.json`/Work Order and maps it to the same validated v2 plan path; no v1
+execution logic is re-implemented.
+
 #### 2.2 Unified orchestrator
 
-Create:
+Implemented 2026-11-09:
 
 ```text
 .agents/unified/orchestrator.py
@@ -452,6 +499,11 @@ It must not:
 - skip Usage gate;
 - skip verify;
 - call a model before plan/preflight.
+
+The CLI is now a thin parser/printer around `UnifiedOrchestrator`. The
+orchestrator records preflight before any planner call, returns
+`AWAITING_USAGE` before a seat is built when approval is required, and has no
+merge code path. `test_unified_orchestrator.py` pins these invariants.
 
 #### 2.3 `swarm` CLI
 
@@ -502,10 +554,10 @@ worktree, handoff paths and next action.
 #### 2.5 Tests
 
 ```text
-test_unified_contracts.py
-test_unified_planner.py
-test_unified_orchestrator.py
-test_swarm_cli.py
+test_unified_contracts.py      # implemented 2026-11-09, 40 checks
+test_unified_planner.py        # covered by test_planner_adapter.py + council cases
+test_unified_orchestrator.py   # implemented 2026-11-09, 63 checks
+test_swarm_cli.py              # implemented 2026-11-08, 44 checks
 ```
 
 Cases:
@@ -517,7 +569,10 @@ Cases:
 - non-TTY usage message;
 - explicit merge only;
 - main unchanged before merge;
-- exit codes.
+- exit codes;
+- preflight precedes planner/model calls;
+- P2/P3 council seats validate and select deterministically;
+- v1 `order.json` shim through the adapter and the CLI.
 
 #### Exit gate
 
@@ -526,8 +581,9 @@ Cases:
 [x] no automatic merge
 [x] plan and worktree artifacts inspectable
 [x] E1/E2 work through the CLI
-[ ] separate unified orchestrator/contracts modules
-[ ] P2/P3 council execution
+[x] separate unified orchestrator/contracts modules
+[x] P2/P3 council execution
+[x] v1 order.json shim
 ```
 
 ---
@@ -802,6 +858,9 @@ Remove “v2 is opt-in” wording only at this phase.
 |---|---|---|---|
 | Tier profile | `test_v2_tiers` (done) | fake execution (done) | real free-model smoke |
 | Planner | `test_planner_adapter` (done) | fake planner (done) | goal → HANDOFF_READY (CLI done) |
+| Council P1–P3 | `test_planner_adapter` + adapter council cases | deterministic 2/3 seats; injected model callables | `--planner-model` live council |
+| Unified contracts | `test_unified_contracts` (done) | CLI/orchestrator payload equality | War Room consumes `UnifiedResult` |
+| Orchestrator | `test_unified_orchestrator` (done) | fake seats + real worktree | live free-model smoke |
 | Usage | policy tests | runner | dashboard approval |
 | Worktree | isolation | execute | kill/recover |
 | Merge | path validation | temp repo | v1-vs-v2 parity |
@@ -884,7 +943,8 @@ Each commit:
 
 - [ ] `swarm "task"` reaches `HANDOFF_READY`.
 - [ ] E1–E4 are real and tested.
-- [ ] Planner P1–P3 works from a goal.
+- [x] Planner P1–P3 works from a goal (deterministic council; model seats opt-in).
+- [x] Unified contracts and orchestrator own the CLI pipeline (no auto-merge).
 - [ ] Main stays unchanged until explicit merge.
 - [ ] Merge/rollback work from CLI and War Room.
 - [ ] One dashboard at 8501.

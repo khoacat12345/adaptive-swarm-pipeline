@@ -2,7 +2,7 @@
 
 > Status: **inventory / decision gate**, not a promise that every implementation
 > file will be copied.
-> Last updated: 2026-11-08
+> Last updated: 2026-11-09
 >
 > Purpose: make sure the zero-user migration to a v2-only product does **not**
 > silently lose capabilities that v1 already provides.
@@ -50,11 +50,11 @@ written approval.
 | General goal → plan | `planner.py`, `clarify.py` | `v2/planner_adapter.py` (goal or v1 plan → validated v2 plan) | **PORTED** | `test_planner_adapter.py`; clarify still advisory |
 | Plan validation | `plan_validator.py`, `inspect_plan.py` | v2 `plan.py` validation + adapter summary | **REPLACED** | v2 plan validator + human-readable summary |
 | Four execution tiers | `tier_policy.py`, v1 job/recipe | v2 E1/E2/E3/E4 runtime; E1 opt-in and sensitive-path gate | **PORTED** | E1–E4 runtime + `test_v2_tiers.py` |
-| Planner levels P1–P3 | `planner.generate_council` | Tier policy proposes P1/P2/P3; only P1 plan generation is wired | **PORT_REQUIRED** | P2/P3 council execution still missing |
+| Planner levels P1–P3 | `planner.generate_council` | `v2/planner_adapter.run_planning_council`: one P1 seat, two P2 seats (proposal + critique), three P3 seats; optional model backends | **PORTED** | `test_planner_adapter.py`; `test_unified_orchestrator.py` council cases |
 | Usage/spend approval | `approval_policy.py`, `usage_request.py`, v1 dashboard | v2 approval + `/v2` page | **REPLACED** | Unified War Room approval; hash-bound |
 | Budget/quota | `quota.py`, v1 recipe caps | v2 budget/actual reconcile | **REPLACED** | v2 budget remains authoritative |
 | Model routing/fallback | `router.py`, `fallback.py`, `model_selector` | v2 `models.py`/adapters; fallback not identical | **PORT_REQUIRED** | Model routes + fallback behavior tests |
-| Provider/catalog preflight | `preflight.py`, `scout.py` | `doctor.py` environment; live model preflight not unified | **PORT_REQUIRED** | doctor + preflight before expensive run |
+| Provider/catalog preflight | `preflight.py`, `scout.py` | `unified/orchestrator.py` runs `doctor` before planning/model calls; live `preflight.check_live` route checks are not yet unified | **PARTIAL** | preflight gate exists; live route cross-check still open |
 | Git worktree isolation | not in v1 | v2 isolation | **PORTED** | Keep v2 as stronger behavior |
 | Safe writer/transactions | `safe_writer.py` | used by v2 execution | **SHARED** | No bypass; regression suite |
 | Secret scanning | `secret_scan.py` | used in workers/v2 | **SHARED** | Keep scanning all prompts/targets |
@@ -84,6 +84,10 @@ written approval.
 
 ### 1.1 Evidence for the current port (2026-11-08)
 
+> Validation snapshot (2026-11-09): contracts 40/40, orchestrator 63/63,
+> planner adapter 38/38, swarm CLI 44/44, v2 tiers 40/40, v2 M3 25/25. All
+> commands exit 0; no existing test file was edited.
+
 | Capability | Code | Deterministic evidence |
 |---|---|---|
 | E1 low-risk execution | `v2/execution.py` `resolve_tier_profile` | `python .agents/tests/test_v2_tiers.py` |
@@ -91,6 +95,10 @@ written approval.
 | E3 four-reviewer wave | unchanged default for old plans | `test_v2_tiers.py`, `test_v2_parity.py` |
 | E4 blackboard meeting | `v2/execution.py` meeting path | `test_v2_tiers.py`, `test_v2_parity.py` |
 | Goal → v2 plan | `v2/planner_adapter.py` | `python .agents/tests/test_planner_adapter.py` |
+| P1–P3 planning council | `v2/planner_adapter.run_planning_council` | `test_planner_adapter.py`, `test_unified_orchestrator.py` |
+| v1 `order.json` shim | `v2/planner_adapter.from_order`, `swarm run --order` | `test_unified_orchestrator.py` order cases |
+| Unified contracts | `unified/contracts.py` | `python .agents/tests/test_unified_contracts.py` (40 checks) |
+| Unified orchestrator | `unified/orchestrator.py` (CLI delegates) | `python .agents/tests/test_unified_orchestrator.py` (63 checks) |
 | One-command CLI | `v2/swarm_cli.py`, `swarm.cmd`, `swarm.sh` | `python .agents/tests/test_swarm_cli.py` |
 
 **Hardening added after the first port (same date):**
@@ -107,12 +115,14 @@ written approval.
 | CLI budget caps | `swarm --max-cost/--max-requests/--max-wall-seconds` | Caps lower the plan envelope *before* the Usage decision; they never increase it, and phase allocations are down-scaled to keep validation sound. |
 | CLI version surface | `swarm --version` (2.2.0) | Wrappers and operators can identify the installed entrypoint. |
 
-**Honest gaps still open:** P2/P3 planner councils are proposed but not executed;
-the unified War Room at 8501 and fixture-level v1-vs-v2 parity are not implemented
-by this slice; live free-model smoke and soak evidence still need a real run;
-`clarify.py` ambiguity checks are still advisory; and the CLI caps are explicit
-operator flags, not a model-driven cost forecast.
-`swarm` defaults to a guarded worktree and never auto-merges.
+**Honest gaps still open:** the unified War Room at 8501 and fixture-level
+v1-vs-v2 parity are not implemented by this slice; live free-model smoke and
+soak evidence still need a real run; `clarify.py` ambiguity checks are still
+advisory; the unified preflight uses `doctor` but the live route catalog check
+(`preflight.check_live`) is not wired into the orchestrator yet; and the CLI
+caps are explicit operator flags, not a model-driven cost forecast.
+`swarm` defaults to a guarded worktree and never auto-merges; the orchestrator
+has no merge path at all.
 
 ---
 
@@ -131,7 +141,7 @@ some are tooling or tests.
 | `permissions.py` | role/path permissions | shared | SHARED | keep |
 | `system_bot.py` | guarded command execution | shared by safe_writer | SHARED | keep |
 | `approval_policy.py` | Usage gate | v2 runner uses | SHARED | keep |
-| `tier_policy.py` | E1–E4 / P1–P3 policy | v2 execution resolves E1–E4; adapter proposes P1–P3 | SHARED | P2/P3 council execution remains open |
+| `tier_policy.py` | E1–E4 / P1–P3 policy | v2 execution resolves E1–E4; adapter executes P1–P3 councils | SHARED | keep tests |
 | `capability_registry.py` | capability policy matrix | v2 capability runtime | SHARED | expose in War Room |
 | `model_registry.py` | normalized model metadata | v2 models/doctor | SHARED | keep |
 | `context_guard.py` | context fitting | workers/v2 prompts | SHARED | keep |
@@ -142,7 +152,7 @@ some are tooling or tests.
 
 | V1 module | Role | V2 equivalent | Status | Action |
 |---|---|---|---|---|
-| `planner.py` | goal → plan, council | `v2/planner_adapter.py` (goal/v1 plan) | PORTED | P2/P3 council still open |
+| `planner.py` | goal → plan, council | `v2/planner_adapter.py` (goal/v1 plan/order + P1–P3 council) | PORTED | keep tests |
 | `clarify.py` | ambiguity checks | not wired | PORT_REQUIRED | call before plan |
 | `classifier.py` | task scope/level | tier/risk heuristics in adapter | PARTIAL | full classifier mapping |
 | `plan_validator.py` | v1 plan validation | v2 `plan.py` | REPLACED | map/validate v2 plan |
@@ -155,8 +165,8 @@ some are tooling or tests.
 
 | V1 module | Role | V2 equivalent | Status | Action |
 |---|---|---|---|---|
-| `job.py` | plan/job orchestration | `v2/swarm_cli.py` + v2 runner | REPLACED | `swarm` is the entrypoint; do not port internals |
-| `recipe_c.py` | single order execution | v2 ExecutionEngine (E1/E2 quick path) | REPLACED | compatibility only as test oracle |
+| `job.py` | plan/job orchestration | `unified/orchestrator.py` + v2 runner | REPLACED | `swarm` is the entrypoint; do not port internals |
+| `recipe_c.py` | single order execution | v2 ExecutionEngine (E1/E2 quick path) + `from_order` shim | REPLACED | order.json maps to a v2 plan; keep executor as test oracle |
 | `fallback.py` | model fallback chain | v2 models/adapters | PORT_REQUIRED | preserve fallback semantics |
 | `router.py` | work-type/provider routing | v2 models + adapters | PORT_REQUIRED | unify routes |
 | `quota.py` | legacy quota tracker | v2 budget | REPLACED | read-only cost UI only if needed |
@@ -189,6 +199,15 @@ some are tooling or tests.
 | `preflight.py` | live route gate | doctor + model checks | PORT_REQUIRED | unify preflight |
 | `sync_skill.py` | OpenCode skill sync | v2 docs | SHARED | keep |
 
+### Unified additions (no v1 counterpart)
+
+| Module | Role | Status | Evidence |
+|---|---|---|---|
+| `.agents/unified/contracts.py` | `UnifiedRequest`, `UnifiedResult`, `PreflightStatus`, `PlanDecision`, `RunProgress` | NEW / PORTED CONTRACT | `test_unified_contracts.py` 40/40 |
+| `.agents/unified/orchestrator.py` | preflight → plan/council → Usage → execute → verify/checkpoint/handoff | NEW / REPLACES CLI INTERNALS | `test_unified_orchestrator.py` 63/63 |
+| `v2/planner_adapter.run_planning_council` | P1/P2/P3 council with deterministic and model seats | NEW | `test_planner_adapter.py`, orchestrator council cases |
+| `v2/planner_adapter.from_order` | v1 `order.json` → validated v2 plan | NEW / COMPATIBILITY SHIM | orchestrator order cases |
+
 ### Tests / acceptance references
 
 | V1 module | Role | V2 status | Action |
@@ -213,7 +232,7 @@ capabilities map as follows:
 |---|---|---|
 | `python .agents/job.py --plan plan.json` | `swarm run --plan plan.json` | **IMPLEMENTED**; v2 worktree, explicit merge |
 | `python .agents/job.py --goal ...` (if used) | `swarm "goal"` | **IMPLEMENTED**; deterministic planner adapter |
-| `python .agents/recipe_c.py --order order.json` | `swarm run --plan <adapted order>` | partial; order→v1 plan shim not built |
+| `python .agents/recipe_c.py --order order.json` | `swarm run --order order.json` | **IMPLEMENTED**; `from_order` shim maps the validated order to a v2 plan, worktree and explicit merge |
 | `python .agents/planner.py --goal ...` | `swarm planner --goal ...` | **IMPLEMENTED**; plan artifact remains inspectable |
 | `python .agents/dashboard.py` | `python .agents/dashboard.py` (War Room) | **OPEN**; 8501 unification not in this slice |
 | `python .agents/replay.py --last` | `swarm status --last` / War Room history | status works; unified replay still open |
@@ -228,6 +247,9 @@ arguments. `swarm` includes `doctor`, `planner`, `run`, `status`, `handoff` and
 `--max-cost`/`--max-requests`/`--max-wall-seconds` to lower the plan envelope
 before that decision. Runtime `--tier` must match the signed plan tier; any
 change requires re-planning so the Usage estimate is re-approved.
+`swarm run --order order.json` uses the v1 order shim, and
+`--council`/`--planner-model` execute the P2/P3 planning seats. The terminal
+CLI delegates the whole pipeline to `.agents/unified/orchestrator.py`.
 
 `job.py` and `recipe_c.py` remain in the v1.0.5 tag and in the test oracle, but
 are not the new-user interface.
@@ -280,6 +302,8 @@ Before v3:
 - [x] `swarm "task"` reaches `HANDOFF_READY` with fake seats.
 - [x] `swarm` never writes main before explicit `merge`.
 - [x] CLI budget caps lower the envelope before the Usage decision.
+- [x] P2/P3 planning councils execute and validate before selection.
+- [x] v1 `order.json` maps to a v2 plan without re-implementing recipe logic.
 - [ ] War Room shows v2 run/spend/usage/handoff/diff (still two surfaces).
 - [x] Crash/resume and merge/rollback pass (existing v2 suites).
 - [ ] Free-model live smoke pass (not run in this deterministic slice).
@@ -292,7 +316,8 @@ Before v3:
    `test_v2_tiers.py`, `test_planner_adapter.py`, `test_swarm_cli.py`.
    Follow-up hardened the signed-tier guard, E1 sensitive-path classes, v1
    declared scopes, new-file goals and CLI budget caps.
-2. Wire P2/P3 planner councils; the adapter currently proposes the level only.
+2. ~~Wire P2/P3 planner councils.~~ Done in `run_planning_council`; optional
+   model seats are available through `--planner-model`.
 3. Unify the War Room at 8501 and add replay/spend projections.
 4. Run fixture-level v1-vs-v2 parity, free-model live smoke and soak.
 5. Review `DROP_CANDIDATE` rows with the owner before deleting v1 modules.
