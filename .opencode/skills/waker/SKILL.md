@@ -59,6 +59,21 @@ waker start --detach --repo . --tasks .waker/tasks.yaml \
 
 `waker stop --repo .`
 
+## Blind evaluation (Kaggle mode)
+
+Khi user nói "chấm mù", "hidden test", "Kaggle mode":
+
+1. Viết hidden tests ra file riêng, **không** đặt trong repo làm việc.
+2. `waker vault init --repo .` → lấy `vault_id`.
+3. `waker vault add --vault <id> --suite <name> --task T1 <file>`
+4. `waker vault validate --vault <id> --repo .` — nếu FAIL, sửa đề rồi chạy lại;
+   **không** start khi đề chưa validate.
+5. Start: `waker start --detach --vault <id> --tasks .waker/tasks.yaml ...`
+6. Khi báo tiến độ: chỉ đọc `hidden x/y` trong `waker status --format md`.
+   Không đoán, không in tên test, không in source.
+7. **Tuyệt đối** không dán nội dung hidden test vào chat của worker;
+   không đưa vault path vào prompt.
+
 ## Quy tắc cứng
 
 - Lint còn ERROR thì **không được start** và **không được hỏi "OK để chạy"**.
