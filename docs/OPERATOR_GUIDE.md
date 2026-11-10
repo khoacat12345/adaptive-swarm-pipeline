@@ -1,8 +1,10 @@
-# Operator Guide — Usage Approval
+# Operator Guide — v3 Unified Engine
 
-> P0-06: plan approval is no longer the default human gate.
-> A quick task may run automatically. Only an expensive/long run asks for
-> **Usage approval** in the dashboard's Usage tab.
+> v3.0.0 uses `swarm "task"` as the single operator entrypoint. Plan approval is
+> no longer the default human gate. A quick task may run automatically. Only an
+> expensive/long run asks for **Usage approval** in the War Room Usage tab.
+> Execution stays in a worktree; main changes only through explicit
+> `swarm merge`.
 
 ## 1. What approve means now
 
@@ -86,75 +88,60 @@ task should invoke the planner. See
 ## 3. Quick task
 
 ```powershell
-python .agents\planner.py --goal "fix the failing add test" --out .agents\tmp\auto_plan.json
-python .agents\job.py --plan .agents\tmp\auto_plan.json
+.\swarm.cmd "fix the failing add test"   # POSIX: ./swarm.sh "fix the failing add test"
 ```
 
-If the plan is below threshold, it starts without a plan-approval click. Verify,
-reviewer and budget caps still run.
+Add the repository root to `PATH` to use the bare `swarm` command.
 
-Direct Work Order:
+The unified orchestrator runs doctor → plan → Usage decision → isolated
+worktree → tier-aware execution → verify → checkpoint → handoff. A quick task
+below the Usage threshold does not ask for a plan approval; verify, reviewer and
+budget caps still run.
+
+Legacy v1 direct commands remain available only as a compatibility/test oracle:
 
 ```powershell
 python .agents\recipe_c.py --order order.json
 ```
 
-## 4. Expensive task
-
-### Job plan
+## 4. Expensive task / tiers
 
 ```powershell
-python .agents\job.py --plan plan.json --reviewer wave --wait --open
+# E3 four-reviewer wave
+.\swarm.cmd "review and fix the authentication flow" --tier E3
+
+# explicit Usage approval when required
+.\swarm.cmd "large refactor" --tier E3 --yes
 ```
 
-This opens the dashboard and waits for Usage approval. The Usage card shows:
+`swarm` shows the plan/estimate and stops at `AWAITING_USAGE` when the policy
+requires approval. The War Room Usage card shows plan/subtask count,
+reviewer/coder mode, estimated requests/cost/wall time, threshold reasons and
+budget controls. Approval binds to the exact plan + estimate.
 
-- plan and subtask count
-- reviewer/coder mode
-- estimated requests/cost/wall time
-- threshold reasons
-- budget and approval controls
-
-Approve once; if the plan or estimate changes, approval is invalid.
-
-### Direct recipe
+E4 uses the Blackboard meeting protocol:
 
 ```powershell
-python .agents\recipe_c.py --order order.json --reviewer wave --wait-usage
+.\swarm.cmd "make an architecture decision" --tier E4 --yes
 ```
 
-The direct request is stored under `.agents/tmp/usage_request.json`, separate
-from the job plan/token. The dashboard URL includes `usage_source=recipe`.
+If a required reviewer route is unavailable, preflight aborts before any model
+call.
 
-Headless alternative:
-
-```powershell
-python .agents\recipe_c.py --order order.json --reviewer wave --usage-approve
-```
-
-This is explicit and audited; it is not a silent bypass.
-
-### Meeting
-
-```powershell
-python .agents\job.py --plan plan.json --mode meeting --reviewer wave --wait --open
-```
-
-Meeting requires `--reviewer wave` and all four roles: security, qa, perf, docs.
-If a role is unavailable, preflight aborts before any model call.
-
-## 5. Dashboard
+## 5. War Room
 
 ```powershell
 .\dashboard.cmd
 # or
-python .agents\dashboard.py --root . --port 8080 --open
+python .agents\dashboard.py --root . --port 8501 --open
 ```
 
-- **Plan**: preview only. No plan-approval button.
-- **Usage**: Usage gate, estimate, plan summary, Approve/Reject.
-- **War Room**: live state; can open Usage gate.
-- **Chat / Report**: timeline and final evidence.
+- **Run timeline**: Planning → Worktree → Executing → Verifying → Handoff.
+- **Usage**: approval, estimate, plan summary, Approve/Reject.
+- **Spend**: estimated vs actual tokens/cost, calls, remaining budget.
+- **Blackboard**: E4 Round 1/2 votes.
+- **Handoff**: diff preview, explicit merge and rollback.
+- **History**: v2 state plus read-only v1 history.
 
 Port conflict:
 
@@ -162,35 +149,29 @@ Port conflict:
 python .agents\dashboard.py --root . --port 8081 --open
 ```
 
-The server binds `127.0.0.1`; control actions need the token printed by
-`job.py`/`recipe_c --wait-usage` (or `.agents/tmp/plan_token.txt`).
+The server binds `127.0.0.1`; write actions require the per-run token.
 
-## 6. v2
+## 6. v3 unified engine
 
 ```powershell
-python .agents\v2\run.py prepare --goal "fix tests" --phase P1
-python .agents\v2\run.py plan --run-id v2_... --plan plan.json
-python .agents\v2\run.py usage-approve --run-id v2_...
-python .agents\v2\run.py execute --run-id v2_... --free
+.\swarm.cmd doctor
+.\swarm.cmd "fix tests" --preset free-only
+.\swarm.cmd "high-risk change" --preset strict --tier E3
+.\swarm.cmd status --last
+.\swarm.cmd merge --run-id v2_...
+.\swarm.cmd rollback --run-id v2_...
 ```
 
-- `signoff` remains a one-release alias for `usage-approve`.
-- `/v2` page button is **Approve Usage**.
-- `Accept handoff` is a separate end-of-run acknowledgement; it does not start
-  the run or auto-merge.
-- `prepare --preset free-only` locks seats to free models and blocks paid
-  models. `prepare --preset strict` keeps four reviewers and lowers the Usage
-  gate to one request / $0.01.
-- `v2 merge --run-id <id>` is the explicit delivery step: it applies the
-  handoff patch, runs every plan `verify_command`, and commits only on exit 0.
-  `v2 rollback --run-id <id>` records and reverts that merge. Neither command
-  runs automatically during execution.
-- Preflight a new machine with `python .agents\v2\run.py doctor` (Git, worktree,
-  OpenCode free models, Spec Kit). Add `--json` for automation.
-- Retain evidence but reclaim disk with `python .agents\v2\run.py prune --days 7`
-  (add `--dry-run` first, `--force` for completed runs younger than N days).
-  Prune removes only isolated worktrees and `swarm/*` branches; manifests,
-  checkpoints, events, budget and handoff patch/report stay in the run ledger.
+- `swarm` is the single new-user entrypoint; `/swarm` is the OpenCode surface.
+- `swarm merge` applies the handoff patch, reruns every plan `verify_command`,
+  and commits only on exit 0. `swarm rollback` reverts that merge.
+- `swarm resume` recovers a killed phase or resumes a paused run.
+- `free-only` blocks paid models; `strict` keeps four reviewers and lowers the
+  Usage gate to one request / $0.01.
+- `swarm prune --days 7` removes old isolated worktrees/branches while retaining
+  manifests, checkpoints, events, budget and handoff evidence.
+- `v1.0.5` remains a frozen emergency fallback tag; do not treat `job.py` /
+  `recipe_c.py` as the new-user path.
 
 ## 7. Approval matrix
 

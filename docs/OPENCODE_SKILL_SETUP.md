@@ -10,8 +10,10 @@ The important distinction:
   how** to invoke that pipeline.
 - `.opencode/commands/swarm.md` provides the `/swarm` command.
 
-The skill is instructions, not a background daemon. The actual work still runs
-through `.agents/planner.py`, `job.py`, `recipe_c.py` or `.agents/v2/run.py`.
+The skill is instructions, not a background daemon. The actual work runs
+through the unified `swarm` CLI (`.agents/v2/swarm_cli.py`) and the v2 runner.
+The old v1 `planner.py`/`job.py`/`recipe_c.py` commands remain a frozen
+compatibility/test oracle.
 
 ## TL;DR
 
@@ -205,7 +207,7 @@ or explicitly:
 @adaptive-swarm-pipeline add a regression test for the parser
 ```
 
-If the model receives the task and starts with the planner/recipe/v2 workflow,
+If the model receives the task and starts with the unified `swarm` workflow,
 the skill is installed correctly.
 
 ## Troubleshooting
@@ -215,7 +217,7 @@ the skill is installed correctly.
 | `/swarm` is not listed | `.opencode/commands/swarm.md` exists and OpenCode was started in this project |
 | Skill is not offered | `.opencode/skills/adaptive-swarm-pipeline/SKILL.md` exists, has a `description`, and the directory name is exactly the skill ID |
 | Wrong skill is loaded | Search for another source defining the same ID; project `.opencode/skills` overrides global sources |
-| Skill loads but does not run | The skill is instructions only; the agent must execute `.agents/planner.py` / `job.py` or the v2 commands |
+| Skill loads but does not run | The skill is instructions only; the agent must execute the `swarm` CLI (`.agents/v2/swarm_cli.py`) |
 | Global install is not visible | Confirm `~/.config/opencode/skills/adaptive-swarm-pipeline/SKILL.md`; Windows uses `C:\Users\<you>\.config\opencode\skills\...` |
 | Command works but no task | `/swarm` needs a task after it, or use `@adaptive-swarm-pipeline <task>` |
 
@@ -226,5 +228,6 @@ Do not edit both the repository copy and the global copy by hand. Edit
 ## Safety note
 
 The skill only tells the agent to use the pipeline. It does not grant permission
-to write files directly. v1 remains the default path; v2 remains opt-in and
-requires explicit worktree execution and merge.
+to write files directly. v3.0.0 is the default product engine; `v1.0.5` remains
+a frozen fallback tag. Execution stays in a worktree, and merge remains an
+explicit operator action.

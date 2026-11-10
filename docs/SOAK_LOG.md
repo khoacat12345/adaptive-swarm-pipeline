@@ -489,3 +489,11 @@
 - 2026-11-10T14:06:55 cycle=2 mode=fake ok=True status=HANDOFF_READY elapsed=3.5s
 - 2026-11-10T14:07:00 cycle=3 mode=fake ok=True status=HANDOFF_READY elapsed=3.6s
 - Soak stopped 2026-11-10T14:07:01 after 3 cycle(s)
+
+## v3.0.0 release evidence
+
+- Full 8-hour fake soak (2026-11-07): 459/459 cycles `HANDOFF_READY`, 0
+  failures. This is the long-run evidence referenced by the masterplan and
+  release notes.
+- Post-Phase 4 short smoke (2026-11-10): 3/3 cycles `HANDOFF_READY`.
+- Product Owner accepted Phase 4 and signed off the v3.0.0 release.

@@ -33,8 +33,12 @@ python3 .agents/tests/test_phase4.py --fast
 Then run a task:
 
 ```bash
-python3 .agents/recipe_c.py --order scratch/swarm_demo/order.json --json
+./swarm.sh "fix the failing add test"
+# Windows: .\swarm.cmd "fix the failing add test"
 ```
+
+`swarm --version` reports `3.0.0`. The v1 `recipe_c.py` order flow is frozen
+compatibility/test-oracle only.
 
 ## Option B - add the pipeline to an existing project
 
@@ -45,9 +49,12 @@ Linux/macOS:
 ```bash
 cp -R /path/to/adaptive-swarm-pipeline/.agents /path/to/your-project/
 cp -R /path/to/adaptive-swarm-pipeline/.opencode /path/to/your-project/
+cp /path/to/adaptive-swarm-pipeline/swarm.sh /path/to/your-project/
+cp /path/to/adaptive-swarm-pipeline/dashboard.sh /path/to/your-project/
 cd /path/to/your-project
 python3 .agents/scout.py --write
 python3 .agents/tests/test_phase4.py --fast
+./swarm.sh doctor
 ```
 
 Windows PowerShell:
@@ -55,9 +62,12 @@ Windows PowerShell:
 ```powershell
 Copy-Item -Recurse C:\path\to\adaptive-swarm-pipeline\.agents C:\path\to\your-project\
 Copy-Item -Recurse C:\path\to\adaptive-swarm-pipeline\.opencode C:\path\to\your-project\
+Copy-Item C:\path\to\adaptive-swarm-pipeline\swarm.cmd C:\path\to\your-project\
+Copy-Item C:\path\to\adaptive-swarm-pipeline\dashboard.cmd C:\path\to\your-project\
 cd C:\path\to\your-project
 python .agents\scout.py --write
 python .agents\tests\test_phase4.py --fast
+.\swarm.cmd doctor
 ```
 
 Do not copy:
@@ -136,62 +146,71 @@ installed copy by hand. Full guide:
 
 ## Run
 
-Plan approval is no longer a default step. A quick one-coder + one-reviewer run
-starts automatically. Only a wave/meeting/overnight/paid or over-threshold run
-asks for **Usage approval**:
+v3.0.0 uses one official entrypoint. From the repository root, Windows uses
+`.\swarm.cmd` and Linux/macOS uses `./swarm.sh`; add the root to `PATH` if you
+want the bare `swarm` command.
+
+```powershell
+.\swarm.cmd "fix the failing add test"
+```
+
+The flow is doctor → plan → Usage decision → isolated worktree → E1–E4
+execution → verify → checkpoint → handoff. A quick task below the Usage
+threshold starts without plan approval; verify, reviewer and budget gates still
+run.
+
+Expensive or high-risk tasks:
+
+```powershell
+.\swarm.cmd "high-risk authentication change" --tier E3 --preset strict
+.\swarm.cmd "architecture decision" --tier E4 --yes
+```
+
+E3 runs four independent reviewers. E4 uses the Blackboard meeting protocol.
+If a required reviewer route is unavailable, preflight aborts before any model
+call. Paid models are opt-in with `scout --write --allow-paid`.
+
+Legacy v1 commands remain frozen as a test oracle:
 
 ```bash
-# quick path: no plan approval
 python3 .agents/job.py --plan plan.json
-
-# expensive path: show the Usage gate and wait for approval
-python3 .agents/job.py --plan plan.json --mode panel --reviewer wave --wait --open
 ```
-
-Meeting mode adds independent Round 1 plus at most one targeted rebuttal:
-
-```bash
-python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --wait --open
-```
-
-`--mode meeting` requires `--reviewer wave` and all four reviewer roles
-(`security`, `qa`, `perf`, `docs`). The preflight gate checks routes/auth and
-provider health before any model is called; if a required reviewer is
-unavailable, the meeting aborts and nothing is applied. Paid models are opt-in
-with `scout --write --allow-paid`. See `docs/PLAN_P0_06_USAGE_APPROVAL.md`.
 
 ## Dashboard
+
+The unified War Room is the only dashboard:
+
+```powershell
+.\dashboard.cmd
+# or:
+python .agents\dashboard.py --root . --port 8501 --open
+```
 
 Linux/macOS:
 
 ```bash
 ./dashboard.sh
 # or:
-python3 .agents/dashboard.py --root . --port 8080 --open
+python3 .agents/dashboard.py --root . --port 8501 --open
 ```
 
-Windows:
-
-```powershell
-.\dashboard.cmd
-# or:
-python .agents\dashboard.py --root . --port 8080 --open
-```
+`--port 8080` remains an alias for old bookmarks.
 
 The server binds `127.0.0.1` only. Read-only dashboard mode does not need a
-token; control actions (`/api/run`, `/api/control`) require the token printed by
-`job.py` or stored in `.agents/tmp/plan_token.txt`.
+token; control actions (`/api/unified/*` writes, merge, rollback) require the
+per-run sign-off token produced by the v2 prepare flow. Tokens are not printed
+by `swarm status`; the safe default is to use the War Room's read-only view or
+run the explicit CLI command.
 
 ## Verify your platform
 
 ```bash
-python3 .agents/tests/test_protocol.py
-python3 .agents/tests/test_round1.py
-python3 .agents/tests/test_rebuttal_policy.py
-python3 .agents/tests/test_adapter.py
-python3 .agents/tests/test_preflight.py
-python3 .agents/tests/test_meeting_ui.py
-python3 .agents/tests/test_sse.py
+python3 .agents/tests/test_unified_contracts.py
+python3 .agents/tests/test_unified_orchestrator.py
+python3 .agents/tests/test_swarm_cli.py
+python3 .agents/tests/test_v1_v2_parity.py
+python3 .agents/tests/test_phase4b.py
+python3 .agents/tests/test_phase_process_crash.py
 python3 .agents/tests/test_phase4.py --fast
 ```
 

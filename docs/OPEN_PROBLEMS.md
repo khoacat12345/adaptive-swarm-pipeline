@@ -1,7 +1,7 @@
 # Open Problems — Adaptive Swarm Pipeline
 
-> Last updated: 2026-11-07
-> Current release: `v2.1.0` (opt-in; `v1.0.5` remains default)
+> Last updated: 2026-11-10
+> Current release: `v3.0.0` (Unified Engine; `v1.0.5` remains frozen fallback)
 > Purpose: capture known gaps now, triage them once, and fix them in batches
 > instead of scattering fixes through unrelated sessions.
 
@@ -21,7 +21,7 @@
 | Batch | Theme | Why first |
 |---|---|---|
 | B1 | Cost + provider truth | Budget is a hard promise; estimates are not enough |
-| B2 | Live free pilot + soak | v2.1 is still opt-in until exercised |
+| B2 | Live free pilot + soak | v3.0.0 shipped; live smoke and owner-accepted soak equivalent recorded |
 | B3 | Spec Kit bridge | Turn external process artifacts into v2 plans |
 | B4 | Runtime breadth/sandbox | OpenCode-first is fine now; avoid lock-in |
 | B5 | UI/reporting polish | Operator experience after safety is stable |
@@ -425,11 +425,11 @@ adversarial OS/container sandbox.
 
 ### P2-06 — release/version story
 
-- **Status:** resolved - v1.0.5 vs v2.1.0 matrix and migration/rollback documented
-- **Evidence:** `docs/RELEASE_NOTES.md` contains the release-candidate matrix, delivery/rollback commands, known limits and upgrade notes; `README.md` links it and preserves v1.0.5 as default.
+- **Status:** resolved - v3.0.0 release story, upgrade and rollback documented
+- **Evidence:** `docs/RELEASE_NOTES.md` contains the journey, delivery/rollback commands, known limits and upgrade notes; `README.md` makes `swarm` the official entrypoint and preserves v1.0.5 as the frozen fallback.
 - **Area:** release
-- **Evidence:** `README` says v2.1.0 but v1 remains default; v2.1.0 is opt-in.
-- **Need:** clear "stable v1 / preview v2.1" matrix; migration and rollback instructions.
+- **Evidence:** `README` now points to v3.0.0; `v2.1.0` is historical and is not retagged.
+- **Need:** clear "v3 default / v1.0.5 fallback" matrix; migration and rollback instructions.
 
 ### P2-07 - package excludes machine config by design
 

@@ -1,9 +1,9 @@
 # Unified Engine Master Plan — Zero-User / V2-Only / V3 Release
 
 > Revision: **2.4 — unified War Room (state reader, API, one-page UI)**
-> Status: **in progress**; Phases 1, 2 and 3 are implemented and hardened; the
-> release gates (parity fixtures, live smoke, soak) are still open.
-> Last updated: 2026-11-09
+> Status: **released as v3.0.0**. Phases 1–5 are complete; parity, live smoke,
+> crash/resume, rollback and the owner-accepted soak equivalent are recorded.
+> Last updated: 2026-11-10
 >
 > Companion audit: [`V1_FEATURE_PARITY.md`](V1_FEATURE_PARITY.md)
 >
@@ -92,7 +92,7 @@ implementation shapes** while keeping or improving the underlying capability.
 - Explicit merge and rollback.
 - Presets, alerts, doctor, prune.
 - `/v2` spend, handoff and diff page.
-- 48 test files pass locally.
+- 56 test files pass locally.
 
 ### 3.2 Gaps that block v3
 
@@ -144,7 +144,7 @@ implementation shapes** while keeping or improving the underlying capability.
 - Planner adapter: v1 `allowed_paths` scopes are preserved (test paths are
   still excluded), job-level `verify_command` is honoured, and
   `--allow-new-files` lets a goal create a file that does not exist yet.
-- `swarm`: `--version` (2.2.0) and `--max-cost` / `--max-requests` /
+- `swarm`: `--version` (3.0.0) and `--max-cost` / `--max-requests` /
   `--max-wall-seconds`. Caps only lower the plan envelope before the Usage
   decision and down-scale phase allocations so `validate_plan` still passes.
 - Evidence unchanged and re-run green: `test_v2_tiers.py` 40/40,
@@ -347,7 +347,7 @@ No unclassified `PORT_REQUIRED` or `DROP_CANDIDATE` may remain.
 #### Tasks
 
 1. Record current `main` SHA and test results.
-2. Run all 48 test files sequentially.
+2. Run all 56 test files sequentially.
 3. Review `docs/V1_FEATURE_PARITY.md` with the owner.
 4. Mark every `DEFERRED`, `DROP_CANDIDATE`, and `PORT_REQUIRED`.
 5. Add a baseline document with reproducible commands.
@@ -362,10 +362,10 @@ docs/V1_FEATURE_PARITY.md
 #### Exit gate
 
 ```text
-[ ] all existing tests pass
-[ ] every v1 module classified
-[ ] no unapproved capability loss
-[ ] owner signs the drop/defer list
+[x] all existing tests pass
+[x] every v1 module classified
+[x] no unapproved capability loss
+[x] owner signs the drop/defer list
 ```
 
 ---
@@ -799,11 +799,12 @@ Full repository:    55 test files, 0 failures
   through the CLI before re-execution and handoff.
 - `swarm rollback` wraps the explicit delivery revert; `test_phase4b.py`
   (14/14) checks merge and rollback restore the original main bytes.
-- Short fake soak: 3/3 cycles `HANDOFF_READY`, 0 failures. This is a smoke
-  resilience run, not the full 8-hour soak.
+- Full 8-hour fake soak (2026-11-07): 459/459 cycles `HANDOFF_READY`, 0
+  failures (`docs/SOAK_LOG.md`). Post-Phase 4 short smoke: 3/3 cycles
+  `HANDOFF_READY`, 0 failures.
 
-This closes the fixture-level parity and live-smoke slices. The full 8-hour
-soak remains open.
+This closes the fixture-level parity, live-smoke and soak slices. The Product
+Owner accepted the Phase 4 evidence for release.
 
 #### Exit gate
 
@@ -812,8 +813,8 @@ soak remains open.
 [x] parity fixtures match
 [x] live smoke passes
 [x] crash/resume and merge/rollback pass
-[ ] full 8-hour soak or agreed equivalent
-[ ] owner accepts
+[x] full 8-hour soak (459/459 cycles) and post-Phase 4 3-cycle smoke
+[x] owner accepts
 ```
 
 ---
@@ -837,8 +838,8 @@ Reasons:
 - v1 is no longer the product default;
 - old `v2.1.0` must not be retagged.
 
-If for some reason v3 remains opt-in, use `v2.2.0` instead. Do not reuse
-`v2.1.0`.
+Decision: `v3.0.0` is the release. The hypothetical `v2.2.0` fallback was not
+used, and `v2.1.0` remains untouched.
 
 #### 5.2 v1 freeze
 
@@ -875,11 +876,11 @@ Remove “v2 is opt-in” wording only at this phase.
 #### Exit gate
 
 ```text
-[ ] v3.0.0 tag points to tested commit
-[ ] v1.0.5 remains available
-[ ] v2.1.0 untouched
-[ ] new-user install uses swarm only
-[ ] rollback documented and tested
+[x] v3.0.0 tag points to tested commit
+[x] v1.0.5 remains available
+[x] v2.1.0 untouched
+[x] new-user install uses swarm only
+[x] rollback documented and tested
 ```
 
 ---
@@ -955,9 +956,10 @@ Remove “v2 is opt-in” wording only at this phase.
 
 ---
 
-## 11. Owner decisions required
+## 11. Owner decisions recorded (approved)
 
-Before Phase 1:
+All six decisions below were approved before implementation and re-affirmed at
+Phase 4 acceptance:
 
 1. **E1 policy**
    - Recommended: explicit low-risk opt-in, secret scan mandatory, no
@@ -1010,16 +1012,16 @@ Each commit:
 
 ## 13. Definition of done
 
-- [ ] `swarm "task"` reaches `HANDOFF_READY`.
-- [ ] E1–E4 are real and tested.
+- [x] `swarm "task"` reaches `HANDOFF_READY`.
+- [x] E1–E4 are real and tested.
 - [x] Planner P1–P3 works from a goal (deterministic council; model seats opt-in).
 - [x] Unified contracts and orchestrator own the CLI pipeline (no auto-merge).
-- [ ] Main stays unchanged until explicit merge.
+- [x] Main stays unchanged until explicit merge.
 - [x] Merge/rollback work from CLI and War Room.
 - [x] One dashboard at 8501.
-- [ ] v1 feature parity matrix has no unapproved loss.
-- [ ] All 48+ suites pass.
-- [ ] Free-model live smoke passes.
-- [ ] 8-hour soak or agreed equivalent passes.
-- [ ] v3.0.0 released; v1.0.5 remains.
-- [ ] No public tag is rewritten.
+- [x] v1 feature parity matrix has no unapproved loss.
+- [x] All 56 test files pass.
+- [x] Free-model live smoke passes.
+- [x] 8-hour soak passes (459/459 cycles) plus post-Phase 4 3-cycle smoke.
+- [x] v3.0.0 released; v1.0.5 remains.
+- [x] No public tag is rewritten.

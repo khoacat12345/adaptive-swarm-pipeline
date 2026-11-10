@@ -1,138 +1,133 @@
 # Adaptive Swarm Pipeline — Release Notes
 
-## v2.1.0 Release Candidate
+## v3.0.0 — Unified Engine
 
-**Release status:** release candidate (v2.1.0)
-**Default execution path:** `v1.0.5`
-**v2 path:** opt-in, isolated preview
-**Last updated:** 2026-11-07
+**Release status:** production release
+**Release date:** 2026-11-10
+**Default engine:** v2 runtime behind the unified `swarm` entrypoint
+**Frozen fallback:** `v1.0.5` tag
+**Historical tags:** `v2.1.0` remains untouched
 
-This document is the release story for the v2.1.0 release candidate. It replaces
-the older `RELEASE_v2.1.0.md` summary while keeping that file as historical
-context.
+v3.0.0 is the first release where the v2 worktree/budget engine, the unified
+orchestrator, the War Room, and the human-facing CLI are one product.
 
-## v1.0.5 vs v2.1.0
-
-| Area | v1.0.5 (default) | v2.1.0 (opt-in preview) |
-|---|---|---|
-| Entry point | `job.py`, `recipe_c.py`, dashboard | `v2/run.py`, `/v2` dashboard page |
-| File isolation | `safe_writer` backups/transactions | guarded Git worktree + `safe_writer` |
-| Verification | `verify_command` before apply | `verify_command` in isolated worktree, then explicit merge gate |
-| Reviewers | panel/wave/meeting policies | four mandatory v2 reviewers, cross-family checks |
-| Budget | request/time caps | reserve/settle per call, per phase and global caps |
-| Crash recovery | transaction journal | v2 state recovery + worktree quarantine |
-| Delivery | manual acceptance | explicit `v2 merge` / `v2 rollback`; no auto-merge during execution |
-| Adaptive context | selected v1 paths | uniform repo-map, ACI, lessons, bounded memory, event runtime across E1–E4 |
-| Default safety claim | stable production path | release candidate; keep v1 for critical work until accepted |
-
-## What is new in this release candidate
-
-- Explicit **one-click delivery** commands:
-  ```powershell
-  python .agents\v2\run.py merge --run-id <id>
-  python .agents\v2\run.py rollback --run-id <id>
-  ```
-  Merge accepts `HANDOFF_READY` or accepted `DONE` runs, validates every patched path against the
-  signed plan, runs every `verify_command`, and commits only after exit code 0.
-  If verification fails, the tree is restored. Rollback uses a safe Git revert
-  of the recorded merge commit.
-- **Presets** at prepare time:
-  ```powershell
-  python .agents\v2\run.py prepare --goal "task" --preset free-only
-  python .agents\v2\run.py prepare --goal "task" --preset strict
-  ```
-  `free-only` locks seats to free models and blocks paid models. `strict`
-  keeps four reviewers, secret scanning, and lowers the Usage approval gate to
-  one request / $0.01.
-- `/v2` spend reconciliation with estimated vs actual tokens, requests, cost,
-  reserved budget, remaining budget, handoff runs and web diff preview.
-- Safe Telegram/webhook alerts for `USAGE_WAITING`, `HANDOFF_READY`,
-  `BUDGET_OVERRUN` and `CRASH`, with secret/path redaction.
-- `v2 doctor` preflight and `v2 prune` worktree retention.
-- Uniform adaptive integration for the five extracted capabilities:
-  1. repo map (aider-style),
-  2. read-only ACI (SWE-agent-style),
-  3. failure lessons (mem0-style),
-  4. bounded tiered memory (Letta-style),
-  5. event/observation runtime (OpenHands-style).
-  They are implemented as dependency-free primitives and injected into v2
-  E1–E4 execution. No new runtime dependency is required.
-
-## Security boundary (P2-05)
-
-**Git worktree protects project files, not the operating system.** A v2 run
-uses an isolated worktree and `safe_writer`, but a model with shell access can
-still perform OS-level actions. v2.1.0 does **not** claim an OS/container/VM
-sandbox. Use an external container, VM or OS user boundary when the workload is
-untrusted. Merge and rollback are explicit operator commands, never automatic
-during execution.
-
-## Adaptive integration (P2-10 / P2-11)
-
-The five capabilities above are wired into the v2 runtime with evidence from:
-
-- `test_capabilities_uniform.py` — E1–E4 capability injection
-- `test_v2_adaptive.py` / `test_v2_adaptive_flags.py`
-- `test_v2_aci_integration.py`
-- `test_v2_lessons_integration.py`
-- `test_v2_planner_repo_map.py`
-- live v2 free-model pilot and Spec Kit signed execution
-
-Deferred, non-blocking improvements (tree-sitter/tags cache, richer ACI tool
-bundles, macOS CI runner) are tracked in `OPEN_PROBLEMS.md` but are not release
-blockers for the v2.1.0 candidate.
-
-## OpenCode skill setup for new users
-
-A fresh clone already includes the project-local skill and `/swarm` command:
+## The journey
 
 ```text
-.opencode/skills/adaptive-swarm-pipeline/SKILL.md
-.opencode/commands/swarm.md
+v1.0.5       legacy direct-write workflow (frozen fallback)
+v2.1.0       opt-in isolated foundation and /v2 page
+v3.0.0       unified engine: swarm + War Room + v2 runtime
 ```
 
-From the project root, run OpenCode and use `/swarm <task>` or
-`@adaptive-swarm-pipeline <task>`. Verify with
-`python .agents/sync_skill.py --check`; for user-wide install use
-`python .agents/sync_skill.py --global --write`. See
-[`OPENCODE_SKILL_SETUP.md`](OPENCODE_SKILL_SETUP.md) for Windows/Linux paths,
-ZIP/copy instructions and troubleshooting.
+The v1 commands remain in the repository as a deterministic test oracle and
+emergency compatibility path. They are not the new-user interface.
+
+## What is new
+
+### Unified Orchestrator
+- One pipeline:
+  ```text
+  preflight → classify/tier → planner → Usage gate
+  → isolated worktree → execute → verify → checkpoint → handoff
+  ```
+- `swarm "task"` is the official entrypoint.
+- The orchestrator never auto-merges; delivery is explicit.
+
+### E1–E4 execution tiers
+| Tier | Review |
+|---|---|
+| E1 | coder only, explicit low-risk opt-in |
+| E2 | coder + security reviewer |
+| E3 | coder + four independent reviewers |
+| E4 | four-reviewer Blackboard meeting |
+
+Planner levels P1–P3 are selected with the tier. P2/P3 councils execute
+deterministic seats by default; optional model-backed planner seats are
+available through `--planner-model`.
+
+### War Room
+- One dashboard at `http://127.0.0.1:8501`.
+- `--port 8080` remains a compatibility alias.
+- Shows run timeline, tier/planner, spend/tokens, Usage approval, E4
+  Blackboard, handoff diff, explicit merge/rollback and run history.
+- API endpoints are under `/api/unified/`.
+- Loopback-only binding, token-bound writes, secret redaction and diff caps.
+
+### Delivery and resilience
+- Explicit `swarm merge` with a verify gate.
+- `swarm rollback` restores the pre-merge state.
+- `swarm resume` recovers a killed phase or resumes a paused run.
+- Git worktree isolation and safe_writer remain mandatory.
+- Free-only and strict presets remain available.
+
+### Parity and evidence
+- Three deterministic parity fixtures compare v1 legacy, v2 without merge, and
+  v2 with explicit merge: single-file, multi-file, and security-sensitive.
+- Live free-model smoke passed:
+  ```text
+  run: v2_20261110T070617_56c0a0
+  tier: E2 / P1
+  status: HANDOFF_READY
+  verify: exit 0
+  merge: b347e725a4777588019917b8b7c16d9ea923141c
+  ```
+- Process-kill/recover and merge/rollback tests pass.
+- Soak evidence: full 8-hour fake soak (2026-11-07) completed 459/459 cycles
+  `HANDOFF_READY`; the post-Phase 4 short smoke added 3/3 cycles. Product Owner
+  accepted the Phase 4 evidence for release.
 
 ## Verification
 
 ```text
-V2 M1                 43/43 PASS
-V2 M2                 47/47 PASS
-V2 M3                 25/25 PASS
-V2 M5                 14/14 PASS
-V2 P0                 15/15 PASS
-V2 PARITY             11/11 PASS
+V1/V2 PARITY          45/45 PASS
+PHASE 4B              14/14 PASS
+PHASE CRASH           11/11 PASS
+UNIFIED ORCHESTRATOR  63/63 PASS
+UNIFIED CONTRACTS     40/40 PASS
+SWARM CLI             44/44 PASS
+V2 TIERS              40/40 PASS
 V2 DELIVERY           13/13 PASS
-V2 PRESETS            14/14 PASS
-V2 WEB UI             23/23 PASS
-V2 ALERTS              5/5  PASS
-V2 DOCTOR             17/17 PASS
-V2 PRUNE              10/10 PASS
-CAPABILITIES UNIFORM  23/23 PASS
-SPECKIT CONVERGE      11/11 PASS
+V2 M1/M2/M3/M5        PASS
+Full repository       56 test files, 0 failures
 ```
 
-## Known limits
+Final gate:
 
-- v2.1.0 is a release candidate, not the default path. v1.0.5 remains the
-  conservative default until the owner accepts the v2 release.
-- Merge is explicit and local; there is no automatic deployment or remote
-  branch protection.
-- Git worktree is not an adversarial OS sandbox.
-- Notifications are optional; disabled configuration fails closed by skipping.
-- `v2 prune` preserves run evidence but does not implement disk quotas or a
-  remote archive tier.
+```powershell
+python .agents\tests\test_v1_v2_parity.py
+python .agents\tests\test_phase4b.py
+swarm --version   # swarm 3.0.0
+```
+
+## Install / first task
+
+```powershell
+git clone https://github.com/khoacat12345/adaptive-swarm-pipeline.git
+cd adaptive-swarm-pipeline
+python .agents\scout.py --write --verify
+swarm doctor
+swarm "fix the failing add() test"
+```
+
+In OpenCode:
+
+```text
+/swarm fix the failing add() test
+```
+
+## Delivery boundary
+
+- Main is untouched during execution.
+- Review `swarm status --last`.
+- Apply with `swarm merge --run-id <id>`.
+- Undo with `swarm rollback --run-id <id>`.
+- Git worktree protects files, **not the OS**. v3.0.0 does not claim a
+  container/VM sandbox.
 
 ## Upgrade / rollback
 
-- v1 users need no migration.
-- v2 state lives under `.agents/tmp/v2/`; keep it out of version control.
-- To undo an accepted v2 delivery, run `v2 rollback --run-id <id>`; this
-  records a revert commit and preserves the original handoff and merge records.
-- To retain the ledger while reclaiming disk, run `v2 prune --days N --dry-run`
-  before removing worktrees.
+- `v1.0.5` remains available as an emergency fallback tag.
+- Do not delete or retag `v2.1.0`; it is historical evidence.
+- New installations should use `swarm`; old v1 commands are compatibility-only.
+- Blind Evaluation has a detailed implementation specification in
+  `docs/BLIND_EVALUATION_SPEC.md`; it is not part of the v3.0.0 runtime yet.

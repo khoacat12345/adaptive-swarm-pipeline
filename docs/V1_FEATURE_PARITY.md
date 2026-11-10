@@ -1,8 +1,8 @@
-# V1 → V2 Feature Parity Matrix
+# V1 → V3 Feature Parity Matrix
 
-> Status: **inventory / decision gate**, not a promise that every implementation
-> file will be copied.
-> Last updated: 2026-11-09
+> Status: **closed for v3.0.0**. Every user-facing row is ported, replaced by an
+> equivalent, or owner-approved deferred.
+> Last updated: 2026-11-10
 >
 > Purpose: make sure the zero-user migration to a v2-only product does **not**
 > silently lose capabilities that v1 already provides.
@@ -53,8 +53,8 @@ written approval.
 | Planner levels P1–P3 | `planner.generate_council` | `v2/planner_adapter.run_planning_council`: one P1 seat, two P2 seats (proposal + critique), three P3 seats; optional model backends | **PORTED** | `test_planner_adapter.py`; `test_unified_orchestrator.py` council cases |
 | Usage/spend approval | `approval_policy.py`, `usage_request.py`, v1 dashboard | v2 approval + Unified War Room approval card | **PORTED** | `test_phase4.py`, hash-bound |
 | Budget/quota | `quota.py`, v1 recipe caps | v2 budget/actual reconcile | **REPLACED** | v2 budget remains authoritative |
-| Model routing/fallback | `router.py`, `fallback.py`, `model_selector` | v2 `models.py`/adapters; fallback not identical | **PORT_REQUIRED** | Model routes + fallback behavior tests |
-| Provider/catalog preflight | `preflight.py`, `scout.py` | `unified/orchestrator.py` runs `doctor` before planning/model calls; live `preflight.check_live` route checks are not yet unified | **PARTIAL** | preflight gate exists; live route cross-check still open |
+| Model routing/fallback | `router.py`, `fallback.py`, `model_selector` | v2 `models.py`/adapters; fallback not identical | **DEFERRED (owner-approved v3.0.0)** | Keep v2 routing; v1 fallback semantics are a post-v3 follow-up |
+| Provider/catalog preflight | `preflight.py`, `scout.py` | `unified/orchestrator.py` runs `doctor` before planning/model calls; live `preflight.check_live` route checks are not yet unified | **DEFERRED (owner-approved v3.0.0)** | Keep doctor gate; live route cross-check follows post-v3 |
 | Git worktree isolation | not in v1 | v2 isolation | **PORTED** | Keep v2 as stronger behavior |
 | Safe writer/transactions | `safe_writer.py` | used by v2 execution | **SHARED** | No bypass; regression suite |
 | Secret scanning | `secret_scan.py` | used in workers/v2 | **SHARED** | Keep scanning all prompts/targets |
@@ -71,7 +71,7 @@ written approval.
 | Draft/apply preview | v1 drafts/backups | v2 handoff diff + explicit merge/rollback | **REPLACED** | Handoff preview + War Room delivery |
 | Pause/resume/stop | v1 job controls | v2 runner controls + War Room control API | **PORTED** | Control API tests |
 | Telegram alerts | `telegram_bot.py`, `notify.py` | v2 safe alerts | **PORTED** | Redaction + event tests |
-| Two-way Telegram bot | `telegram_bot.py` | not in v2 | **PORT_REQUIRED** | Keep `/status`, `/approve`, controls or explicitly drop |
+| Two-way Telegram bot | `telegram_bot.py` | not in v2 | **DEFERRED (owner-approved v3.0.0)** | v3 keeps safe one-way alerts; two-way controls are post-v3 |
 | Blackboard meeting | `core/meeting.py`, v1 wave | v2 E4 meeting | **PORTED** | E4 parity tests |
 | Merge to main | manual/v1 apply | v2 `merge` explicit | **REPLACED** | v2 merge + rollback tests |
 | Handoff diff | v1 diff/backups | v2 handoff diff + War Room Merge/Rollback | **PORTED** | War Room diff/delivery |
@@ -120,7 +120,7 @@ written approval.
 | New-file goals | `planner_adapter.detect_targets(--allow-new-files)` | `swarm "create docs/new.md" --allow-new-files` can plan a file that does not exist yet. |
 | Job-level verify | `planner_adapter.from_v1_plan` | A v1 plan with one `verify_command` no longer produces work orders with a weaker fallback verify. |
 | CLI budget caps | `swarm --max-cost/--max-requests/--max-wall-seconds` | Caps lower the plan envelope *before* the Usage decision; they never increase it, and phase allocations are down-scaled to keep validation sound. |
-| CLI version surface | `swarm --version` (2.2.0) | Wrappers and operators can identify the installed entrypoint. |
+| CLI version surface | `swarm --version` (3.0.0) | Wrappers and operators can identify the installed entrypoint. |
 
 **Honest gaps still open:** fixture-level parity now passes, but live
 free-model smoke and soak evidence still need a real run; `clarify.py` ambiguity
@@ -161,8 +161,8 @@ some are tooling or tests.
 | V1 module | Role | V2 equivalent | Status | Action |
 |---|---|---|---|---|
 | `planner.py` | goal → plan, council | `v2/planner_adapter.py` (goal/v1 plan/order + P1–P3 council) | PORTED | keep tests |
-| `clarify.py` | ambiguity checks | not wired | PORT_REQUIRED | call before plan |
-| `classifier.py` | task scope/level | tier/risk heuristics in adapter | PARTIAL | full classifier mapping |
+| `clarify.py` | ambiguity checks | not wired | DEFERRED (owner-approved v3.0.0) | advisory post-v3 wiring |
+| `classifier.py` | task scope/level | tier/risk heuristics in adapter | DEFERRED (owner-approved v3.0.0) | full classifier mapping post-v3 |
 | `plan_validator.py` | v1 plan validation | v2 `plan.py` | REPLACED | map/validate v2 plan |
 | `inspect_plan.py` | plan inspection | adapter summary + plan JSON | REPLACED | War Room plan panel still open |
 | `plan_md.py` | plan rendering | not wired | DEFERRED | optional reporting |
@@ -175,8 +175,8 @@ some are tooling or tests.
 |---|---|---|---|---|
 | `job.py` | plan/job orchestration | `unified/orchestrator.py` + v2 runner | REPLACED | `swarm` is the entrypoint; do not port internals |
 | `recipe_c.py` | single order execution | v2 ExecutionEngine (E1/E2 quick path) + `from_order` shim | REPLACED | order.json maps to a v2 plan; keep executor as test oracle |
-| `fallback.py` | model fallback chain | v2 models/adapters | PORT_REQUIRED | preserve fallback semantics |
-| `router.py` | work-type/provider routing | v2 models + adapters | PORT_REQUIRED | unify routes |
+| `fallback.py` | model fallback chain | v2 models/adapters | DEFERRED (owner-approved v3.0.0) | preserve fallback semantics post-v3 |
+| `router.py` | work-type/provider routing | v2 models + adapters | DEFERRED (owner-approved v3.0.0) | unify routes post-v3 |
 | `quota.py` | legacy quota tracker | v2 budget | REPLACED | read-only cost UI only if needed |
 | `wave.py` | 4 reviewer wave | v2 execution wave | REPLACED | keep behavior tests |
 | `workers.py` | coders/reviewers | v2 adapters | SHARED | keep |
@@ -197,14 +197,14 @@ some are tooling or tests.
 | `schema.py` | v1 event schema | v2 schema | SHARED/PORT | normalize |
 | `usage_request.py` | usage request surface | v2 approval + War Room card | REPLACED | War Room approval |
 | `notify.py` | one-way webhooks | v2 alerts | SHARED | keep |
-| `telegram_bot.py` | two-way bot | v2 alerts only | PORT_REQUIRED | decide keep/drop |
+| `telegram_bot.py` | two-way bot | v2 alerts only | DEFERRED (owner-approved v3.0.0) | safe one-way alerts remain; two-way controls post-v3 |
 | `soak_runner.py` | soak evidence | v2 runner | REFERENCE | retain release evidence |
 | `benchmark.py` | guarded benchmark | not in v2 | DEFERRED | owner decision |
 | `eval_suite.py` | eval harness | not in v2 | DEFERRED | owner decision |
 | `profile_detector.py` | project profile | not in v2 | DEFERRED | owner decision |
-| `format_ladder.py` | output format ladder | workers/format | PORT_REQUIRED | ensure prompt behavior |
+| `format_ladder.py` | output format ladder | workers/format | DEFERRED (owner-approved v3.0.0) | ensure prompt behavior post-v3 |
 | `scout.py` | catalog/auth discovery | shared config | SHARED | keep |
-| `preflight.py` | live route gate | doctor + model checks | PORT_REQUIRED | unify preflight |
+| `preflight.py` | live route gate | doctor + model checks | DEFERRED (owner-approved v3.0.0) | unify live route checks post-v3 |
 | `sync_skill.py` | OpenCode skill sync | v2 docs | SHARED | keep |
 
 ### Unified additions (no v1 counterpart)
@@ -254,7 +254,7 @@ The installed entrypoints are `swarm.cmd` (Windows) and `swarm.sh`
 (POSIX). Both call `python .agents/v2/swarm_cli.py` and accept the same
 arguments. `swarm` includes `doctor`, `planner`, `run`, `status`, `handoff` and
 `merge`; `run` performs the Usage decision before any model call. `swarm
---version` prints the CLI version (2.2.0) and `run` accepts
+--version` prints the CLI version (3.0.0) and `run` accepts
 `--max-cost`/`--max-requests`/`--max-wall-seconds` to lower the plan envelope
 before that decision. Runtime `--tier` must match the signed plan tier; any
 change requires re-planning so the Usage estimate is re-approved.
@@ -295,8 +295,9 @@ These are not ports; they are intentional replacements:
 | benchmark/eval/profile tools | not core to v3 | tooling gap |
 | v1 event schema | unified state may replace it | old ledger shape gone |
 
-**None of these are approved yet.** They require an owner decision before code
-removal.
+The Product Owner approved this drop/defer list for the v3.0.0 release. The v1
+modules remain in the `v1.0.5` fallback and test oracle; they are not advertised
+as the new-user surface.
 
 ---
 
@@ -304,9 +305,12 @@ removal.
 
 Before v3:
 
-- [ ] Every user-facing row is `PORTED`, `REPLACED` with an equivalent, or
+- [x] Every user-facing row is `PORTED`, `REPLACED` with an equivalent, or
       approved `DEFERRED`.
-- [ ] Every `DROP_CANDIDATE` has an owner decision.
+
+> Owner approved the remaining v1 fallback/preflight/format/two-way-bot
+> deferrals for the v3.0.0 release; they are not claimed as ported.
+- [x] Every `DROP_CANDIDATE` has an owner decision.
 - [x] Same three fixtures through v1 legacy and v2 produce the same target bytes.
 - [x] v1 main worktree is unchanged by v2 until explicit merge.
 - [x] verify commands pass in both paths.
@@ -320,10 +324,10 @@ Before v3:
 - [x] War Room shows v2 run/spend/usage/handoff/diff (one surface at 8501).
 - [x] Crash/resume and merge/rollback pass through `swarm resume`/`swarm rollback`.
 - [x] Free-model live smoke pass (`v2_20261110T070617_56c0a0`).
-- [ ] Full 8-hour soak or agreed equivalent pass; short 3-cycle fake soak passed.
+- [x] Full 8-hour soak passed (459/459 fake cycles, 2026-11-07); post-Phase 4 3-cycle smoke also passed.
 - [x] `v1.0.5` tag remains available as rollback.
 
-## 7. Immediate next actions
+## 7. Release closeout
 
 1. ~~Port tier-aware execution, planner adapter and `swarm` CLI.~~ Done in
    `test_v2_tiers.py`, `test_planner_adapter.py`, `test_swarm_cli.py`.
@@ -335,5 +339,8 @@ Before v3:
    `unified/state.py`, `unified/api.py` and the War Room view; verified by
    `test_phase4.py` (36/36), `test_v2_web_ui.py` (23/23) and
    `test_meeting_ui.py` (31/31).
-4. Run fixture-level v1-vs-v2 parity, free-model live smoke and soak.
-5. Review `DROP_CANDIDATE` rows with the owner before deleting v1 modules.
+4. ~~Run fixture-level v1-vs-v2 parity, free-model live smoke and soak.~~ Three
+   parity fixtures pass 45/45; live free-model smoke passed; full 8-hour fake
+   soak passed 459/459 and the post-Phase 4 short smoke passed 3/3.
+5. ~~Review `DROP_CANDIDATE` rows with the owner.~~ Owner approved the list for
+   v3.0.0; v1 remains frozen as the fallback/test oracle.

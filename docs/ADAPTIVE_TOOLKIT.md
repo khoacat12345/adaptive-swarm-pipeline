@@ -44,7 +44,7 @@
 10. run_benchmark -> CI/eval harness
 ```
 
-## Release integration (v2.1.0 RC)
+## Release integration (v3.0.0)
 
 The five release-critical capabilities are no longer reference-only:
 

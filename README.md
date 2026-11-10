@@ -17,45 +17,72 @@ A **verification-first** coding harness for [OpenCode](https://opencode.ai):
 several AI models work as one team, but nothing is written to your project unless a
 real machine check passes.
 
-> Status: **v2.1.0 release candidate** — opt-in isolated foundation (worktree,
-> budget, planning, sign-off, execution, delivery and local controls).
-> `v1.0.5` remains the conservative default. The live free-model pilot and the
-> 459-cycle soak evidence are available; do not treat v2 as the default path
-> until the owner accepts the release.
+> Status: **v3.0.0 — Unified Engine release**.
+> `swarm "task"` is the official entrypoint; the v2 runner is the default
+> execution heart. `v1.0.5` remains available as a frozen fallback tag.
+> The release includes live free-model smoke, a 459/459-cycle fake-mode 8-hour soak,
+> crash/resume, rollback, parity fixtures, and the unified War Room at
+> `127.0.0.1:8501`.
 > Original acceptance on Windows; Linux/macOS paths are supported and covered
 > by the cross-platform CI workflow.
 >
 > Built with AI assistance; every change is machine-verified.
 
-## v2.1 — isolated autonomous foundation
+## v3.0.0 — Unified Engine
 
-The v2.1 path is opt-in and lives under `.agents/v2/`. It adds a guarded Git
-worktree, reserve-before-call budgets, three-seat planning, hash-bound Usage
-approval, a coder/reviewer execution engine, a local `/v2` control page and
-explicit merge/rollback delivery. It does **not** auto-merge during execution;
-delivery is a separate operator command.
+The unified architecture is:
 
-```bash
-python .agents/v2/run.py prepare --goal "your task" --phase P1
-python .agents/v2/run.py prepare --goal "your task" --preset free-only
-python .agents/v2/run.py prepare --goal "your task" --preset strict
-python .agents/v2/run.py plan --run-id <id> --plan plan.json
-python .agents/v2/run.py usage-approve --run-id <id>
-python .agents/v2/run.py execute --run-id <id> --free
-python .agents/v2/run.py merge --run-id <id>      # explicit, verify-gated
-python .agents/v2/run.py rollback --run-id <id>   # safe revert
+```text
+swarm CLI / OpenCode / War Room (8501)
+                  │
+                  ▼
+          UnifiedOrchestrator
+   preflight → tier → planner → Usage
+                  │
+                  ▼
+              v2 Runner
+   worktree + budget + adaptive bundle
+                  │
+                  ▼
+   verify → checkpoint → handoff
+                  │
+        explicit merge / rollback
 ```
+
+- **One entrypoint:** `swarm "task"` (terminal) or `/swarm <task>` (OpenCode).
+- **E1–E4 execution tiers:** coder-only, coder+security, four-reviewer wave,
+  and E4 blackboard meeting.
+- **Planner P1–P3:** one, two, or three planning seats by tier.
+- **One War Room:** `http://127.0.0.1:8501`; `--port 8080` remains an alias.
+- **Explicit delivery:** merge and rollback are operator commands; execution
+  never auto-merges.
+- **Frozen v1:** commands and tag `v1.0.5` remain as an emergency oracle; new
+  users should use `swarm`.
+
+```powershell
+# New user flow (Windows; POSIX uses ./swarm.sh)
+python .agents\scout.py --write --verify
+.\swarm.cmd doctor
+.\swarm.cmd "fix the failing add() test"
+
+# Inspect / deliver
+.\swarm.cmd status --last
+.\swarm.cmd merge --run-id <id>
+.\swarm.cmd rollback --run-id <id>
+```
+
+Add the repository root to `PATH` if you prefer the bare `swarm` command
+(`./swarm.sh` on Linux/macOS).
 
 ### Delivery and release boundary
 
-- **v1.0.5** is the default and conservative path.
-- **v2.1.0** is the opt-in release candidate: isolated worktree, four reviewers,
-  Usage gate, explicit merge/rollback, `/v2` spend dashboard, alerts, doctor and
-  prune.
-- Git worktree protects **files**, not the OS; v2 does not claim a container/VM
+- **v3.0.0** is the default product engine (`swarm` + v2 runner).
+- **v1.0.5** is frozen fallback/test-oracle; do not use `job.py`/`recipe_c.py`
+  as the new-user interface.
+- Git worktree protects **files**, not the OS; v3 does not claim a container/VM
   sandbox. Use an external sandbox for untrusted workloads.
 - The five adaptive capabilities (repo map, read-only ACI, failure lessons,
-  bounded tiered memory, event runtime) are integrated across v2 E1–E4.
+  bounded tiered memory, event runtime) are integrated across E1–E4.
 
 Operator guide: [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md).
 Unified engine migration plan:
@@ -65,7 +92,7 @@ V1 feature parity audit:
 Blind evaluation spec:
 [`docs/BLIND_EVALUATION_SPEC.md`](docs/BLIND_EVALUATION_SPEC.md).
 Spec Kit adoption: [`docs/SPEC_KIT_ADOPTION.md`](docs/SPEC_KIT_ADOPTION.md).
-Details: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Constitution:
+Legacy v2 foundation spec: [`docs/SWARM_V2.1_SPEC.md`](docs/SWARM_V2.1_SPEC.md). Constitution:
 [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md). Tasks schema:
 [`docs/schemas/tasks.schema.json`](docs/schemas/tasks.schema.json). Release
 notes: [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md) (historical
@@ -174,25 +201,41 @@ Full step-by-step guide:
 Full cross-platform setup, dashboard and MCP notes:
 **[docs/INSTALL.md](docs/INSTALL.md)**.
 
-### First task
+### First task (v3 official flow)
 
-```bash
-python3 .agents/planner.py --goal "fix the failing add() test" --out .agents/tmp/auto_plan.json
-python3 .agents/job.py --plan .agents/tmp/auto_plan.json
+```powershell
+# Windows (or add the repo root to PATH and use `swarm`)
+.\swarm.cmd "fix the failing add() test"
+
+# Linux/macOS
+./swarm.sh "fix the failing add() test"
 ```
 
-A quick plan with one coder + one reviewer runs without a plan-approval click.
-When the policy estimates a wave/meeting/overnight/paid run, it opens the
-**Usage** gate instead:
+The first task runs through the unified orchestrator:
 
-```bash
-python3 .agents/job.py --plan plan.json --mode meeting --reviewer wave --wait --open
+```text
+doctor → plan → Usage gate (if needed) → isolated worktree
+→ tier-aware execution → verify → checkpoint → handoff
 ```
 
-`--mode meeting` requires `--reviewer wave`; it adds independent Round 1 plus at
-most one targeted rebuttal and a machine re-verify before Lead applies. Approval
-is for quota/cost, not for the existence of a plan. See
-[`docs/PLAN_P0_06_USAGE_APPROVAL.md`](docs/PLAN_P0_06_USAGE_APPROVAL.md).
+The main branch is never changed by execution. Review the handoff, then merge
+explicitly:
+
+```powershell
+.\swarm.cmd status --last
+.\swarm.cmd merge --run-id <id>
+.\swarm.cmd rollback --run-id <id>
+```
+
+Open the War Room:
+
+```text
+http://127.0.0.1:8501
+```
+
+`v1.0.5` commands (`planner.py`, `job.py`, `recipe_c.py`) are frozen as a
+compatibility/test oracle. They are **not** the new-user interface. See
+[`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md).
 
 ### Health & cost preflight
 
@@ -235,60 +278,51 @@ lookup failure makes meeting/wave fail closed.
 Missing `verify_command` is rejected immediately. Level 1/2 take one target file;
 Level 3 takes two or more and runs as one atomic transaction.
 
-## Dashboard (mission control)
+## War Room (unified mission control)
 
-Open it with `dashboard.cmd` on Windows or `./dashboard.sh` on Linux/macOS, or
-`job.py --wait --open` for full control with a token.
+Open it with `dashboard.cmd` on Windows or `./dashboard.sh` on Linux/macOS:
 
-Left sidebar: **Overview, Plan, Chat, Workspaces, Usage, Drafts, Settings**.
-
-- **Chat** is a chronological timeline (oldest first) with `HH:MM:SS` on every event;
-  logs are not shown on the overview.
-- **Workspaces** lists real OpenCode projects (old working rooms) with session count,
-  cost and tokens.
-- **Usage** shows exact per-request spend from `opencode.db` (today / 5h rolling /
-  7d / 30d), per-model costs and a request log.
-- Deep links: `/#overview`, `/#plan`, `/#chat`, `/#workspaces`, `/#quota`, `/#drafts`, `/#settings`.
-
-![Usage view](docs/usage.png)
-
-![Workspaces](docs/workspaces.png)
-
-![Swarm chat](docs/chat.png)
-
-## Goal -> plan (W4 planner)
-
-```bash
-python .agents/planner.py --goal "Add JWT auth and tests" --root . --submit
+```text
+http://127.0.0.1:8501
 ```
 
-Or type the goal in the dashboard's input and click **Plan**: the planner reads the
-project tree, proposes 1-5 subtasks with verification, validates that every target
-exists and that dependencies are acyclic, then submits the plan for approval.
+The old `--port 8080` remains an alias. The War Room reads both v2 run state and
+read-only v1 history, and provides:
 
-Planner uses the model chain from `.agents/config.json` (scout) and retries once
-with validation errors if the first plan is invalid.
+- run timeline: Planning → Worktree → Executing → Verifying → Handoff;
+- tier/planner badges;
+- spend, tokens and remaining budget;
+- Usage approval;
+- E4 Blackboard Round 1/2 votes;
+- handoff diff, explicit merge and rollback;
+- run history/replay.
 
-## Wave reviewers (parallel audit)
+## Goal → plan (v3)
 
-```bash
-python .agents/job.py --plan plan.json --root . --reviewer wave --wait --open
+```powershell
+.\swarm.cmd "Add JWT auth and tests"
 ```
 
-Four read-only reviewers run **in parallel** (security, QA, perf, docs) and their
-verdicts are aggregated: any reject blocks the apply. The default role models are
-free/local; override with `SWARM_WAVE_ROLES` when you intentionally want paid models. The wave is **budget-aware**:
-it uses the wave reservation/burst rules (soft 8 / hard 16). If fewer than four
-roles can run, the wave **fails closed**: it returns reject/unavailable and never
-auto-approves through the heuristic reviewer. `skipped` lists the roles that did
-not run. Default remains the 0-request heuristic reviewer for panel mode.
+The planner adapter reads the project, proposes a validated v2 MasterPlan with
+target files, verify commands and a tier, then the orchestrator runs the Usage
+gate and execution. For plan inspection only:
 
-Free dry-run (same free model for all four roles, $0):
-
-```cmd
-set SWARM_WAVE_ROLES=security=opencode/deepseek-v4.1-flash-free,qa=opencode/deepseek-v4.1-flash-free,perf=opencode/deepseek-v4.1-flash-free,docs=opencode/deepseek-v4.1-flash-free
-python .agents/job.py --plan scratch/swarm_demo/plan_wave.json --root . --reviewer wave --model opencode/deepseek-v4.1-flash-free --decision approve  # headless Usage approval
+```powershell
+.\swarm.cmd planner "Add JWT auth and tests" --out plan.json
 ```
+
+The frozen v1 `planner.py --goal ... --submit` path remains available as a test
+oracle, not the new-user entrypoint.
+
+## Wave reviewers (E3)
+
+```powershell
+.\swarm.cmd "review and fix the authentication flow" --tier E3
+```
+
+E3 runs four independent reviewer roles (security, QA, perf, docs) and blocks on
+any reject. E4 uses the Blackboard meeting protocol. The v1 `job.py` wave
+command remains available only as a frozen compatibility/test-oracle path.
 
 ## Soak / overnight
 
@@ -312,7 +346,11 @@ Kinds: `discord` (`content`), `telegram` (`chat_id` + `text`; `url` is the bot
 `sendMessage` endpoint), `generic` (`text`). Events: `plan.submitted`,
 `plan.approved`, `plan.rejected`, `job.done`. Notification failures never break a job.
 
-### Telegram bot (two-way)
+### Telegram bot (v1 compatibility, two-way deferred)
+
+v3.0.0 keeps safe one-way Telegram/Discord alerts. The v1 two-way control bot
+(`telegram_bot.py`) remains a frozen compatibility path; it is not part of the
+v3 new-user surface.
 
 ```json
 {"telegram": {"bot_token": "123:ABC", "chat_id": 123456}}
@@ -326,6 +364,19 @@ Only the configured `chat_id` is accepted. Commands: `/status`, `/approve`,
 `/reject`, `/pause`, `/resume`, `/stop`, `/say <direction>`, `/help`.
 
 ## Tests
+
+The release gate runs all 56 `test_*.py` files. Core v3 gates:
+
+```bash
+python .agents/tests/test_v1_v2_parity.py   # 45 checks, three fixtures
+python .agents/tests/test_phase4b.py        # resume/rollback/soak
+python .agents/tests/test_phase_process_crash.py
+python .agents/tests/test_unified_orchestrator.py
+python .agents/tests/test_unified_contracts.py
+python .agents/tests/test_swarm_cli.py
+```
+
+Representative v1/v2 suite:
 
 ```bash
 python .agents/tests/test_tiers.py        # E1-E4 / P1-P3 policy
@@ -364,18 +415,18 @@ Hard model-selection tasks live in `.agents/tests/hard_tasks.py`; see
 
 | Path | Purpose |
 |---|---|
-| `.agents/recipe_c.py` | pipeline engine (classify, verify twice, apply, rollback) |
-| `.agents/safe_writer.py` | backup, atomic write, transaction, journal, rollback |
-| `.agents/router.py` | work-type router (W0-W8) with cross-family chains |
-| `.agents/quota.py` | real spend from `opencode stats` (shared + per-model caps) |
-| `.agents/job.py` | Usage approval, state/control, sequential executor |
-| `.agents/planner.py` | goal -> plan.json (W4 planner) |
-| `.agents/notify.py` | one-way Discord/Telegram/generic webhooks |
-| `.agents/telegram_bot.py` | two-way Telegram control (/approve, /pause, /say) |
-| `.agents/workers.py` | coders/reviewers (agentic CLI, scripted, fallback) |
-| `.agents/sync_skill.py` | sync `.agents/SKILL.md` into the installed skill |
-| `.agents/ledger.py`, `schema.py`, `replay.py`, `dashboard.py` | evidence + observability |
-| `.agents/tests/` | acceptance suites and hard tasks |
+| `.agents/v2/swarm_cli.py` | official `swarm` CLI: run/resume/rollback/merge/status |
+| `.agents/unified/orchestrator.py` | v3 pipeline: preflight → tier → planner → Usage → execute → handoff |
+| `.agents/unified/contracts.py` | UnifiedRequest/UnifiedResult contracts |
+| `.agents/unified/state.py` | v2 run state plus read-only v1 history projection |
+| `.agents/unified/api.py` | War Room API with token, redaction and loopback guards |
+| `.agents/v2/` | worktree runner, budgets, tiers, planner adapter, delivery |
+| `.agents/dashboard.py` | War Room server at `127.0.0.1:8501` |
+| `.agents/dashboard_ui.html` | War Room timeline/spend/usage/blackboard/diff UI |
+| `.agents/tests/test_v1_v2_parity.py` | three deterministic v1/v2 parity fixtures |
+| `.agents/tests/test_phase4b.py`, `test_phase_process_crash.py` | resume/rollback/crash gates |
+| `.agents/recipe_c.py`, `job.py`, `planner.py` v1 paths | frozen fallback/test oracle |
+| `.agents/tests/` | full 56-file release regression suite |
 
 Install guide: [`docs/INSTALL.md`](docs/INSTALL.md).
 
