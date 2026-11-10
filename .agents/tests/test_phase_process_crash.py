@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -19,6 +21,7 @@ for _path in (AGENTS_DIR, AGENTS_DIR / "tests"):
         sys.path.insert(0, str(_path))
 
 from v2.execution import ExecutionEngine  # noqa: E402
+from v2.swarm_cli import main as swarm_main  # noqa: E402
 from test_v2_m3 import (  # noqa: E402
     Checks,
     StaticCoder,
@@ -100,9 +103,24 @@ def main() -> int:
         checks.check("crash: process was killed", child.returncode != 0,
                      child.returncode)
 
-        recovered = runner.recover(run_id)
-        checks.check("crash: state recovered to PROVISIONING",
-                     recovered["status"] == "PROVISIONING", recovered)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            resume_code = swarm_main([
+                "resume", "--run-id", run_id,
+                "--root", str(root),
+                "--state-root", str(root / "state"),
+                "--worktree-root", str(wt_root),
+                "--json",
+            ])
+        resume_text = buffer.getvalue()
+        try:
+            recovered = json.loads(resume_text)
+        except json.JSONDecodeError:
+            recovered = {}
+        checks.check("crash: swarm resume exits 0", resume_code == 0,
+                     resume_text[-800:])
+        checks.check("crash: swarm resume recovers to PROVISIONING",
+                     recovered.get("status") == "PROVISIONING", recovered)
         checks.check("crash: checkpoint state readable",
                      runner.load(run_id).load().get("status") == "PROVISIONING")
 
