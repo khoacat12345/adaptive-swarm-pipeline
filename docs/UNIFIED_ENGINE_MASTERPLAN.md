@@ -788,16 +788,31 @@ V1/V2 PARITY:       45/45 PASS
 Full repository:    55 test files, 0 failures
 ```
 
-This closes the fixture-level parity slice only. Live smoke and soak remain
-open.
+**2026-11-10 - Phase 4B live smoke and resilience.**
+
+- Live free-model smoke through `swarm --preset free-only`:
+  `v2_20261110T070617_56c0a0`, E2/P1, `HANDOFF_READY`, verify exit 0,
+  explicit merge `b347e725a4777588019917b8b7c16d9ea923141c`; main was unchanged
+  before merge and `src.py` became `VALUE = 2` only after explicit merge.
+- `swarm resume` now wraps the v2 recover/resume transition; the process-kill
+  test (`test_phase_process_crash.py`, 11/11) kills a real child and resumes
+  through the CLI before re-execution and handoff.
+- `swarm rollback` wraps the explicit delivery revert; `test_phase4b.py`
+  (14/14) checks merge and rollback restore the original main bytes.
+- Short fake soak: 3/3 cycles `HANDOFF_READY`, 0 failures. This is a smoke
+  resilience run, not the full 8-hour soak.
+
+This closes the fixture-level parity and live-smoke slices. The full 8-hour
+soak remains open.
 
 #### Exit gate
 
 ```text
 [x] all deterministic tests pass
 [x] parity fixtures match
-[ ] live smoke passes
-[ ] soak and crash tests pass
+[x] live smoke passes
+[x] crash/resume and merge/rollback pass
+[ ] full 8-hour soak or agreed equivalent
 [ ] owner accepts
 ```
 

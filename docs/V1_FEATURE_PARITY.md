@@ -84,10 +84,12 @@ written approval.
 
 ### 1.1 Evidence for the current port (2026-11-08)
 
-> Validation snapshot (2026-11-10): parity fixtures 45/45, contracts 40/40,
-> orchestrator 63/63, planner adapter 38/38, swarm CLI 44/44, v2 tiers 40/40,
-> v2 M3 25/25, Phase 4 36/36, v2 web UI 23/23. Full repository: 55 test files,
-> 0 failures. All commands exit 0; no existing test file was edited.
+> Validation snapshot (2026-11-10): parity fixtures 45/45, Phase 4B 14/14,
+> process crash/resume 11/11, contracts 40/40, orchestrator 63/63, planner
+> adapter 38/38, swarm CLI 44/44, v2 tiers 40/40, v2 M3 25/25, Phase 4 36/36,
+> v2 web UI 23/23. Full repository: 56 test files, 0 failures. Live free-model
+> smoke passed and explicit merge restored `src.py`; short fake soak 3/3. All
+> commands exit 0; no existing test file was edited.
 
 | Capability | Code | Deterministic evidence |
 |---|---|---|
@@ -316,9 +318,9 @@ Before v3:
 - [x] P2/P3 planning councils execute and validate before selection.
 - [x] v1 `order.json` maps to a v2 plan without re-implementing recipe logic.
 - [x] War Room shows v2 run/spend/usage/handoff/diff (one surface at 8501).
-- [x] Crash/resume and merge/rollback pass (existing v2 suites).
-- [ ] Free-model live smoke pass (not run in this deterministic slice).
-- [ ] 8-hour soak or agreed equivalent pass.
+- [x] Crash/resume and merge/rollback pass through `swarm resume`/`swarm rollback`.
+- [x] Free-model live smoke pass (`v2_20261110T070617_56c0a0`).
+- [ ] Full 8-hour soak or agreed equivalent pass; short 3-cycle fake soak passed.
 - [x] `v1.0.5` tag remains available as rollback.
 
 ## 7. Immediate next actions

@@ -482,3 +482,10 @@
 - 2026-11-07T08:22:47 cycle=458 mode=fake ok=True status=HANDOFF_READY elapsed=2.8s
 - 2026-11-07T08:23:49 cycle=459 mode=fake ok=True status=HANDOFF_READY elapsed=2.8s
 - Soak stopped 2026-11-07T08:23:50 after 459 cycle(s)
+
+## Soak started 2026-11-10T14:06:47
+- mode: `fake`  interval: 0.0s  hours: 0.1
+- 2026-11-10T14:06:51 cycle=1 mode=fake ok=True status=HANDOFF_READY elapsed=3.7s
+- 2026-11-10T14:06:55 cycle=2 mode=fake ok=True status=HANDOFF_READY elapsed=3.5s
+- 2026-11-10T14:07:00 cycle=3 mode=fake ok=True status=HANDOFF_READY elapsed=3.6s
+- Soak stopped 2026-11-10T14:07:01 after 3 cycle(s)
