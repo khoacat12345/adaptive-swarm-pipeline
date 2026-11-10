@@ -84,10 +84,10 @@ written approval.
 
 ### 1.1 Evidence for the current port (2026-11-08)
 
-> Validation snapshot (2026-11-09): contracts 40/40, orchestrator 63/63,
-> planner adapter 38/38, swarm CLI 44/44, v2 tiers 40/40, v2 M3 25/25,
-> Phase 4 36/36, v2 web UI 23/23. All commands exit 0; no existing test file
-> was edited.
+> Validation snapshot (2026-11-10): parity fixtures 45/45, contracts 40/40,
+> orchestrator 63/63, planner adapter 38/38, swarm CLI 44/44, v2 tiers 40/40,
+> v2 M3 25/25, Phase 4 36/36, v2 web UI 23/23. Full repository: 55 test files,
+> 0 failures. All commands exit 0; no existing test file was edited.
 
 | Capability | Code | Deterministic evidence |
 |---|---|---|
@@ -98,6 +98,7 @@ written approval.
 | Goal → v2 plan | `v2/planner_adapter.py` | `python .agents/tests/test_planner_adapter.py` |
 | P1–P3 planning council | `v2/planner_adapter.run_planning_council` | `test_planner_adapter.py`, `test_unified_orchestrator.py` |
 | v1 `order.json` shim | `v2/planner_adapter.from_order`, `swarm run --order` | `test_unified_orchestrator.py` order cases |
+| v1-vs-v2 parity fixtures | `test_v1_v2_parity.py` (single-file, multi-file, security-sensitive) | `python .agents/tests/test_v1_v2_parity.py` (45 checks) |
 | Unified contracts | `unified/contracts.py` | `python .agents/tests/test_unified_contracts.py` (40 checks) |
 | Unified orchestrator | `unified/orchestrator.py` (CLI delegates) | `python .agents/tests/test_unified_orchestrator.py` (63 checks) |
 | One-command CLI | `v2/swarm_cli.py`, `swarm.cmd`, `swarm.sh` | `python .agents/tests/test_swarm_cli.py` |
@@ -119,13 +120,13 @@ written approval.
 | CLI budget caps | `swarm --max-cost/--max-requests/--max-wall-seconds` | Caps lower the plan envelope *before* the Usage decision; they never increase it, and phase allocations are down-scaled to keep validation sound. |
 | CLI version surface | `swarm --version` (2.2.0) | Wrappers and operators can identify the installed entrypoint. |
 
-**Honest gaps still open:** fixture-level v1-vs-v2 parity is not implemented by
-this slice; live free-model smoke and soak evidence still need a real run;
-`clarify.py` ambiguity checks are still advisory; the unified preflight uses
-`doctor` but the live route catalog check (`preflight.check_live`) is not wired
-into the orchestrator yet; and the CLI caps are explicit operator flags, not a
-model-driven cost forecast. The War Room is implemented; its v1 rows are a
-read-only history projection, not a second execution path.
+**Honest gaps still open:** fixture-level parity now passes, but live
+free-model smoke and soak evidence still need a real run; `clarify.py` ambiguity
+checks are still advisory; the unified preflight uses `doctor` but the live route
+catalog check (`preflight.check_live`) is not wired into the orchestrator yet;
+and the CLI caps are explicit operator flags, not a model-driven cost forecast.
+The War Room is implemented; its v1 rows are a read-only history projection,
+not a second execution path.
 `swarm` defaults to a guarded worktree and never auto-merges; the orchestrator
 has no merge path at all.
 
@@ -304,9 +305,9 @@ Before v3:
 - [ ] Every user-facing row is `PORTED`, `REPLACED` with an equivalent, or
       approved `DEFERRED`.
 - [ ] Every `DROP_CANDIDATE` has an owner decision.
-- [ ] Same fixture through v1 legacy and v2 produces the same target bytes.
-- [ ] v1 main worktree is unchanged by v2 until explicit merge.
-- [ ] verify commands pass in both paths.
+- [x] Same three fixtures through v1 legacy and v2 produce the same target bytes.
+- [x] v1 main worktree is unchanged by v2 until explicit merge.
+- [x] verify commands pass in both paths.
 - [x] E1/E2/E3/E4 have expected reviewer/meeting behavior.
 - [x] A runtime tier override cannot bypass the signed plan/Usage estimate.
 - [x] `swarm "task"` reaches `HANDOFF_READY` with fake seats.

@@ -767,11 +767,35 @@ SKILL CONSISTENCY
 - Windows + Linux/macOS CI.
 - Secret/path redaction review.
 
+#### 4.3 Phase 4A evidence (2026-11-10)
+
+`test_v1_v2_parity.py` now runs three deterministic fixtures offline with fake
+model seats:
+
+1. single-file logic fix (E2);
+2. multi-file refactor (E3);
+3. security-sensitive authorization fix (E3, security reviewer required).
+
+For each fixture the suite runs the frozen v1 `recipe_c` oracle, then v2 through
+`swarm`, checks that main is unchanged before merge, performs explicit merge,
+and compares final bytes. It also checks scope, verify exit, tier/planner,
+reviewer policy, budget artifact and absence of unexpected writes.
+
+Evidence:
+
+```text
+V1/V2 PARITY:       45/45 PASS
+Full repository:    55 test files, 0 failures
+```
+
+This closes the fixture-level parity slice only. Live smoke and soak remain
+open.
+
 #### Exit gate
 
 ```text
-[ ] all deterministic tests pass
-[ ] parity fixtures match
+[x] all deterministic tests pass
+[x] parity fixtures match
 [ ] live smoke passes
 [ ] soak and crash tests pass
 [ ] owner accepts
