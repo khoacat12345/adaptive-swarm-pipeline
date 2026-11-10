@@ -42,7 +42,7 @@ from v2.runner import V2Runner  # noqa: E402
 
 __version__ = "2.2.0"
 
-COMMANDS = {"doctor", "planner", "run", "status", "handoff", "merge"}
+COMMANDS = {"doctor", "planner", "run", "status", "handoff", "merge", "resume", "rollback"}
 
 
 def _normalize_argv(argv: Sequence[str]) -> list[str]:
@@ -228,6 +228,15 @@ def _build_parser() -> argparse.ArgumentParser:
     merge.add_argument("--message", default=None)
     merge.add_argument("--verify-timeout", type=int, default=300)
     merge.add_argument("--dry-run", action="store_true")
+
+    resume = sub.add_parser("resume", parents=[common],
+                            help="recover a killed phase or resume a paused run")
+    resume.add_argument("--run-id", required=True)
+
+    rollback = sub.add_parser("rollback", parents=[common],
+                              help="revert a previous explicit merge")
+    rollback.add_argument("--run-id", required=True)
+    rollback.add_argument("--message", default=None)
     return parser
 
 
@@ -316,7 +325,7 @@ def main(
         _emit(payload, as_json=as_json)
         return 0
 
-    if args.command in {"status", "handoff", "merge"}:
+    if args.command in {"status", "handoff", "merge", "resume", "rollback"}:
         state_root, worktree_root = _resolve_state_paths(root, args)
         runner = V2Runner(root, state_root=state_root, worktree_root=worktree_root)
         try:
@@ -327,6 +336,33 @@ def main(
                 return 0
             if args.command == "handoff":
                 payload = runner.handoff(args.run_id, report=args.report)
+                _emit(payload, as_json=as_json)
+                return 0
+            if args.command == "resume":
+                manifest = runner.load(args.run_id).load()
+                status = str(manifest.get("status") or "")
+                if status in {"PHASE_EXECUTING", "PHASE_VERIFYING"}:
+                    recovered = runner.recover(args.run_id)
+                    payload = {"ok": True, "action": "recover",
+                               "previous_status": status, **recovered}
+                elif status in {"PAUSED", "BLOCKED", "RATE_LIMITED",
+                                "AWAITING_USER_CONFIRMATION", "USER_CONFIRMED"}:
+                    resumed = runner.resume(args.run_id)
+                    payload = {"ok": True, "action": "resume",
+                               "status": resumed.get("status"),
+                               "run_id": args.run_id}
+                else:
+                    raise ExecutionError(
+                        f"resume requires a killed/disrupted phase or paused run, got {status!r}")
+                _emit(payload, as_json=as_json)
+                return 0
+            if args.command == "rollback":
+                from v2.delivery import rollback as rollback_merge
+
+                payload = rollback_merge(
+                    root, args.run_id, state_root=state_root,
+                    message=args.message,
+                )
                 _emit(payload, as_json=as_json)
                 return 0
             from v2.delivery import merge as merge_handoff
