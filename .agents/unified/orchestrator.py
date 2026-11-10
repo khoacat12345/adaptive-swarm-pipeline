@@ -755,7 +755,7 @@ class UnifiedOrchestrator:
                     coder_kind=request.coder_kind,
                     timeout=request.timeout,
                     config=config,
-                    paid_cost=request.paid_cost,
+                    paid_cost_usd=request.paid_cost,
                     free_only=bool(
                         use_free or preset_free_only(request.preset)
                     ),
