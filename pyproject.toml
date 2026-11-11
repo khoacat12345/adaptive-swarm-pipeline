@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "adaptive-swarm-pipeline"
 version = "3.0.0"
-description = "Verification-first autonomous multi-agent coding harness for OpenCode"
+description = "Unified autonomous multi-agent pipeline with zero-trust Git worktree isolation, council planning, and verification gates."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
