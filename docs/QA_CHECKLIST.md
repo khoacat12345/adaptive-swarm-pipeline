@@ -11,16 +11,16 @@
 
 | Trường | Giá trị |
 |---|---|
-| Ngày kiểm tra | |
-| Người kiểm tra | |
-| Commit đang test | |
-| Tag | `v3.0.0` |
-| Hệ điều hành | Windows / Linux / macOS |
-| Python | |
-| Git | |
-| OpenCode CLI | |
-| Chế độ test | Fake seats + một live free-only smoke |
-| Kết quả tổng | PASS / FAIL |
+| Ngày kiểm tra | 2026-11-12 |
+| Người kiểm tra | QA gate (OpenCode / AI) |
+| Commit đang test | `2caeac25864fe05c9ab26ec46af3fa87007c51ef` |
+| Tag | `v3.0.0` → `60e57f03d539df19955fa87925f9f6696f580c76` (HEAD test là commit docs/QA sau tag) |
+| Hệ điều hành | Windows (win32) |
+| Python | 3.12.10 |
+| Git | 2.56.0.windows.2 |
+| OpenCode CLI | v2.0.32 |
+| Chế độ test | Fake seats E2 + automated regression; live smoke SKIP |
+| Kết quả tổng | **FAIL (UI acceptance)** — xem Findings bên dưới |
 
 ---
 
@@ -719,18 +719,66 @@ TOTAL=56 FAILURES=0
 
 | Evidence | Giá trị |
 |---|---|
-| Commit SHA | |
-| `swarm --version` | |
-| Full suite result | |
-| Test log path | |
-| Live smoke run ID | |
-| War Room screenshot | |
-| Merge run ID | |
-| Rollback run ID | |
-| CI run URL | |
-| PyPI URL | |
-| ZIP SHA256 | |
-| Ghi chú lỗi / skip | |
+| Commit SHA | `2caeac25864fe05c9ab26ec46af3fa87007c51ef` |
+| `swarm --version` | `swarm 3.0.0` |
+| Full suite result | **56/56 PASS, 0 failures, exit code 0** |
+| Test log path | `C:\Users\tuank\AppData\Local\Temp\swarm-v3-evidence\regression.log` |
+| Packaging logs | `build.log`, `twine.log`, `wheel-install.log`, `pypi-install.log`, `uvx.log` trong thư mục evidence |
+| E2E logs | `e2e_run.log`, `e2e_status.log`, `e2e_merge_dryrun.log`, `e2e_merge.log`, `e2e_rollback.log` |
+| Live smoke run ID | **SKIP** — không chạy lại; dùng evidence cũ `v2_20261110T070617_56c0a0`. Fake E2 run: `v2_20261111T171242_7ac1be` |
+| War Room screenshot | `C:\Users\tuank\AppData\Local\Temp\swarm-v3-evidence\war-room-unified.png` |
+| Merge run ID | `v2_20261111T171242_7ac1be` — pre-merge `684e58cc1069ca16ea983c42aefad8d21a13142e`, merge `0881a647852e8e0560d105fd43c03278204d68b8` |
+| Rollback run ID | `v2_20261111T171242_7ac1be` — rollback commit `d42abd7cec6f6193274a998a7adf7a397544e76e`; tree equal baseline (`git diff --quiet 684e58c HEAD` → exit 0) |
+| CI run URL | cross-platform: https://github.com/khoacat12345/adaptive-swarm-pipeline/actions/runs/43062462649 · publish: https://github.com/khoacat12345/adaptive-swarm-pipeline/actions/runs/43041207834 |
+| PyPI URL | https://pypi.org/project/adaptive-swarm-pipeline/3.0.0/ |
+| ZIP SHA256 | `75a245312bd912d7b19ab4e6e5e592bb82d76a27c76a4387e828197e67f4d7a3` |
+| Ghi chú lỗi / skip | UI token counts bị redacted; UI verify summary rỗng; rollback là revert commit (nội dung khớp baseline nhưng HEAD khác SHA); worktree được giữ lại để làm evidence; live smoke và 8h soak SKIP theo Mục 13 |
+
+### Giá trị thực tế thay cho placeholder
+
+| Placeholder | Giá trị thực tế |
+|---|---|
+| `<id>` | `v2_20261111T171242_7ac1be` |
+| `<repo>` | `C:\Users\tuank\AppData\Local\Temp\swarm-qa-temp-repo` |
+| Worktree | `C:\Users\tuank\AppData\Local\AdaptiveSwarm\worktrees\v2_20261111T171242_7ac1be` |
+| State root | `C:\Users\tuank\AppData\Local\Temp\swarm-qa-temp-repo\.agents\tmp\v2\runs\v2_20261111T171242_7ac1be` |
+| Baseline SHA | `684e58cc1069ca16ea983c42aefad8d21a13142e` |
+| Merge SHA | `0881a647852e8e0560d105fd43c03278204d68b8` |
+| Rollback SHA | `d42abd7cec6f6193274a998a7adf7a397544e76e` |
+
+### Findings
+
+1. **UI token counts bị redacted — P1 UI data defect.**
+   - `GET /api/unified/runs/<id>` trả:
+     ```text
+     estimated_tokens: "[REDACTED_SECRET]"
+     used_tokens: "[REDACTED_SECRET]"
+     remaining_tokens: "[REDACTED_SECRET]"
+     ```
+   - Root cause: `.agents/unified/state.py` dùng `_SECRET_KEY_HINTS` chứa
+     `"token"`; `redact()` khớp mọi key có chuỗi `token`, kể cả token count.
+   - Ảnh hưởng: Spend panel trong War Room không hiển thị token thật.
+   - Đề xuất: chỉ redact credential keys (`signoff_token`, `usage_token`, ...),
+     hoặc bỏ qua các key kết thúc bằng `_tokens`/`tokens`; thêm regression test.
+2. **UI verify summary chưa lấy được verify exit 0 — P2.**
+   - `GET /api/unified/runs/<id>` trả `verify.ok = null`, `last_exit = null`,
+     `results = []` dù `checkpoint.recorded` có `verify_exit: 0` và
+     `run.merged.verify[0].exit_code == 0`.
+   - Root cause: `_verify_summary()` chỉ đọc event có chữ `verify`; bỏ qua
+     `checkpoint.recorded`/`run.merged`.
+   - Ảnh hưởng: War Room có thể hiển thị Verify pending sau khi verify pass.
+3. **Rollback semantics — cần chốt acceptance.**
+   - Nội dung main khớp baseline: `git diff --quiet baseline HEAD` → exit 0.
+   - HEAD là revert commit `d42abd7...`, không phải baseline SHA `684e58c...`.
+   - Nếu tiêu chí là "exact SHA reset", case này FAIL; nếu là "restore đúng byte",
+     case này PASS.
+4. **Worktree retention — không phải lỗi chức năng.**
+   - Sau rollback, worktree vẫn tồn tại để giữ evidence.
+   - Cleanup dự kiến qua `prune`; chưa xóa trong lần QA này.
+5. **Live smoke và 8-hour soak — SKIP có lý do.**
+   - Live smoke không chạy lại để tiết kiệm quota; dùng evidence cũ.
+   - Soak dài không chạy lại vì execution core không thay đổi; evidence
+     459/459 fake cycles đã có.
 
 ---
 
