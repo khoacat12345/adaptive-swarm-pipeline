@@ -1,7 +1,7 @@
 # Adaptive Swarm Pipeline
 
 [![PyPI version](https://img.shields.io/pypi/v/adaptive-swarm-pipeline.svg)](https://pypi.org/project/adaptive-swarm-pipeline/)
-[![Downloads](https://img.shields.io/pypi/dm/adaptive-swarm-pipeline.svg)](https://pypi.org/project/adaptive-swarm-pipeline/)
+[![PyPI Downloads](https://img.shields.io/badge/PyPI%20Downloads-live-blue.svg)](https://pypi.org/project/adaptive-swarm-pipeline/#files)
 [![tests](https://github.com/khoacat12345/adaptive-swarm-pipeline/actions/workflows/cross-platform.yml/badge.svg?branch=main)](https://github.com/khoacat12345/adaptive-swarm-pipeline/actions/workflows/cross-platform.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -133,6 +133,8 @@ Swarm separates **doing the work** from **accepting the result**.
   coder output may not target test paths, and changed test hashes fail with
   `TEST_TAMPER`. Python proposals are also syntax/AST-checked before they reach
   the transaction writer.
+- **Budget and time caps.** Per-call usage is reconciled against the reservation,
+  and a hard wall-clock limit of 600 seconds prevents runaway or stalled runs.
 
 Git worktree isolation protects **files**, not the operating system. For
 untrusted workloads, use an external container or VM sandbox.
