@@ -22,6 +22,23 @@ v3.0.0       unified engine: swarm + War Room + v2 runtime
 The v1 commands remain in the repository as a deterministic test oracle and
 emergency compatibility path. They are not the new-user interface.
 
+## v1.0.5 vs v3.0.0
+
+| Capability | v1.0.5 (frozen fallback) | v3.0.0 (official) |
+|---|---|---|
+| Entrypoint | `planner.py`, `job.py`, `recipe_c.py` | `swarm "task"` / `/swarm` |
+| Apply model | Verify then apply directly, with backup/transaction | Worktree execution, explicit `swarm merge` |
+| Main branch | Can change during the run | Unchanged until explicit merge |
+| Planner | W4 goal → plan | Planner adapter P1–P3 with optional council seats |
+| Review tiers | Wave/meeting paths | E1–E4 tier-aware execution, including E4 Blackboard |
+| Dashboard | v1 dashboard | Unified War Room at `127.0.0.1:8501` |
+| Recovery | Transaction journal | `swarm resume` + checkpoints + crash tests |
+| Rollback | Transaction/delivery rollback | `swarm rollback` after explicit merge |
+| Surface | Multiple commands and pages | One CLI, one War Room, one state projection |
+
+v1 remains available as `v1.0.5` for emergency rollback and as a deterministic
+test oracle. v2.1.0 remains a historical tag and is not retagged.
+
 ## What is new
 
 ### Unified Orchestrator
@@ -53,6 +70,15 @@ available through `--planner-model`.
 - API endpoints are under `/api/unified/`.
 - Loopback-only binding, token-bound writes, secret redaction and diff caps.
 
+### Worktree isolation
+- Every execution runs in a guarded Git worktree.
+- The main tree is untouched during planning, execution and verification.
+- Handoff is a patch/report; `swarm merge` applies it only after all
+  `verify_command` entries exit `0`.
+- `swarm rollback` restores the pre-merge state.
+- Git worktree protects files, not the OS; use an external sandbox for
+  untrusted workloads.
+
 ### Delivery and resilience
 - Explicit `swarm merge` with a verify gate.
 - `swarm rollback` restores the pre-merge state.
@@ -75,6 +101,51 @@ available through `--planner-model`.
 - Soak evidence: full 8-hour fake soak (2026-11-07) completed 459/459 cycles
   `HANDOFF_READY`; the post-Phase 4 short smoke added 3/3 cycles. Product Owner
   accepted the Phase 4 evidence for release.
+
+## Release artifacts and checksum
+
+Offline source archive:
+
+```text
+dist/adaptive-swarm-pipeline-v3.0.0.zip
+dist/adaptive-swarm-pipeline-v3.0.0.zip.sha256
+```
+
+SHA-256:
+
+```text
+75a245312bd912d7b19ab4e6e5e592bb82d76a27c76a4387e828197e67f4d7a3
+```
+
+The official GitHub Release title is:
+
+```text
+Adaptive Swarm Pipeline v3.0.0 — Unified Autonomous Engine
+```
+
+The release workflow attaches the ZIP and the `.sha256` file. The checksum is
+also stored in the release notes so it can be verified after download:
+
+```powershell
+(Get-FileHash .\adaptive-swarm-pipeline-v3.0.0.zip -Algorithm SHA256).Hash
+```
+
+## PyPI package
+
+The package name is `adaptive-swarm-pipeline`, version `3.0.0`, with the
+console entrypoint `swarm`. Publishing uses PyPI Trusted Publishing through
+GitHub Actions OIDC; no long-lived PyPI API token is stored in the repository.
+
+```powershell
+python -m pip install adaptive-swarm-pipeline==3.0.0
+swarm --version
+```
+
+Expected output:
+
+```text
+swarm 3.0.0
+```
 
 ## Verification
 

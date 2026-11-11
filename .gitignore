@@ -11,6 +11,8 @@
 !/AGENTS.md
 !/README.md
 !/LICENSE
+!/pyproject.toml
+!/scripts/
 !/dashboard.cmd
 !/dashboard.sh
 !/swarm.cmd
