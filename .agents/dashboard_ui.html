@@ -1798,26 +1798,6 @@
       text-decoration: none
     }
 
-    .runpick {
-      min-width: 210px;
-      text-align: left;
-      border: 1px solid #203044;
-      background: #0c1622;
-      color: var(--text);
-      border-radius: 9px;
-      padding: 8px 10px;
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      gap: 4px
-    }
-
-    .runpick:hover { border-color: #3a617f; background: #101d2b }
-    .runpick.active { border-color: #2388c9; background: #10283a; box-shadow: inset 3px 0 0 #37a9e8 }
-    .runpick .rp-top { display: flex; gap: 6px; align-items: center }
-    .runpick .rp-goal { font-weight: 600; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-    .runpick .rp-meta { color: var(--dim2); font: 9.5px Consolas, monospace; display: flex; gap: 6px; flex-wrap: wrap }
-
     .ov-subtabs {
       display: flex;
       gap: 4px;
@@ -2641,15 +2621,6 @@
 
       <!-- OVERVIEW -->
       <section class="view active" id="view-overview">
-        <div class="card" id="runBarCard">
-          <div class="spread" style="margin-bottom:8px">
-            <h2 style="margin:0">Runs</h2>
-            <button class="btn primary" onclick="newRun()">+ New run</button>
-          </div>
-          <div id="runBar" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:5px">
-            <span class="muted">Loading runs...</span>
-          </div>
-        </div>
         <div id="overviewHero">
           <div class="ov-hero">
             <div class="ov-card muted">Loading mission control...</div>
@@ -2676,8 +2647,8 @@
 
       <!-- UNIFIED WAR ROOM (v2 state + read-only v1 history) -->
       <section class="view" id="view-unified">
-        <div class="grid" style="grid-template-columns:1fr">
-          <div class="card" id="uwPickerCard" style="display:none">
+        <div class="grid g2">
+          <div class="card">
             <div class="spread" style="margin-bottom:8px">
               <h2 style="margin:0">War Room</h2>
               <button class="btn ghost" onclick="uwLoadRuns()">Refresh</button>
@@ -2692,10 +2663,7 @@
           </div>
           <div class="card">
             <div class="spread" style="margin-bottom:8px">
-              <div><h2 id="uwGoal" style="margin:0">Select a run</h2>
-                <div class="muted" style="font-size:10.5px;margin-top:3px">
-                  Meeting/blackboard only. Choose a previous run in Overview.
-                </div></div>
+              <h2 id="uwGoal" style="margin:0">Select a run</h2>
               <span id="uwStatus" class="pill">-</span>
             </div>
             <div class="row" style="gap:8px;margin-bottom:10px">
@@ -2774,7 +2742,7 @@
         <div class="card">
           <div class="chathead">
             <div class="row">
-              <select id="runSelect" class="btn ghost" onchange="selectChatRun(this.value)"></select>
+              <select id="runSelect" class="btn ghost" onchange="selectRun(this.value)"></select>
               <span id="chatMeta" class="muted mono"></span>
             </div>
             <div class="row">
@@ -2979,8 +2947,6 @@
     const state = {
       view: 'overview', runs: [], selected: null, run: null, diff: null, job: null, planState: null,
       unifiedRuns: [], unifiedPlan: null, unifiedPlanId: null, unifiedPlanSig: '',
-      selectedRunId: new URLSearchParams(location.search).get('run') || null,
-      selectedSource: null, ctxDetail: null, ctxEvents: [], ctxDiff: null,
       quota: null, health: null, drafts: null, workspaces: [], chatTab: 'timeline', follow: false,
       chatFilter: 'all', overviewTab: 'warroom', hourlyMode: 'cost', teamData: null, replayIndex: null, replayTimer: null, pageSig: {},
       meetingRound: 'all', stream: null, streamRun: null, streamHealthy: false, streamRefreshTimer: null,
@@ -3016,29 +2982,26 @@
         const [job, plan, health, team, unified] = await Promise.all([
           api('/api/job'), api('/api/plan'), api('/api/health'),
           api('/api/team').catch(() => ({})),
-          api('/api/unified/runs?include_v1=1').catch(() => ({ runs: [] }))
+          api('/api/unified/runs?include_v1=0').catch(() => ({ runs: [] }))
         ]);
         state.job = job; state.planState = plan; state.health = health;
         state.teamData = team;
         state.unifiedRuns = unified.runs || [];
-        // Run selection is explicit. Never auto-select a legacy v1 run or a
-        // different v2 run just because it is newest.
-        if (state.selectedRunId) {
-          const stillExists = state.unifiedRuns.some((run) => run.run_id === state.selectedRunId);
-          if (stillExists) {
-            await loadRunContext(state.selectedRunId, true);
-          } else {
-            clearRunSelection(false);
-          }
-        }
+        await syncUnifiedPlan();
         if (Date.now() - state.lastQuota > 15000) {
           try {
             state.quota = await api('/api/quota');
             state.lastQuota = Date.now();
           } catch (_) { /* keep the previous quota snapshot */ }
         }
+        if (!state.selected) {
+          const first = state.runs.find((run) => run.task_id) || state.runs[0];
+          if (first) state.selected = first.run_id;
+        }
+        if (state.selected) await loadRun(state.selected, true);
         $('#connDot').classList.remove('off');
         render();
+        if (state.view === 'overview') ensureWarRun();
       } catch (error) {
         $('#connDot').classList.add('off');
         $('#updatedAt').textContent = 'offline';
@@ -3066,114 +3029,32 @@
       'PAUSED', 'BLOCKED', 'RATE_LIMITED'
     ]);
 
-    function clearRunSelection(redraw = true) {
-      state.selectedRunId = null;
-      state.selectedSource = null;
-      state.ctxDetail = null;
-      state.ctxEvents = [];
-      state.ctxDiff = null;
-      state.unifiedPlan = null;
-      state.unifiedPlanId = null;
-      state.run = null;
-      state.diff = null;
-      state.selected = null;
-      const url = new URL(location.href);
-      url.searchParams.delete('run');
-      history.replaceState(null, '', url);
-      if (redraw) render();
+    function pickUnifiedPlanRun(runs) {
+      const v2 = (runs || []).filter((run) => run && run.run_id);
+      return v2.find((run) => V2_ACTIVE_STATUSES.has(String(run.status || ''))) || v2[0] || null;
     }
 
-    async function loadRunContext(runId, silent = false) {
-      const meta = (state.unifiedRuns || []).find((run) => run.run_id === runId);
-      if (!meta) {
-        clearRunSelection(false);
-        return false;
-      }
-      state.selectedRunId = runId;
-      state.selectedSource = meta.source || 'v2';
-      state.selected = runId;
-      if (state.selectedSource === 'v2') {
-        const [detail, events, diff] = await Promise.all([
-          api('/api/unified/runs/' + encodeURIComponent(runId)),
-          api('/api/unified/runs/' + encodeURIComponent(runId) + '/events?limit=200')
-            .catch(() => ({ items: [] })),
-          api('/api/unified/runs/' + encodeURIComponent(runId) + '/diff')
-            .catch(() => ({}))
-        ]);
-        state.ctxDetail = detail;
-        state.ctxEvents = events.items || events.events || [];
-        state.ctxDiff = diff;
-        state.unifiedPlan = detail;
-        state.unifiedPlanId = runId;
-        state.diff = diff;
-        state.run = null;
-      } else {
-        await loadRun(runId, silent);
-        state.ctxDetail = null;
-        state.ctxEvents = [];
-        state.ctxDiff = state.diff;
+    async function syncUnifiedPlan() {
+      const run = pickUnifiedPlanRun(state.unifiedRuns);
+      if (!run) {
         state.unifiedPlan = null;
         state.unifiedPlanId = null;
-      }
-      return true;
-    }
-
-    async function selectRun(runId, targetView = null) {
-      if (!runId) return;
-      const ok = await loadRunContext(runId);
-      if (!ok) return;
-      const url = new URL(location.href);
-      url.searchParams.set('run', runId);
-      history.replaceState(null, '', url);
-      render();
-      if (targetView) switchView(targetView);
-    }
-
-    function newRun() {
-      clearRunSelection(false);
-      switchView('overview');
-      setTimeout(() => {
-        const goal = $('#goal');
-        if (goal) goal.focus();
-      }, 50);
-    }
-
-    function renderRunBar() {
-      const box = $('#runBar');
-      if (!box) return;
-      const runs = (state.unifiedRuns || []).slice().sort((left, right) => {
-        const l = String(left.updated_at || '');
-        const r = String(right.updated_at || '');
-        if (l !== r) return r.localeCompare(l);
-        return String(left.run_id).localeCompare(String(right.run_id));
-      });
-      if (!runs.length) {
-        box.innerHTML = '<span class="muted">No runs yet. Add a goal below to start the first run.</span>';
         return;
       }
-      box.innerHTML = runs.map((run) => {
-        const selected = run.run_id === state.selectedRunId;
-        const live = V2_ACTIVE_STATUSES.has(String(run.status || ''));
-        const source = run.source || 'v2';
-        return `<button class="runpick ${selected ? 'active' : ''}" onclick="selectRun('${esc(run.run_id)}')">
-          <span class="rp-top">
-            <span class="uw-badge ${source === 'v1' ? '' : 'e'}">${esc(source)}</span>
-            <b class="mono">${esc(run.run_id)}</b>
-            ${live ? '<span class="pill ok">live</span>' : ''}
-            <span class="pill" style="margin-left:auto">${esc(run.status || '?')}</span>
-          </span>
-          <span class="rp-goal">${esc(run.goal || run.run_id)}</span>
-          <span class="rp-meta">
-            <span>${esc(run.tier || '-')}</span>
-            <span>${esc(run.updated_at || '')}</span>
-            ${selected ? '<span class="ok">selected</span>' : ''}
-          </span>
-        </button>`;
-      }).join('');
+      try {
+        const detail = await api('/api/unified/runs/' + encodeURIComponent(run.run_id));
+        state.unifiedPlan = detail;
+        state.unifiedPlanId = run.run_id;
+      } catch (_) {
+        // Keep the previous v2 plan only when it is the same run.
+        if (state.unifiedPlanId !== run.run_id) state.unifiedPlan = null;
+      }
     }
 
     function openUnifiedRun(runId) {
-      selectRun(runId, 'unified');
+      if (!runId) return;
+      uwState.selected = runId;
+      switchView('unified');
     }
 
     function toggleLegacyPlan() {
@@ -3187,11 +3068,8 @@
       const detail = state.unifiedPlan;
       const plan = detail && detail.plan ? detail.plan : null;
       if (!plan) {
-        panel.style.display = '';
-        legacy.style.display = 'none';
-        panel.innerHTML = `<div class="hero"><div><div class="eyebrow">Plan</div>
-          <h2>Plan not ready</h2><p>The selected run has not submitted a plan yet.</p></div>
-          <div class="actions"><button class="btn primary" onclick="switchView('overview')">Back to Overview</button></div></div>`;
+        panel.style.display = 'none';
+        legacy.style.display = '';
         return;
       }
       panel.style.display = '';
@@ -3338,6 +3216,7 @@
       if (view === 'chat') renderChat();
       if (view === 'unified') uwLoadRuns(true);
       if (['overview', 'plan'].includes(view)) render();
+      if (view === 'overview') ensureWarRun();
     }
 
     /* ---------- render ---------- */
@@ -3348,43 +3227,26 @@
       const control = job.control || {};
       const decision = job.decision || (state.planState || {}).decision || {};
 
-      renderRunBar();
       const unifiedPlan = state.unifiedPlan;
-      const hasV2 = state.selectedSource === 'v2' && !!unifiedPlan;
-      const hasV1 = state.selectedSource === 'v1' && !!state.run;
-      if (hasV2) {
-        $('#sideState').textContent = String(unifiedPlan.status || 'active').toLowerCase();
-        $('#sideDot').classList.remove('off');
-        $('#sideJob').textContent = String(unifiedPlan.run_id || 'v2');
-      } else if (hasV1) {
-        $('#sideState').textContent = jobState.phase || 'idle';
-        $('#sideDot').classList.toggle('off', !jobState.phase);
-        $('#sideJob').textContent = jobState.job_id || state.selectedRunId || 'no job';
-      } else {
-        $('#sideState').textContent = 'select a run';
-        $('#sideDot').classList.add('off');
-        $('#sideJob').textContent = 'no run selected';
-      }
+      $('#sideState').textContent = unifiedPlan
+        ? String(unifiedPlan.status || 'active').toLowerCase()
+        : (jobState.phase || 'idle');
+      $('#sideDot').classList.toggle('off', !(unifiedPlan || jobState.phase));
+      $('#sideJob').textContent = unifiedPlan
+        ? String(unifiedPlan.run_id || 'v2')
+        : (jobState.job_id ? jobState.job_id : 'no job');
       $('#updatedAt').textContent = 'updated ' + new Date().toLocaleTimeString();
       const badge = $('#planBadge');
-      badge.style.display = hasV1 && decision.status === 'pending' ? 'inline-block' : 'none';
+      badge.style.display = unifiedPlan || decision.status !== 'pending' ? 'none' : 'inline-block';
 
+      if (state.view === 'plan') renderUnifiedPlan();
       if (state.view === 'overview') {
-        if (hasV2) renderUnifiedOverview();
-        else if (hasV1) {
-          renderOverview(plan, jobState, decision, control);
-          renderWarRoom(plan, jobState, decision);
-          renderVerify(plan, jobState, decision);
-          renderDone(plan, jobState, decision);
-        } else {
-          renderEmptyOverview();
-        }
+        renderOverview(plan, jobState, decision, control);
+        renderWarRoom(plan, jobState, decision);
+        renderVerify(plan, jobState, decision);
+        renderDone(plan, jobState, decision);
       }
-      if (state.view === 'plan') {
-        if (hasV2) renderUnifiedPlan();
-        else if (hasV1) renderPlan(plan, decision, jobState, control);
-        else renderEmptyPlan();
-      }
+      if (state.view === 'plan') renderPlan(plan, decision, jobState, control);
       if (state.view === 'workspaces') renderWorkspaces();
       if (state.view === 'quota') renderUsage();
       if (state.view === 'settings') renderSettings(plan, jobState, control);
@@ -3434,9 +3296,15 @@
     }
 
     async function ensureWarRun() {
-      // Legacy v1 auto-selection is intentionally disabled. Overview owns the
-      // explicit run selector and never steals the user's selection.
-      return;
+      const phase = (state.job && state.job.state && state.job.state.phase) || '';
+      if (['awaiting_approval', 'approved'].includes(phase)) return;
+      const current = state.run && state.run.run ? state.run.run.run_id : '';
+      const latest = (state.runs || []).find((run) => String(run.run_id).startsWith('rc_'));
+      if (!latest || String(latest.run_id) === String(current)) return;
+      try {
+        await loadRun(latest.run_id, true);
+        if (state.view === 'warroom') render();
+      } catch (_) { /* keep the current run */ }
     }
 
     function shortModel(model) {
@@ -3764,122 +3632,6 @@
         })()}
     </div>
   </div>`;
-    }
-
-    function renderEmptyOverview() {
-      $('#overviewHero').innerHTML = `<div class="ov-card ov-snapshot">
-        <div class="eyebrow">Mission control</div>
-        <div class="ov-title">No run selected</div>
-        <p class="ov-obj">Choose an active or previous run from the bar above.
-          Click <b>+ New run</b> to start with a fresh goal.</p>
-        <div class="actions"><button class="btn primary" onclick="newRun()">+ New run</button></div>
-      </div>`;
-      $('#overviewTabs').innerHTML = '';
-      $('#warBody').innerHTML = '<p class="muted">Select a run to inspect its plan, chat and verify evidence.</p>';
-      $('#verifyBody').innerHTML = '<p class="muted">No run selected.</p>';
-      $('#doneBody').innerHTML = '<p class="muted">No run selected.</p>';
-      applyOverviewTab();
-    }
-
-    function renderEmptyPlan() {
-      const panel = $('#planUnified');
-      const legacy = $('#planLegacyCard');
-      panel.style.display = '';
-      legacy.style.display = 'none';
-      panel.innerHTML = `<div class="hero"><div>
-        <div class="eyebrow">Plan</div><h2>No run selected</h2>
-        <p>Select a run in Overview first. The Plan tab will show that run's plan.</p>
-      </div><div class="actions"><button class="btn primary" onclick="switchView('overview')">Choose a run</button></div></div>`;
-    }
-
-    function v2TimelineRows(detail) {
-      return (detail.timeline || []).map((item) => `<div class="row" style="gap:8px;padding:4px 0">
-        <span class="mono" style="width:82px;color:var(--dim2)">${esc(item.state || '')}</span>
-        <b style="font-size:11px">${esc(item.label || item.id || '')}</b>
-        <span class="muted mono" style="font-size:10px">${esc(item.at || '')}</span>
-      </div>`).join('');
-    }
-
-    function renderUnifiedOverview() {
-      const detail = state.unifiedPlan;
-      const plan = detail && detail.plan ? detail.plan : {};
-      const phases = plan.phases || [];
-      const orders = phases.flatMap((phase) => phase.work_orders || []);
-      const files = [...new Set(orders.flatMap((item) => item.target_files || []))];
-      const status = detail.status || 'UNKNOWN';
-      const tone = uwTone(status);
-      if (!guardRender('overview-v2', {
-        id: detail.run_id, status, plan, spend: detail.spend,
-        verify: detail.verify, handoff: detail.handoff
-      })) {
-        applyOverviewTab();
-        return;
-      }
-      const verify = detail.verify || {};
-      const handoff = detail.handoff || {};
-      const spend = detail.spend || {};
-      const e4 = (detail.blackboard_rounds || []).length > 0 || detail.tier === 'E4';
-      const statusClass = tone === 'ok' ? 'ok' : tone === 'bad' ? 'bad' : 'warn';
-      $('#overviewHero').innerHTML = `<div class="ov-card ov-snapshot">
-        <div class="ov-head">
-          <div style="min-width:0">
-            <div class="eyebrow">Mission control</div>
-            <div class="ov-title mono">${esc(detail.run_id)}</div>
-            <p class="ov-obj">${esc(detail.goal || plan.goal || '')}</p>
-            <div class="chips">
-              <span class="pill ${statusClass}">${esc(status)}</span>
-              <span class="chip">${esc(detail.tier || '-')}</span>
-              <span class="chip">${esc(detail.planner || '-')}</span>
-              <span class="chip">${phases.length} phase</span>
-              <span class="chip">${files.length} file</span>
-            </div>
-          </div>
-          <div class="actions" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-            <button class="btn primary" onclick="switchView('plan')">Open plan</button>
-            <button class="btn" onclick="switchView('chat')">Open chat</button>
-            ${e4 ? `<button class="btn ghost" onclick="switchView('unified')">War Room</button>` : ''}
-            <button class="btn ghost" onclick="newRun()">+ New run</button>
-          </div>
-        </div>
-        <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
-          <span class="chip">Worktree: <span class="mono">${esc(detail.worktree || '-')}</span></span>
-          <span class="chip">Source: ${esc(detail.source || 'v2')}</span>
-        </div>
-      </div>`;
-      const tabs = [
-        { key: 'warroom', label: 'Run', meta: status },
-        { key: 'verify', label: 'Verify', meta: verify.ok === true ? 'PASS' : verify.ok === false ? 'FAIL' : 'pending' },
-        { key: 'report', label: 'Report', meta: handoff.merged ? 'merged' : handoff.ready ? 'handoff ready' : 'in progress' }
-      ];
-      $('#overviewTabs').innerHTML = tabs.map((tab) =>
-        `<button data-tab="${tab.key}" onclick="setOverviewTab('${tab.key}')">
-          <b>${esc(tab.label)}</b><span>${esc(tab.meta)}</span></button>`).join('');
-      $('#warBody').innerHTML = `<div class="grid g2">
-        <div class="card"><h3 style="margin-top:0">Run timeline</h3>${v2TimelineRows(detail) || '<p class="muted">No timeline yet.</p>'}</div>
-        <div class="card"><h3 style="margin-top:0">Spend</h3>
-          <div class="kv">
-            <div class="k">Requests</div><div>${esc(spend.used_requests || 0)} / ${esc(spend.max_requests || '-')}</div>
-            <div class="k">Tokens</div><div>${esc(spend.used_tokens || 0)} / ${esc(spend.estimated_tokens || '-')}</div>
-            <div class="k">Cost</div><div>$${esc(spend.used_cost_usd || 0)}</div>
-            <div class="k">Current phase</div><div class="mono">${esc(detail.current_phase || '-')}</div>
-          </div>
-        </div>
-      </div>`;
-      $('#verifyBody').innerHTML = `<div class="card"><h3 style="margin-top:0">Verification</h3>
-        <div class="kv"><div class="k">Status</div><div>${verify.ok === true ? '<span class="pill ok">PASS</span>' : verify.ok === false ? '<span class="pill bad">FAIL</span>' : '<span class="pill warn">pending</span>'}</div>
-        <div class="k">Last exit</div><div class="mono">${esc(verify.last_exit != null ? verify.last_exit : '-')}</div></div>
-        ${(verify.results || []).map((item) => `<div class="contract"><span class="mono">${esc(item.command || verify.command || '-')}</span><span class="chip">${esc(item.event_type || '')}</span><span class="mono">exit ${esc(item.exit_code)}</span></div>`).join('') || '<p class="muted">No verify results yet.</p>'}
-      </div>`;
-      $('#doneBody').innerHTML = `<div class="card"><h3 style="margin-top:0">Delivery</h3>
-        <div class="kv">
-          <div class="k">Handoff</div><div>${handoff.ready ? '<span class="pill ok">ready</span>' : '<span class="pill warn">not ready</span>'}</div>
-          <div class="k">Merged</div><div>${handoff.merged ? '<span class="pill ok">yes</span>' : 'no'}</div>
-          <div class="k">Merge SHA</div><div class="mono">${esc((handoff.merge || {}).merge_sha || '-')}</div>
-          <div class="k">Rollback</div><div>${handoff.rolled_back ? '<span class="pill bad">rolled back</span>' : 'no'}</div>
-        </div>
-        ${handoff.report_text ? `<pre class="uw-pre">${esc(handoff.report_text)}</pre>` : '<p class="muted">No completion report yet. F11 will add a full report.</p>'}
-      </div>`;
-      applyOverviewTab();
     }
 
     function renderPlan(plan, decision, jobState, control) {
@@ -5108,85 +4860,7 @@
       if (force) toast('Jumped to latest');
     }
 
-    function unifiedChatTimeline() {
-      return (state.ctxEvents || []).map((event) => {
-        const data = event.data || {};
-        return {
-          ...event,
-          details: data,
-          node: data.role || data.sender || data.agent || event.node || 'system',
-          message: data.message || data.body || data.summary || data.text || event.event_type,
-          timestamp: event.timestamp || event.created_at
-        };
-      });
-    }
-
-    function renderUnifiedChat() {
-      const detail = state.ctxDetail || {};
-      const runs = state.unifiedRuns || [];
-      const select = $('#runSelect');
-      select.innerHTML = runs.map((run) =>
-        `<option value="${esc(run.run_id)}" ${run.run_id === state.selectedRunId ? 'selected' : ''}>${esc(run.run_id)} — ${esc(run.goal || '')}</option>`
-      ).join('') || '<option>no runs</option>';
-      $('#chatMeta').textContent = state.selectedRunId
-        ? `${detail.status || '?'} · ${state.ctxEvents.length} events · ${esc(detail.tier || '')}/${esc(detail.planner || '')}`
-        : 'Select a run in Overview.';
-      $('#followBtn').textContent = 'Follow: ' + (state.follow ? 'on' : 'off');
-      $('#followBtn').classList.toggle('primary', state.follow);
-      document.querySelectorAll('#chatFilters button').forEach((button) =>
-        button.classList.toggle('active', button.dataset.filter === (state.chatFilter || 'all')));
-      const stream = $('#chatStream'), diffPane = $('#diffPane');
-      const isChat = state.chatTab === 'timeline';
-      stream.style.display = isChat ? 'flex' : 'none';
-      diffPane.style.display = isChat ? 'none' : 'block';
-      $('#tabTimeline').classList.toggle('active', isChat);
-      $('#tabDiff').classList.toggle('active', !isChat);
-      if (!state.selectedRunId) {
-        stream.innerHTML = '<div class="chat-empty">Select a run in Overview to see its chat.</div>';
-        return;
-      }
-      if (!isChat) {
-        const diff = state.ctxDiff || {};
-        const lines = (diff.diff || '').split('\n');
-        const rendered = lines.map((line) => {
-          let cls = 'ctx';
-          if (line.startsWith('@@')) cls = 'hunk';
-          else if (line.startsWith('+') && !line.startsWith('+++')) cls = 'add';
-          else if (line.startsWith('-') && !line.startsWith('---')) cls = 'del';
-          return `<div class="${cls}">${esc(line) || '&nbsp;'}</div>`;
-        }).join('');
-        diffPane.innerHTML = `<div class="spread" style="margin-bottom:6px">
-          <span class="mono">${esc(diff.target || 'handoff diff')}</span>
-          <span class="muted mono">${esc(diff.changed_lines || 0)} lines</span></div>
-          <pre class="diff">${rendered || '<div class="ctx">No diff for this run.</div>'}</pre>`;
-        return;
-      }
-      const timelineData = unifiedChatTimeline();
-      const signature = sigOf({ timelineData, filter: state.chatFilter, follow: state.follow });
-      if (signature === state.sig.chat) return;
-      state.sig.chat = signature;
-      const atBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 50;
-      const messages = chatMessages(timelineData).filter(chatFilterMatch);
-      if (!messages.length) {
-        stream.innerHTML = '<div class="chat-empty">This run has no chat events for this filter.</div>';
-        return;
-      }
-      stream.innerHTML = messages.map(chatBubble).join('');
-      if (state.follow || atBottom) stream.scrollTop = stream.scrollHeight;
-    }
-
     function renderChat() {
-      if (state.selectedSource === 'v2') {
-        renderUnifiedChat();
-        return;
-      }
-      if (!state.selectedRunId) {
-        const emptySelect = $('#runSelect');
-        if (emptySelect) emptySelect.innerHTML = '<option>no run selected</option>';
-        $('#chatMeta').textContent = 'Select a run in Overview.';
-        $('#chatStream').innerHTML = '<div class="chat-empty">Select a run in Overview to see its chat.</div>';
-        return;
-      }
       const select = $('#runSelect');
       const runs = state.runs.filter((run) => run.task_id).slice(0, 30);
       select.innerHTML = runs.map((run) =>
@@ -5675,9 +5349,10 @@
       setControl('opinion', value); input.value = '';
     }
 
-    async function selectChatRun(runId) {
+    async function selectRun(runId) {
       if (!runId) return;
-      await selectRun(runId, 'chat');
+      await loadRun(runId);
+      switchView('chat');
     }
 
     function chatTab(tab) {
@@ -5761,27 +5436,16 @@
       try {
         const data = await api('/api/unified/runs?include_v1=1');
         uwState.runs = data.runs || [];
-        const selectedExists = state.selectedRunId
-          && uwState.runs.some((run) => run.run_id === state.selectedRunId);
-        uwState.selected = selectedExists ? state.selectedRunId : null;
+        const v2Runs = uwState.runs.filter((run) => run.source !== 'v1');
+        const first = v2Runs.find((run) => V2_ACTIVE_STATUSES.has(String(run.status || '')))
+          || v2Runs[0] || uwState.runs[0];
+        const selectedExists = uwState.runs.some((run) => run.run_id === uwState.selected);
+        if (!keepSelection || !uwState.selected || !selectedExists) {
+          uwState.selected = first ? first.run_id : null;
+        }
         uwRenderRunList();
         uwRenderHistory(data.summary || {});
-        if (uwState.selected) {
-          await uwSelect(uwState.selected, true);
-        } else {
-          uwState.detail = null;
-          $('#uwGoal').textContent = 'Select a run';
-          $('#uwStatus').textContent = '-';
-          $('#uwStatus').className = 'pill';
-          $('#uwTimeline').innerHTML = '';
-          $('#uwWarnings').innerHTML = '';
-          $('#uwSpend').innerHTML = '<span class="muted">Select a run in Overview.</span>';
-          $('#uwUsage').innerHTML = '<span class="muted">Select a run in Overview.</span>';
-          $('#uwBlackboard').innerHTML = '<span class="muted">Select a run in Overview.</span>';
-          $('#uwHandoffInfo').textContent = 'Select a run in Overview.';
-          $('#uwDiff').textContent = '';
-          $('#uwEvents').innerHTML = '<span class="muted">No run selected.</span>';
-        }
+        if (uwState.selected) await uwSelect(uwState.selected, true);
       } catch (error) {
         $('#uwRunList').innerHTML = `<span class="bad">${esc(error.message)}</span>`;
       } finally {
@@ -5956,6 +5620,8 @@
     const VIEWS = ['overview', 'unified', 'plan', 'chat', 'workspaces', 'quota', 'drafts', 'settings'];
     const STAGE_TABS = { warroom: 'warroom', verify: 'verify', report: 'report', done: 'report' };
     const initialView = (location.hash || '#overview').slice(1);
+    const runParam = new URLSearchParams(location.search).get('run');
+    if (runParam) state.selected = runParam;
     switchView(STAGE_TABS[initialView] ? initialView
       : initialView === 'analyze' ? 'plan'
         : VIEWS.includes(initialView) ? initialView : 'overview');

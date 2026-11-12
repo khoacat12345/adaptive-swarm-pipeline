@@ -133,9 +133,7 @@ def main() -> int:
         ui = (AGENTS_DIR / "dashboard_ui.html").read_text(encoding="utf-8")
         for marker in ("Run timeline", "Tier", "Spend", "Usage approval",
                        "Blackboard", "Handoff", "Run history",
-                       "LIVE V2 PLAN", "planUnified", "toggleLegacyPlan",
-                       "runBar", "newRun", "selectedRunId",
-                       "renderUnifiedOverview", "renderUnifiedChat"):
+                       "LIVE V2 PLAN", "planUnified", "toggleLegacyPlan"):
             checks += 1; assert marker.lower() in ui.lower(), marker
 
         print(f"UNIFIED DASHBOARD: {checks}/{checks} PASS")
