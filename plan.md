@@ -37,7 +37,7 @@
 | Mức | Ý nghĩa | Phạm vi |
 |---|---|---|
 | **P0** | Nền tảng bắt buộc cho orchestration | F01 |
-| **P1** | Giá trị cao, tạo khác biệt cốt lõi | F02–F05 |
+| **P1** | Giá trị cao, tạo khác biệt cốt lõi | F02–F05, F11 |
 | **P2** | Mở rộng sản phẩm, tăng adoption | F06–F08 |
 | **P3** | Platform/remote/automation | F09–F10 |
 
@@ -152,7 +152,7 @@ Nó bỏ qua `checkpoint.recorded` và `run.merged`.
 
 ---
 
-# 10 Features
+# 10 Core Features + F11 Reporting
 
 | ID | Chức năng | Ưu tiên | Giá trị | Effort | Target |
 |---|---|---|---|---|---|
@@ -161,6 +161,7 @@ Nó bỏ qua `checkpoint.recorded` và `run.merged`.
 | F03 | Decision Inbox + ask/reply gates | **P1** | Cao | M | v3.2.0 |
 | F04 | Agent-agnostic adapter protocol | **P1** | Rất cao | L | v3.2.0 |
 | F05 | Quota-aware scheduling | **P1** | Cao | M | v3.2.x |
+| F11 | Unified run completion report | **P1** | R?t cao | M | v3.1.x |
 | F06 | Browser/visual verification | **P2** | Rất cao cho web | M/L | v3.3.0 |
 | F07 | Diff annotations + feedback loop | **P2** | Cao | M | v3.3.x |
 | F08 | GitHub/Linear/PR/CI integration | **P2** | Cao | L | v3.4.0 |
@@ -439,6 +440,80 @@ chiếm quá nhiều việc.
 
 ---
 
+## F11 ? Unified Run Completion Report
+
+### V?n ??
+
+War Room hi?n c? timeline, spend, Usage, handoff diff v? l?ch s? event, nh?ng
+sau khi run k?t th?c ng??i d?ng v?n kh?ng c? m?t b?o c?o ho?n ch?nh tr? l?i:
+
+- ?? l?m xong vi?c g??
+- File n?o ?? thay ??i?
+- Verify ?? pass ch?a?
+- C? review/veto n?o kh?ng?
+- ?? merge hay rollback ch?a?
+- T?i c?n ki?m tra g? ti?p theo?
+
+Trang **Report** hi?n t?i ch? y?u ph?c v? job/plan v1; run v2 `HANDOFF_READY`
+kh?ng c? m?t completion report t??ng ?ng trong War Room.
+
+### M?c ti?u
+
+Sau m?i run ? ??c bi?t l? run ?? `HANDOFF_READY`, `MERGED`, `ROLLED_BACK` ho?c
+`FAILED` ? ng??i d?ng m? War Room v? th?y ngay m?t b?o c?o ho?n ch?nh, kh?ng
+ph?i ??c chat log ho?c t? gh?p timeline.
+
+### Ph?m vi
+
+- Th?m **Run Report** v?o War Room cho v2:
+  - tr?ng th?i cu?i;
+  - goal;
+  - tier/planner;
+  - th?i gian b?t ??u/k?t th?c/duration;
+  - run ID;
+  - worktree;
+  - s? request/token/cost;
+  - file thay ??i v? diff stat;
+  - verify commands + exit code + output tail;
+  - review roles/votes;
+  - E4 Blackboard n?u c?;
+  - merge/rollback SHA;
+  - warnings v? next action.
+- Th?m API:
+  ```text
+  GET /api/unified/runs/<id>/report
+  ```
+- B? sung `report` v?o `run_detail` ?? UI kh?ng ph?i gh?p nhi?u request.
+- N?t h?nh ??ng:
+  - `View diff`
+  - `Merge`
+  - `Rollback`
+  - `Copy run ID`
+  - `Download Markdown`
+  - `Download JSON`
+- Empty state r? r?ng:
+  - ch?a c? report;
+  - run ?ang ch?y;
+  - run fail kh?ng c? handoff.
+- Gi? nguy?n explicit merge gate; report kh?ng t? merge.
+
+### Acceptance
+
+- [ ] Sau `HANDOFF_READY`, War Room c? b?o c?o ?what changed / what passed?.
+- [ ] B?o c?o hi?n th? verify exit code th?t.
+- [ ] B?o c?o hi?n th? merge/rollback status v? SHA.
+- [ ] C? th? t?i Markdown/JSON.
+- [ ] Kh?ng l? secret/token.
+- [ ] B?o c?o E4 hi?n th? vote; E1?E3 kh?ng c? panel meeting gi?.
+- [ ] Report kh?ng thay ??i main.
+- [ ] C? test API + UI.
+
+**Effort:** M
+**Ph? thu?c:** state projection hi?n c?; kh?ng c?n ch? F01
+**Target:** v3.1.x
+
+---
+
 # P2 — Mở rộng sản phẩm
 
 ## F06 — Browser/visual verification
@@ -637,6 +712,7 @@ P1: F02 Worker lifecycle
 P1: F03 Decision Inbox
 P1: F04 Agent adapter
 P1: F05 Quota routing
+P1: F11 Unified run report
 P2: F06 Browser verification
 P2: F07 Diff annotations
 P2: F08 GitHub/Linear
