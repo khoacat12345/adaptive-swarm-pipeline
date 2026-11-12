@@ -96,12 +96,28 @@ ACTIVE_STATUSES = {
     "AWAITING_USER_CONFIRMATION", "USER_CONFIRMED", "USER_REJECTED",
 }
 
-# Order of fields that may carry a credential.  Redaction is applied to every
-# projected string, not just to known event payload keys.
+# Only authentication/credential fields are redacted.  In particular, generic
+# metric names such as ``estimated_tokens`` and ``used_tokens`` must remain
+# visible in the War Room spend panel.
 _SECRET_KEY_HINTS = (
-    "token", "secret", "password", "passwd", "api_key", "apikey", "authorization",
-    "private_key", "access_key", "refresh_token", "signoff_token", "usage_token",
+    "access_token", "refresh_token", "signoff_token", "usage_token",
+    "auth_token", "bearer_token", "api_key", "apikey", "authorization",
+    "password", "passwd", "secret", "private_key", "access_key",
 )
+# String-level scanning keeps the broad token hint so key=value credentials are
+# still caught, while the mapping path below excludes token-count suffixes.
+_SECRET_STRING_HINTS = ("token",) + _SECRET_KEY_HINTS
+_TOKEN_COUNT_SUFFIXES = ("_tokens", "tokens")
+
+
+def _is_secret_key(name: str) -> bool:
+    """Return True only for credential keys, not token-count metrics."""
+    lowered = str(name).lower()
+    if lowered == "tokens" or lowered.endswith(_TOKEN_COUNT_SUFFIXES):
+        return False
+    if lowered in {"token", "secret", "password", "authorization"}:
+        return True
+    return any(hint in lowered for hint in _SECRET_KEY_HINTS)
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +197,7 @@ def _redact_string(value: str) -> str:
         except Exception:  # pragma: no cover - scanner must never break the UI
             pass
     lowered = text.lower()
-    if any(hint in lowered for hint in _SECRET_KEY_HINTS) and not any(
+    if any(hint in lowered for hint in _SECRET_STRING_HINTS) and not any(
         marker in text for marker in ("[REDACTED", "Bearer <", "****")
     ):
         # Scan known key=value shapes that the generic scanner may miss.
@@ -213,8 +229,7 @@ def redact(value: Any, *, depth: int = 0, max_string: int = 20_000) -> Any:
             if index >= 80:
                 break
             name = str(key)
-            lowered = name.lower()
-            if any(hint in lowered for hint in _SECRET_KEY_HINTS) and isinstance(
+            if _is_secret_key(name) and isinstance(
                 item, (str, int, float, bool)
             ):
                 # Keep boolean/None states meaningful, hide every literal value.
@@ -327,23 +342,92 @@ def _plan_commands(plan: Mapping[str, Any]) -> list[str]:
 
 def _verify_summary(plan: Mapping[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
     commands = _plan_commands(plan)
+    default_command = commands[0] if len(commands) == 1 else None
     results: list[dict[str, Any]] = []
+
+    def append_result(
+        event_type: str,
+        timestamp: Any,
+        *,
+        command: Any = None,
+        exit_code: Any = None,
+        output: Any = None,
+        status: Any = None,
+    ) -> None:
+        if exit_code is None:
+            return
+        results.append({
+            "event_type": event_type,
+            "timestamp": timestamp,
+            "command": command or default_command,
+            "exit_code": exit_code,
+            "output": output,
+            "status": status,
+        })
+
     for event in events:
         name = str(event.get("event_type") or "")
-        if "verify" not in name:
-            continue
         data = event.get("data") if isinstance(event.get("data"), Mapping) else {}
-        exit_code = data.get("exit_code", data.get("verify_exit"))
-        if exit_code is None and isinstance(data.get("result"), Mapping):
-            exit_code = (data.get("result") or {}).get("exit_code")
-        entry = {
-            "event_type": name,
-            "timestamp": event.get("timestamp"),
-            "command": data.get("command") or data.get("verify_command"),
-            "exit_code": exit_code,
-            "status": event.get("status") or data.get("status"),
-        }
-        results.append(entry)
+        timestamp = event.get("timestamp")
+
+        # Direct verify events keep their existing shape.
+        if "verify" in name:
+            exit_code = data.get("exit_code", data.get("verify_exit"))
+            if exit_code is None and isinstance(data.get("result"), Mapping):
+                exit_code = (data.get("result") or {}).get("exit_code")
+            append_result(
+                name,
+                timestamp,
+                command=data.get("command") or data.get("verify_command"),
+                exit_code=exit_code,
+                output=data.get("output_tail") or data.get("output"),
+                status=event.get("status") or data.get("status"),
+            )
+            continue
+
+        # Checkpoints carry the verification result for the phase.  They are
+        # written before a handoff and are the authoritative evidence when no
+        # explicit verify.* event was emitted.
+        if name == "checkpoint.recorded":
+            append_result(
+                name,
+                timestamp,
+                command=data.get("verify_command"),
+                exit_code=data.get("verify_exit"),
+                output=data.get("verify_output"),
+                status=event.get("status"),
+            )
+            verify_results = data.get("verify_results")
+            if isinstance(verify_results, list):
+                for item in verify_results:
+                    if not isinstance(item, Mapping):
+                        continue
+                    append_result(
+                        name,
+                        timestamp,
+                        command=item.get("command") or item.get("verify_command"),
+                        exit_code=item.get("exit_code", item.get("verify_exit")),
+                        output=item.get("output_tail") or item.get("output"),
+                        status=item.get("status") or event.get("status"),
+                    )
+            continue
+
+        # Merge re-runs every verify command; expose that evidence in the UI.
+        if name == "run.merged":
+            merged_verify = data.get("verify")
+            if isinstance(merged_verify, list):
+                for item in merged_verify:
+                    if not isinstance(item, Mapping):
+                        continue
+                    append_result(
+                        name,
+                        timestamp,
+                        command=item.get("command") or item.get("verify_command"),
+                        exit_code=item.get("exit_code", item.get("verify_exit")),
+                        output=item.get("output_tail") or item.get("output"),
+                        status=item.get("status") or event.get("status"),
+                    )
+
     last = next((item for item in reversed(results) if item.get("exit_code") is not None), None)
     ok: bool | None = None
     if last is not None:
