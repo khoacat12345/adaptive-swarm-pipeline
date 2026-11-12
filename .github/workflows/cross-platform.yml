@@ -49,6 +49,8 @@ jobs:
         run: python -m unittest discover -s .agents/tests -p "test_v2_event_state.py"
       - name: Unified state projection
         run: python -m unittest discover -s .agents/tests -p "test_unified_state.py"
+      - name: Unified logbook projection
+        run: python -m unittest discover -s .agents/tests -p "test_unified_logbook.py"
       - name: Skill consistency
         run: python .agents/tests/test_skill_consistency.py
       - name: Wave reviewer / fail-closed

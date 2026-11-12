@@ -1,6 +1,11 @@
-#!/usr/bin/env sh
-# Open the Unified War Room on Linux/macOS (loopback only).
-set -eu
-dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cd "$dir"
-exec python3 .agents/dashboard.py --root . --port 8501 --open
+#!/usr/bin/env bash
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON=python3
+else
+  PYTHON=python
+fi
+
+exec "$PYTHON" "$DIR/.agents/v2/swarm_cli.py" ui "$@"

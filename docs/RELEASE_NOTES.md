@@ -1,5 +1,23 @@
 # Adaptive Swarm Pipeline — Release Notes
 
+## v3.0.1 — Single-Run Viewer and Logbook
+
+- UI is now **single-run only**; run history and the War Room surface are
+  removed from the user-facing dashboard.
+- Open a run from the terminal:
+  ```bash
+  swarm ui --run-id <id> --open
+  ```
+- Each invocation regenerates a human-readable logbook:
+  ```text
+  .agents/tmp/v2/runs/<id>/logbook.md
+  .agents/tmp/v2/runs/<id>/logbook.json
+  ```
+- Chat, replay, verify, diff, Usage, merge and rollback remain available for
+  the selected run.
+- The viewer never exposes another run or auto-selects a legacy run.
+- Verification: 58/58 test files pass.
+
 ## v3.0.0 — Unified Engine
 
 **Release status:** production release

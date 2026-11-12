@@ -29,8 +29,8 @@ swarm merge --run-id <id>
 ```
 
 **v3.0.0 is the Unified Autonomous Engine release.** It consolidates the
-previously separate v1/v2 entrypoints into one CLI, one orchestrator, one state
-model and one War Room.
+previously separate v1/v2 entrypoints into one CLI and one orchestrator. The
+dashboard is now a **single-run viewer**, opened with a run ID from the terminal.
 
 ---
 
@@ -114,7 +114,7 @@ Swarm separates **doing the work** from **accepting the result**.
 | Write directly into the working tree | Execute in an isolated Git worktree |
 | One model reviews itself | Maker-checker councils across model families |
 | A model can silently weaken tests | Frozen test hashes, test-path rejection and AST syntax checks |
-| Review happens in chat history | War Room timeline, spend, votes and diff evidence |
+| Review happens in chat history | Per-run timeline, spend, votes, diff and logbook evidence |
 | The agent decides when to commit | The operator explicitly runs `swarm merge` |
 | Crash means starting over | `swarm resume` recovers paused or killed runs |
 | Errors are hard to undo | `swarm rollback` restores the pre-merge state |
@@ -145,8 +145,8 @@ untrusted workloads, use an external container or VM sandbox.
 
 ```text
        +-------------------------------+
-       |  swarm CLI / OpenCode / War   |
-       |  Room dashboard (:8501)      |
+       |  swarm CLI / OpenCode / Run  |
+       |  Viewer (:8501, run-scoped)   |
        +---------------+---------------+
                        |
                        v
@@ -179,8 +179,8 @@ The main components:
   context and verification.
 - **Planner adapter** — turns a goal, v1 plan or v1 `order.json` into a validated
   v2 MasterPlan.
-- **War Room** — the single local dashboard for run state, spend, reviews,
-  diffs and delivery.
+- **Run Viewer** — a single-run dashboard for plan, chat, verify, spend,
+  delivery and the generated logbook. It does not expose run history.
 - **Delivery layer** — merge and rollback are explicit operator actions.
 
 ---
@@ -204,6 +204,9 @@ swarm planner --goal "Add rate limiting" --out plan.json
 swarm status --last
 swarm status --run-id <id>
 
+# Open the viewer for exactly one run
+swarm ui --run-id <id> --open
+
 # Review the handoff, then deliver explicitly
 swarm merge --run-id <id>
 swarm rollback --run-id <id>
@@ -219,6 +222,7 @@ Useful commands:
 | `swarm "task"` | Run one task through the unified pipeline |
 | `swarm planner --goal "task"` | Produce an inspectable plan without executing it |
 | `swarm status --last` | Show the latest run and handoff information |
+| `swarm ui --run-id <id>` | Open the single-run viewer for one run |
 | `swarm merge --run-id <id>` | Verify and apply a handoff to `main` |
 | `swarm rollback --run-id <id>` | Revert a previous merge |
 | `swarm resume --run-id <id>` | Resume a paused or interrupted run |
@@ -230,40 +234,52 @@ and test oracle. New users should use `swarm`.
 
 ---
 
-## War Room
+## Single-Run Viewer
 
-The War Room is the single local dashboard at:
-
-```text
-http://127.0.0.1:8501
-```
-
-Launch it from a source checkout:
+The UI is intentionally scoped to **one run**:
 
 ```bash
-python .agents/dashboard.py --root . --port 8501 --open
+swarm ui --run-id <id> --open
 ```
 
-On Windows:
+or, from a source checkout:
+
+```bash
+python .agents/dashboard.py --root . --run-id <id> --port 8501 --open
+```
+
+Windows wrapper:
 
 ```powershell
-.\dashboard.cmd
+.\dashboard.cmd --run-id <id> --port 8501 --open
 ```
 
-`--port 8080` remains an alias for old bookmarks. The War Room is a small
-single-page dashboard served by Python's standard-library HTTP server; it does
-not require Streamlit or a separate frontend build.
+The default page without `--run-id` only prints instructions; it does **not**
+show run history. To view another run, start another viewer process with that
+run ID (use separate ports when viewing concurrent runs).
 
-It shows:
+The viewer shows only the selected run:
 
-- run timeline: Planning -> Worktree -> Executing -> Verifying -> Handoff;
-- tier and planner badges;
-- token, cost and remaining budget;
-- Usage approval state;
-- E4 Blackboard Round 1/2 votes;
-- handoff diff and verification evidence;
-- explicit merge and rollback actions;
-- v2 run history plus read-only v1 history.
+- goal, tier/planner and final status;
+- plan and work orders;
+- per-run chat/events, filter and replay;
+- verify commands, results and exit codes;
+- spend/tokens and remaining budget;
+- handoff diff, explicit merge and rollback;
+- generated logbook.
+
+### Per-run logbook
+
+`swarm ui --run-id <id>` regenerates a human-readable logbook in:
+
+```text
+.agents/tmp/v2/runs/<id>/logbook.md
+.agents/tmp/v2/runs/<id>/logbook.json
+```
+
+Raw events, patches and state remain the source of truth. The logbook is a
+deterministic projection for humans and includes descriptions, file changes,
+verification evidence, spend and delivery status.
 
 ---
 
@@ -314,7 +330,7 @@ v3.0.0 is tested as a release, not just as a collection of files.
 
 | Gate | Evidence |
 |---|---|
-| Full regression | **56/56 test files pass**, 0 failures, exit code 0 |
+| Full regression | **58/58 test files pass**, 0 failures, exit code 0 |
 | v1/v2 parity | **45/45**, three deterministic fixtures |
 | Crash and resume | **11/11** process-kill/recovery checks |
 | Phase 4B delivery | **14/14** merge/rollback/soak checks |
@@ -391,10 +407,11 @@ Key project documents:
 | `.agents/unified/orchestrator.py` | Unified pipeline |
 | `.agents/unified/contracts.py` | Unified request/result contracts |
 | `.agents/unified/state.py` | v2 state plus read-only v1 history |
-| `.agents/unified/api.py` | War Room API |
+| `.agents/unified/api.py` | Unified API for the single-run viewer |
+| `.agents/unified/logbook.py` | Per-run Markdown/JSON logbook generator |
 | `.agents/v2/` | Worktree runner, budgets, tiers, planner, delivery |
-| `.agents/dashboard.py` | War Room server at `127.0.0.1:8501` |
-| `.agents/dashboard_ui.html` | War Room user interface |
+| `.agents/dashboard.py` | Single-run viewer server at `127.0.0.1:8501` |
+| `.agents/run_ui.html` | Single-run viewer UI (no history/War Room) |
 | `.agents/tests/` | Release regression suite |
 | `swarm.cmd` / `swarm.sh` | Source-checkout CLI wrappers |
 | `pyproject.toml` | PEP 517 packaging and PyPI metadata |

@@ -136,6 +136,14 @@ def main() -> int:
                        "LIVE V2 PLAN", "planUnified", "toggleLegacyPlan"):
             checks += 1; assert marker.lower() in ui.lower(), marker
 
+        # The user-facing surface is now a single-run viewer. The old SPA is
+        # retained only as the legacy/test surface and is not served by default.
+        checks += 1; assert "Run Viewer" in dashboard.RUN_HTML
+        checks += 1; assert "Logbook" in dashboard.RUN_HTML
+        checks += 1; assert "War Room" not in dashboard.RUN_HTML
+        checks += 1; assert "Run history" not in dashboard.RUN_HTML
+        checks += 1; assert "single-run only" in dashboard.REQUIRED_HTML
+
         print(f"UNIFIED DASHBOARD: {checks}/{checks} PASS")
         return 0
     finally:

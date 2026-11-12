@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -42,7 +43,7 @@ from v2.runner import V2Runner  # noqa: E402
 
 __version__ = "3.0.1"
 
-COMMANDS = {"doctor", "planner", "run", "status", "handoff", "merge", "resume", "rollback"}
+COMMANDS = {"doctor", "planner", "run", "status", "handoff", "merge", "resume", "rollback", "ui"}
 
 
 def _normalize_argv(argv: Sequence[str]) -> list[str]:
@@ -237,7 +238,49 @@ def _build_parser() -> argparse.ArgumentParser:
                               help="revert a previous explicit merge")
     rollback.add_argument("--run-id", required=True)
     rollback.add_argument("--message", default=None)
+
+    ui = sub.add_parser("ui", parents=[common],
+                        help="open the single-run viewer for one run id")
+    ui.add_argument("--run-id", required=True)
+    ui.add_argument("--port", type=int, default=8501)
+    ui.add_argument("--open", action="store_true")
     return parser
+
+
+def _open_run_ui(args: argparse.Namespace) -> int:
+    """Validate one run, generate its logbook and serve the single-run UI."""
+    root = _resolve_root(args)
+    state_root, worktree_root = _resolve_state_paths(root, args)
+    runner = V2Runner(
+        root,
+        state_root=state_root,
+        worktree_root=worktree_root,
+        require_clean=False,
+    )
+    try:
+        runner.status(args.run_id)
+    except (FileNotFoundError, V2Error, ExecutionError) as exc:
+        print(f"swarm ui: run not found or unreadable: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        from unified import logbook
+
+        logbook.write(root, args.run_id, state_root=state_root)
+    except Exception as exc:  # logbook failure must not prevent viewing the run
+        print(f"swarm ui: logbook warning: {exc}", file=sys.stderr)
+
+    dashboard = Path(__file__).resolve().parents[1] / "dashboard.py"
+    command = [
+        sys.executable,
+        str(dashboard),
+        "--root", str(root),
+        "--run-id", args.run_id,
+        "--port", str(args.port),
+    ]
+    if args.open:
+        command.append("--open")
+    return subprocess.call(command)
 
 
 def main(
@@ -252,6 +295,9 @@ def main(
     args = parser.parse_args(_normalize_argv(sys.argv[1:] if argv is None else argv))
     root = _resolve_root(args)
     as_json = bool(getattr(args, "json", False))
+
+    if args.command == "ui":
+        return _open_run_ui(args)
 
     if args.command == "doctor":
         return doctor_main(root, json_output=as_json, color=not args.no_color)

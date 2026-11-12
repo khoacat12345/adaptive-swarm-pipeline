@@ -2,7 +2,7 @@
 
 > v3.0.0 uses `swarm "task"` as the single operator entrypoint. Plan approval is
 > no longer the default human gate. A quick task may run automatically. Only an
-> expensive/long run asks for **Usage approval** in the War Room Usage tab.
+> expensive/long run asks for **Usage approval** in the single-run viewer Usage tab.
 > Execution stays in a worktree; main changes only through explicit
 > `swarm merge`.
 
@@ -115,7 +115,7 @@ python .agents\recipe_c.py --order order.json
 ```
 
 `swarm` shows the plan/estimate and stops at `AWAITING_USAGE` when the policy
-requires approval. The War Room Usage card shows plan/subtask count,
+requires approval. The run viewer Usage card shows plan/subtask count,
 reviewer/coder mode, estimated requests/cost/wall time, threshold reasons and
 budget controls. Approval binds to the exact plan + estimate.
 
@@ -128,28 +128,31 @@ E4 uses the Blackboard meeting protocol:
 If a required reviewer route is unavailable, preflight aborts before any model
 call.
 
-## 5. War Room
+## 5. Single-run viewer
 
 ```powershell
-.\dashboard.cmd
+swarm ui --run-id <id> --open
 # or
-python .agents\dashboard.py --root . --port 8501 --open
+python .agents\dashboard.py --root . --run-id <id> --port 8501 --open
 ```
 
 - **Run timeline**: Planning → Worktree → Executing → Verifying → Handoff.
 - **Usage**: approval, estimate, plan summary, Approve/Reject.
 - **Spend**: estimated vs actual tokens/cost, calls, remaining budget.
-- **Blackboard**: E4 Round 1/2 votes.
+- **Chat/Replay**: per-run events and replay.
+- **Verify**: commands and exit evidence.
 - **Handoff**: diff preview, explicit merge and rollback.
-- **History**: v2 state plus read-only v1 history.
+- **Logbook**: generated Markdown/JSON for this run only.
 
-Port conflict:
+The viewer intentionally has **no history or run selector**. To view another
+run, start another viewer with that run ID:
 
 ```powershell
-python .agents\dashboard.py --root . --port 8081 --open
+swarm ui --run-id <other-id> --port 8081 --open
 ```
 
-The server binds `127.0.0.1`; write actions require the per-run token.
+The server binds `127.0.0.1`; write actions require the per-run token. Each
+`swarm ui` invocation refreshes the run logbook under the run directory.
 
 ## 6. v3 unified engine
 
