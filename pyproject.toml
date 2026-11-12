@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "adaptive-swarm-pipeline"
-version = "3.0.0"
+version = "3.0.1"
 description = "Unified autonomous multi-agent pipeline with zero-trust Git worktree isolation, council planning, and verification gates."
 readme = "README.md"
 requires-python = ">=3.11"
