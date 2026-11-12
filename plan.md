@@ -154,7 +154,7 @@ Nó bỏ qua `checkpoint.recorded` và `run.merged`.
 
 ## D03 ? Legacy v1 Plan/War Room split-brain
 
-**Tr?ng th?i:** fixed in UI patch (v3.0.1)
+**Tr?ng th?i:** partially fixed in UI patch; full redesign pending
 **M?c ??:** P1 UI/state synchronization
 **Target:** v3.0.1 UI patch
 
@@ -206,6 +206,266 @@ v?n ?ang ch?y v? gi? `run.lock`.
 - [ ] Selected run ??ng b? gi?a Plan / War Room / Report.
 - [ ] Run v2 active hi?n th? ??ng plan v? tr?ng th?i.
 - [ ] C? test cho split-brain.
+
+---
+
+## UI Synchronization Redesign ? selected run context
+
+> M?c ti?u c?a ph?n n?y l? s?a ??ng ki?n tr?c UI, kh?ng ch? v? ri?ng tab Plan.
+> ??y l? thi?t k? b?t bu?c tr??c khi th?m F11 Completion Report.
+
+### V?n ?? hi?n t?i
+
+- **Overview** v?n ??c state v1 (`/api/job` + `/api/plan`) v? ?ang hi?n th?
+  Kaggle `J1` d? v2 run m?i ?ang ch?y.
+- **Plan** ch? m?i ???c v? ?? ch?n v2 active; ch?a d?ng chung selected run.
+- **Chat** v?n d?ng `/api/runs` c?a v1; kh?ng hi?n th? ??ng chat c?a v2 run.
+- **War Room** ?ang v?a l? run history, v?a l? run detail, v?a l? blackboard.
+  M?c ??ch ??ng c?a War Room l? **n?i xem c?c agent tranh lu?n/meeting**, kh?ng
+  ph?i danh s?ch previous runs.
+- `state.selected` (v1) v? `uwState.selected` (v2) l? hai ngu?n ??c l?p.
+- `refreshAll()` t? ch?n run v1; `uwLoadRuns()` t? ch?n run ??u ti?n.
+  Khi c? 2?3 run ch?y song song, selection c? th? nh?y ho?c hi?n th? sai run.
+- v1 `job_J1` v?n t?n t?i trong ledger; n?u kh?ng ch?n r?, UI d? hi?n th? n?
+  nh? plan hi?n t?i.
+
+### UX m?c ti?u
+
+```text
+Overview = previous runs + selected-run summary
+Plan     = plan c?a selected run
+Chat     = AI messages/events c?a selected run
+War Room = blackboard/debate c?a selected run (ch? y?u E4)
+Report   = report c?a selected run (F11)
+```
+
+#### Quy t?c m?c ??nh
+
+- Khi m? app: **kh?ng ch?n run n?o**.
+- Overview hi?n th? empty state:
+  ```text
+  No run selected. Choose a run below.
+  ```
+- Kh?ng t? l?y J1 ho?c run m?i nh?t.
+- Kh?ng hi?n th? plan/chat c?a run kh?c.
+- N?u c? run m?i, ch? hi?n badge ?new run?, kh?ng c??p selection.
+
+#### Thanh ch?n run tr?n Overview
+
+Th?m m?t horizontal run bar ? ??u Overview:
+
+```text
+[? A: 1+1=2       running  v2 E1] [ B: 5+7=?    AWAITING  v2 E2] [ J1 legacy  stopped v1 ]
+```
+
+M?i item hi?n th?:
+
+- run ID ng?n;
+- goal;
+- status;
+- source v1/v2;
+- tier;
+- th?i gian;
+- badge ?selected?;
+- badge ?live? n?u ?ang ch?y.
+
+Click v?o item:
+
+- set `selectedRunId`;
+- render l?i Overview / Plan / Chat / War Room / Report;
+- update URL query `?run=<id>` ?? deep link;
+- selected run ???c gi? khi refresh n?u v?n t?n t?i.
+
+#### Nhi?u run ch?y song song
+
+- Overview hi?n th? t?t c? active runs.
+- M?i run c? selection ??c l?p.
+- Plan/Chat/War Room/Report ch? ??c selected run.
+- N?u selected run b? x?a/kh?ng c?n state:
+  - clear selection;
+  - quay v? empty state;
+  - kh?ng t? nh?y sang run kh?c.
+
+### Ki?n tr?c state m?i
+
+T?o m?t run context duy nh?t trong frontend:
+
+```js
+const runContext = {
+  runs: [],              // v2 + v1 history
+  selectedRunId: null,
+  selectedSource: null,  // 'v2' | 'v1'
+  detail: null,
+  events: [],
+  loading: false
+};
+```
+
+C?c h?m b?t bu?c:
+
+```text
+loadRuns()                 // kh?ng auto-select
+selectRun(runId, source)   // set + load detail + events
+clearSelection()
+refreshSelected()          // ch? refresh selected run
+```
+
+B? c?c auto-select hi?n t?i:
+
+- `refreshAll()` kh?ng c?n ch?n `first.run_id`;
+- `uwLoadRuns()` kh?ng c?n t? ch?n run ??u ti?n;
+- `state.selected` v? `uwState.selected` ???c thay b?ng m?t context.
+
+### Tr?ch nhi?m t?ng tab
+
+| Tab | Ngu?n d? li?u | H?nh vi |
+|---|---|---|
+| **Overview** | `runContext.runs` + `detail` | Previous runs + selected summary; default empty |
+| **Plan** | `detail.plan` | Plan ??ng selected run; v1 fallback n?u source v1 |
+| **Chat** | `detail.events` | AI messages/events c?a selected run; v1 adapter cho legacy |
+| **War Room** | `detail.blackboard_rounds`, meeting events | Ch? debate/meeting c?a selected run; non-E4 hi?n empty state |
+| **Report** | `detail.report` (F11) | Completion report c?a selected run |
+
+### Chi ti?t t?ng view
+
+#### Overview
+
+- Empty state khi ch?a ch?n:
+  - ?Select a run to inspect plan, chat, verification and report.?
+  - Hi?n th? run selector.
+- Khi ch?n v2:
+  - goal/status/tier/planner;
+  - plan snapshot;
+  - verify result;
+  - timeline;
+  - spend/usage;
+  - n?t `Open Plan`, `Open Chat`, `Open War Room` (ch? E4), `Open Report`.
+- Khi ch?n v1:
+  - hi?n th? legacy v1 summary;
+  - banner `Legacy v1 (read-only)`;
+  - Plan/Chat d?ng v1 data.
+- Kh?ng c?n hi?n th? J1 m?c ??nh.
+
+#### Plan
+
+- `Plan` ch? render `runContext.detail.plan`.
+- N?u selected run l? v1:
+  - d?ng `/api/plan` legacy;
+  - hi?n th? banner legacy.
+- N?u ch?a ch?n:
+  - empty state.
+- Kh?ng auto ch?n v2 active n?u user ch?a ch?n.
+- N?t `Show legacy v1 plan` ch? hi?n khi selected source v1, ho?c trong debug panel.
+
+#### Chat
+
+- V?i v2:
+  - fetch `/api/unified/runs/<id>/events`;
+  - render per-run events;
+  - filter: all / lead / agents / system;
+  - E4 blackboard messages c? th? hi?n th? trong Chat v? War Room.
+- V?i v1:
+  - d?ng `/api/runs/<id>` legacy.
+- Kh?ng tr?n event c?a run A v? run B.
+- Run selector ? Chat c?ng ph?i d?ng chung `runContext`.
+
+#### War Room
+
+- Kh?ng d?ng War Room l?m run history.
+- Khi selected run l? E4:
+  - hi?n th? Blackboard Round 1/2;
+  - votes, rebuttal, evidence;
+  - meeting stats.
+- Khi selected run l? E1?E3:
+  - empty state:
+    ```text
+    This run has no E4 meeting. Use Overview to inspect the run.
+    ```
+- Kh?ng auto-select v1/J1.
+- Kh?ng hi?n th? run list/history ? ??y; history n?m ? Overview.
+- N?u v?n mu?n gi? t?n ?War Room?, gi? nguy?n nav; ch? ??i n?i dung.
+
+#### Report
+
+- F11 d?ng selected run; kh?ng d?ng J1.
+- Ch?a c? report:
+  - hi?n th? tr?ng th?i v? verify evidence hi?n c?;
+  - kh?ng gi? v? ?? c? k?t qu?.
+
+### API / backend
+
+Kh?ng c?n thay engine. Ch? c?n ??m b?o:
+
+```text
+GET /api/unified/runs?include_v1=1
+GET /api/unified/runs/<id>
+GET /api/unified/runs/<id>/events
+GET /api/unified/runs/<id>/diff
+GET /api/unified/runs/<id>/report   # F11
+GET /api/plan                       # v1 legacy only
+GET /api/job                        # v1 legacy only
+```
+
+C? th? th?m:
+
+```text
+GET /api/ui/context?run=<id>
+```
+
+nh?ng kh?ng b?t bu?c; frontend c? th? gh?p t? c?c API hi?n c?.
+
+### Work breakdown
+
+#### P0 ? Selection foundation
+
+- [ ] T?o `runContext` duy nh?t.
+- [ ] B? auto-select kh?i `refreshAll()`.
+- [ ] B? auto-select kh?i `uwLoadRuns()`.
+- [ ] Overview run selector bar.
+- [ ] Default empty state.
+- [ ] Selected run URL `?run=<id>`.
+- [ ] Plan bind selected run.
+- [ ] Chat bind selected run.
+- [ ] War Room ch? hi?n th? selected run blackboard.
+- [ ] Legacy v1 ch? hi?n khi explicit select.
+
+#### P1 ? Per-run chat & report
+
+- [ ] Chat v2 per-run events.
+- [ ] E4 blackboard messages per-run.
+- [ ] F11 completion report.
+- [ ] New-run notification without stealing selection.
+- [ ] Preserve selection across refresh.
+- [ ] Clear selection when run disappears.
+
+#### P2 ? Polish
+
+- [ ] Keyboard navigation on run bar.
+- [ ] Compact/mobile run selector.
+- [ ] Deep links to Plan/Chat/Report.
+- [ ] ?Copy run link?.
+- [ ] Run comparison view (optional).
+
+### Acceptance criteria
+
+- [ ] M? app m?c ??nh kh?ng ch?n run.
+- [ ] Overview ch? hi?n empty state + run selector.
+- [ ] Ch?n run A ? Plan/Chat/Overview/War Room/Report ??u l? run A.
+- [ ] Ch?n run B ? to?n b? ??i sang run B.
+- [ ] Run A goal `1+1=2`, run B goal `5+7=?` ? Plan/Chat hi?n th? ??ng goal t??ng ?ng.
+- [ ] Refresh trang v?n gi? selected run.
+- [ ] 2?3 run ch?y song song kh?ng l?m selection nh?y.
+- [ ] War Room E4 hi?n th? debate; E1?E3 empty state.
+- [ ] v1 J1 ch? hi?n khi user ch?n legacy.
+- [ ] Kh?ng c? event/plan/chat c?a run kh?c b? tr?n.
+- [ ] Tests: UI selector, Plan, Chat, War Room, v1 fallback.
+
+### Non-goals
+
+- Kh?ng ??i engine/worktree/merge gate.
+- Kh?ng x?a J1 ho?c ledger v1.
+- Kh?ng auto-merge.
+- Kh?ng ??i t?n War Room n?u kh?ng c?n; ch? ??i n?i dung.
 
 ---
 
