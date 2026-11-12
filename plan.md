@@ -154,7 +154,7 @@ Nó bỏ qua `checkpoint.recorded` và `run.merged`.
 
 ## D03 ? Legacy v1 Plan/War Room split-brain
 
-**Tr?ng th?i:** partially fixed in UI patch; full redesign pending
+**Tr?ng th?i:** fixed in UI redesign (selected-run context)
 **M?c ??:** P1 UI/state synchronization
 **Target:** v3.0.1 UI patch
 
