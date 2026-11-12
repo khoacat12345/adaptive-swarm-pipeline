@@ -1,10 +1,10 @@
-# Adaptive Swarm v3+ — Product & Integration Roadmap
+# Adaptive Swarm v3+ — Feature Roadmap & Debug Backlog
 
-> Mục tiêu: học các ý tưởng orchestration tốt từ Orca (`stablyai/orca`) nhưng
-> giữ vững lợi thế cạnh tranh của Adaptive Swarm:
+> Định hướng: học các ý tưởng orchestration tốt từ Orca (`stablyai/orca`)
+> nhưng giữ vững lợi thế của Adaptive Swarm:
 > **verification-first, anti-tamper, explicit merge và release evidence.**
 >
-> Không biến sản phẩm thành bản sao Orca. Mục tiêu là:
+> Mục tiêu cuối cùng:
 >
 > **Orca-like orchestration + Adaptive Swarm quality gate.**
 
@@ -23,89 +23,155 @@
   - crash/resume;
   - anti-tamper test guard;
   - 56 test files.
-- QA gần nhất phát hiện 2 lỗi state projection cần đóng trước khi thêm tính năng lớn:
-  - token counts bị redacted;
-  - verify summary rỗng sau khi verify pass.
 
----
+## Quy ước
 
-## 1. Cách ưu tiên
+- **Fxx** = feature mới, nằm trong roadmap sản phẩm.
+- **Dxx** = bug/debug item, nằm trong backlog riêng, **không tính là feature**.
+- Khi nói **“làm P0”**, chỉ làm **F01 — Task model + DAG**.
+- Khi nói **“fix debug”** hoặc **“QA fix”**, mới làm D01/D02.
+- Không gộp bugfix vào P0 feature, tránh việc “làm P0” bị kéo theo sửa lỗi.
 
-| Mức | Ý nghĩa | Khi nào làm |
+## Ưu tiên
+
+| Mức | Ý nghĩa | Phạm vi |
 |---|---|---|
-| **P0** | Blocker hoặc nền tảng bắt buộc cho bước tiếp theo | Ngay lập tức |
-| **P1** | Giá trị cao, tạo khác biệt cốt lõi | Release kế tiếp |
-| **P2** | Mở rộng sản phẩm, tăng adoption | Sau khi P1 ổn định |
-| **P3** | Platform/remote/automation | Dài hạn |
-
-Mỗi feature chỉ được coi là xong khi có:
-
-- unit/integration test;
-- CLI/API/UI tương ứng;
-- tài liệu;
-- evidence;
-- không auto-merge;
-- rollback hoặc recovery path;
-- cập nhật `docs/QA_CHECKLIST.md`.
+| **P0** | Nền tảng bắt buộc cho orchestration | F01 |
+| **P1** | Giá trị cao, tạo khác biệt cốt lõi | F02–F05 |
+| **P2** | Mở rộng sản phẩm, tăng adoption | F06–F08 |
+| **P3** | Platform/remote/automation | F09–F10 |
 
 ---
 
-## 2. Danh sách 10 chức năng
+# Debug Backlog — không phải feature
 
-| ID | Chức năng | Ưu tiên | Giá trị | Effort | Phụ thuộc |
-|---|---|---|---|---|---|
-| F01 | QA state projection correctness | **P0** | Rất cao | S | — |
-| F02 | Task model + DAG + parallel worktrees | **P0** | Rất cao | L | F01 |
-| F03 | Worker lifecycle + attempt history | **P1** | Cao | M | F02 |
-| F04 | Decision Inbox + ask/reply gates | **P1** | Cao | M | F02, F03 |
-| F05 | Agent-agnostic adapter protocol | **P1** | Rất cao | L | F02 |
-| F06 | Quota-aware scheduling | **P1** | Cao | M | F03, F05 |
-| F07 | Browser/visual verification | **P2** | Rất cao cho web | M/L | F02 |
-| F08 | Diff annotations + feedback loop | **P2** | Cao | M | F04 |
-| F09 | GitHub/Linear/PR/CI integration | **P2** | Cao | L | F05, F02 |
-| F10 | Remote execution + scheduled automations | **P3** | Cao | XL | F05, F06 |
+> Đây là các lỗi QA đã phát hiện. Làm riêng, không nằm trong P0.
+> Không đưa vào estimate của F01 hoặc bất kỳ feature nào.
 
----
+## D01 — Token counts bị redacted trong War Room
 
-# P0 — Bắt buộc trước khi mở rộng
+**Trạng thái:** confirmed
+**Mức độ:** P1 UI data bug
+**Target:** `v3.0.1` hotfix
 
-## F01 — QA state projection correctness
+### Hiện tượng
 
-### Vấn đề
+`GET /api/unified/runs/<id>` trả:
 
-War Room và API đang trả sai một số state:
+```json
+{
+  "estimated_tokens": "[REDACTED_SECRET]",
+  "used_tokens": "[REDACTED_SECRET]",
+  "remaining_tokens": "[REDACTED_SECRET]"
+}
+```
 
-- `estimated_tokens`, `used_tokens`, `remaining_tokens` bị
-  `[REDACTED_SECRET]`;
-- `verify.ok = null` dù `checkpoint.recorded.verify_exit = 0`;
-- `/api/health` đếm v1 ledger thay vì unified runs.
+### Root cause
 
-### Phạm vi
+`.agents/unified/state.py` dùng:
 
-- Sửa `_SECRET_KEY_HINTS` / `redact()` để chỉ che credential thật, không che
-  token count.
-- Mở rộng `_verify_summary()` để đọc:
-  - `checkpoint.recorded.verify_exit`;
-  - `run.merged.verify[].exit_code`;
-  - event `verify.*`.
-- Làm rõ `health.runs` là v1 hay unified, hoặc trả cả hai.
-- Thêm regression test cho spend/verify projection.
+```python
+_SECRET_KEY_HINTS = (
+    "token",
+    ...
+)
+```
+
+`redact()` coi mọi key chứa `"token"` là credential, kể cả token count.
+
+### Phạm vi fix
+
+- Chỉ redact credential keys:
+  - `signoff_token`
+  - `usage_token`
+  - `access_token`
+  - `refresh_token`
+  - `api_key`
+  - `authorization`
+  - `password`
+  - `secret`
+- Hoặc bỏ qua các key kết thúc bằng `_tokens` / `tokens`.
+- Thêm regression test cho spend projection.
 
 ### Acceptance
 
-- [ ] Spend panel hiển thị số token thật.
-- [ ] Verify panel hiển thị exit `0` sau checkpoint/merge.
-- [ ] Không lộ token/secret thật.
+- [ ] `estimated_tokens`, `used_tokens`, `remaining_tokens` là số.
+- [ ] Token/secret thật vẫn bị redacted.
+- [ ] War Room Spend panel hiển thị đúng.
 - [ ] 56/56 test files pass.
-- [ ] UI QA gate pass.
-
-### Release
-
-`v3.0.1` hotfix.
 
 ---
 
-## F02 — Task model + DAG + parallel worktrees
+## D02 — Verify summary rỗng sau khi verify pass
+
+**Trạng thái:** confirmed
+**Mức độ:** P2 UI/state projection
+**Target:** `v3.0.1` hotfix
+
+### Hiện tượng
+
+`GET /api/unified/runs/<id>` trả:
+
+```json
+{
+  "verify": {
+    "commands": ["python check.py"],
+    "ok": null,
+    "last_exit": null,
+    "results": []
+  }
+}
+```
+
+Trong khi event thật có:
+
+```text
+checkpoint.recorded.verify_exit = 0
+run.merged.verify[0].exit_code = 0
+```
+
+### Root cause
+
+`_verify_summary()` chỉ đọc event có chữ `"verify"` trong `event_type`.
+Nó bỏ qua `checkpoint.recorded` và `run.merged`.
+
+### Phạm vi fix
+
+- Đọc thêm `checkpoint.recorded.verify_exit`.
+- Đọc thêm `run.merged.verify`.
+- Giữ ưu tiên event `verify.*` nếu có.
+- Thêm regression test cho checkpoint/merge verify.
+
+### Acceptance
+
+- [ ] `verify.ok` là `true` sau verify exit 0.
+- [ ] `verify.last_exit` là `0`.
+- [ ] `results` có evidence tương ứng.
+- [ ] War Room không còn hiển thị Verify pending sai.
+- [ ] 56/56 test files pass.
+
+---
+
+# 10 Features
+
+| ID | Chức năng | Ưu tiên | Giá trị | Effort | Target |
+|---|---|---|---|---|---|
+| F01 | Task model + DAG + parallel worktrees | **P0** | Rất cao | L | v3.1.0 |
+| F02 | Worker lifecycle + attempt history | **P1** | Cao | M | v3.1.x |
+| F03 | Decision Inbox + ask/reply gates | **P1** | Cao | M | v3.2.0 |
+| F04 | Agent-agnostic adapter protocol | **P1** | Rất cao | L | v3.2.0 |
+| F05 | Quota-aware scheduling | **P1** | Cao | M | v3.2.x |
+| F06 | Browser/visual verification | **P2** | Rất cao cho web | M/L | v3.3.0 |
+| F07 | Diff annotations + feedback loop | **P2** | Cao | M | v3.3.x |
+| F08 | GitHub/Linear/PR/CI integration | **P2** | Cao | L | v3.4.0 |
+| F09 | Remote execution backend | **P3** | Cao | XL | v4.0 |
+| F10 | Scheduled automations | **P3** | Trung bình | M | v4.0+ |
+
+---
+
+# P0 — Nền tảng orchestration
+
+## F01 — Task model + DAG + parallel worktrees
 
 ### Ý tưởng học từ Orca
 
@@ -176,15 +242,11 @@ mỗi task có worktree và verify riêng.
 Không dùng một worktree cho tất cả task. Worktree là **đơn vị cô lập**, không
 chỉ là nơi chứa code.
 
-### Release
-
-`v3.1.0`.
-
 ---
 
 # P1 — Orchestration cốt lõi
 
-## F03 — Worker lifecycle + attempt history
+## F02 — Worker lifecycle + attempt history
 
 ### Mục tiêu
 
@@ -231,12 +293,12 @@ agent, nhưng task và evidence vẫn còn.
 - [ ] Timeout/lost/cancel có state rõ ràng.
 - [ ] War Room hiển thị attempt history.
 
-**Effort:** M  
-**Release:** `v3.1.x`
+**Effort:** M
+**Phụ thuộc:** F01
 
 ---
 
-## F04 — Decision Inbox + ask/reply gates
+## F03 — Decision Inbox + ask/reply gates
 
 ### Mục tiêu
 
@@ -284,12 +346,12 @@ chat log hoặc agent tự quyết.
 - [ ] Không có polling loop; event-driven.
 - [ ] Approval không thể bypass bằng tier override.
 
-**Effort:** M  
-**Release:** `v3.2.0`
+**Effort:** M
+**Phụ thuộc:** F01, F02
 
 ---
 
-## F05 — Agent-agnostic adapter protocol
+## F04 — Agent-agnostic adapter protocol
 
 ### Mục tiêu
 
@@ -334,12 +396,12 @@ Cần có:
 - [ ] Không hard-code provider trong orchestrator.
 - [ ] Agent fail có lỗi rõ ràng.
 
-**Effort:** L  
-**Release:** `v3.2.0`
+**Effort:** L
+**Phụ thuộc:** F01
 
 ---
 
-## F06 — Quota-aware scheduling
+## F05 — Quota-aware scheduling
 
 ### Mục tiêu
 
@@ -372,14 +434,14 @@ chiếm quá nhiều việc.
 - [ ] Reassign được ghi evidence.
 - [ ] Không có paid model nếu free-only.
 
-**Effort:** M  
-**Release:** `v3.2.x`
+**Effort:** M
+**Phụ thuộc:** F02, F04
 
 ---
 
 # P2 — Mở rộng sản phẩm
 
-## F07 — Browser/visual verification
+## F06 — Browser/visual verification
 
 ### Mục tiêu
 
@@ -412,12 +474,12 @@ Verify không chỉ bằng unit test mà còn bằng hành vi UI thật.
 - [ ] Không merge nếu browser verify fail.
 - [ ] Có timeout và cleanup browser.
 
-**Effort:** M/L  
-**Release:** `v3.3.0`
+**Effort:** M/L
+**Phụ thuộc:** F01
 
 ---
 
-## F08 — Diff annotations + feedback loop
+## F07 — Diff annotations + feedback loop
 
 ### Mục tiêu
 
@@ -446,12 +508,12 @@ Người review có thể note trực tiếp trên diff và gửi feedback lại
 - [ ] Comment cũ không làm mất state.
 - [ ] Không sửa main trước merge.
 
-**Effort:** M  
-**Release:** `v3.3.x`
+**Effort:** M
+**Phụ thuộc:** F03
 
 ---
 
-## F09 — GitHub/Linear/PR/CI integration
+## F08 — GitHub/Linear/PR/CI integration
 
 ### Mục tiêu
 
@@ -476,85 +538,117 @@ Người review có thể note trực tiếp trên diff và gửi feedback lại
 - [ ] PR không auto-merge.
 - [ ] Không lộ token trong comment/log.
 
-**Effort:** L  
-**Release:** `v3.4.0`
+**Effort:** L
+**Phụ thuộc:** F01, F04
 
 ---
 
 # P3 — Platform
 
-## F10 — Remote execution + scheduled automations
+## F09 — Remote execution backend
 
 ### Mục tiêu
 
-Mở rộng khỏi máy local và cho phép chạy theo lịch.
+Mở rộng khỏi máy local: chạy worktree trên SSH host, container hoặc cloud VM.
 
 ### Phạm vi
 
-Execution backend:
-
-- local;
-- SSH;
-- container;
-- cloud VM.
-
-Automation:
-
-- nightly test sweep;
-- dependency audit;
-- flaky test triage;
-- weekly issue triage.
-
-Bảo mật:
-
-- SSH key isolation;
-- secret scoping;
-- no plaintext token in logs;
-- explicit merge only;
-- budget cap;
-- remote cleanup.
+- Execution backend interface:
+  - local;
+  - SSH;
+  - container;
+  - cloud VM.
+- Remote worktree lifecycle:
+  - create;
+  - sync;
+  - cleanup.
+- Evidence sync:
+  - patch;
+  - verify log;
+  - screenshots;
+  - run manifest.
+- Security:
+  - SSH key isolation;
+  - secret scoping;
+  - no plaintext token;
+  - explicit merge only;
+  - budget cap.
 
 ### Acceptance
 
 - [ ] Cùng một task chạy được local và remote.
 - [ ] Worktree remote được cleanup.
+- [ ] Evidence đồng bộ về local.
+- [ ] Không auto-merge.
+- [ ] Không lộ credential.
+
+**Effort:** XL
+**Phụ thuộc:** F01, F04
+
+---
+
+## F10 — Scheduled automations
+
+### Mục tiêu
+
+Chạy các tác vụ định kỳ có kiểm soát.
+
+### Phạm vi
+
+- nightly test sweep;
+- dependency audit;
+- flaky test triage;
+- weekly issue triage.
+- Cấu hình:
+  - schedule;
+  - budget cap;
+  - free-only;
+  - target branch;
+  - explicit merge gate.
+
+### Acceptance
+
 - [ ] Scheduled run có budget/time cap.
 - [ ] Không auto-merge.
-- [ ] Evidence được sync về local.
+- [ ] Có notification khi cần người.
+- [ ] Evidence được lưu.
+- [ ] Có thể disable bằng một lệnh.
 
-**Effort:** XL  
-**Release:** `v4.0` hoặc sau v3.4
+**Effort:** M
+**Phụ thuộc:** F09
 
 ---
 
-## 3. Thứ tự thực hiện đề xuất
+# Thứ tự thực hiện
+
+## Debug (riêng)
 
 ```text
-P0: F01 QA correctness
-P0: F02 Task model + DAG + parallel worktrees
-P1: F03 Worker lifecycle
-P1: F04 Decision Inbox
-P1: F05 Agent adapter
-P1: F06 Quota-aware scheduling
-P2: F07 Browser verification
-P2: F08 Diff annotations
-P2: F09 GitHub/Linear/PR/CI
-P3: F10 Remote + automations
+D01 token redaction
+D02 verify summary
+→ v3.0.1
 ```
 
-Lý do:
+## Feature roadmap
 
-- F01 phải xong trước vì mọi feature mới đều dựa trên state projection.
-- F02 tạo nền tảng cho parallel workers.
-- F03/F04 làm cho worker có lifecycle và human gates.
-- F05/F06 mở rộng agent và quota.
-- F07/F08 cải thiện chất lượng review/UI.
-- F09 mở rộng workflow.
-- F10 là platform dài hạn.
+```text
+P0: F01 Task DAG
+P1: F02 Worker lifecycle
+P1: F03 Decision Inbox
+P1: F04 Agent adapter
+P1: F05 Quota routing
+P2: F06 Browser verification
+P2: F07 Diff annotations
+P2: F08 GitHub/Linear
+P3: F09 Remote backend
+P3: F10 Automations
+```
+
+> Debug không nằm trong P0. Khi yêu cầu “làm P0”, chỉ thực hiện F01.
 
 ---
 
-## 4. Những gì không nên copy từ Orca
+# Những gì không copy từ Orca
 
 - ❌ Desktop IDE đầy đủ — War Room chỉ nên là control plane.
 - ❌ Mobile app ngay — chờ remote runner và notification.
@@ -564,9 +658,9 @@ Lý do:
 
 ---
 
-## 5. Tiêu chí thành công
+# Tiêu chí thành công
 
-### Kỹ thuật
+## Kỹ thuật
 
 - [ ] Task DAG chạy song song thật.
 - [ ] Mỗi task có worktree/verify/evidence riêng.
@@ -576,7 +670,7 @@ Lý do:
 - [ ] Browser verify là một phần của merge gate.
 - [ ] GitHub/Linear không tạo auto-merge.
 
-### Sản phẩm
+## Sản phẩm
 
 - [ ] Giảm thời gian hoàn thành task lớn.
 - [ ] Tăng tỷ lệ handoff pass verify.
@@ -584,7 +678,7 @@ Lý do:
 - [ ] Tăng số task chạy song song an toàn.
 - [ ] Giữ nguyên tỷ lệ 0 lần main bị sửa trước merge.
 
-### Release gate
+## Release gate
 
 Mỗi release phải có:
 
