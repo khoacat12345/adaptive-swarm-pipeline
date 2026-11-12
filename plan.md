@@ -152,6 +152,63 @@ Nó bỏ qua `checkpoint.recorded` và `run.merged`.
 
 ---
 
+## D03 ? Legacy v1 Plan/War Room split-brain
+
+**Tr?ng th?i:** confirmed
+**M?c ??:** P1 UI/state synchronization
+**Target:** v3.0.2/v3.1
+
+### Hi?n t??ng
+
+Sau khi ch?y m?t task v2 m?i, tab **Plan** v?n hi?n th? k? ho?ch Kaggle c?
+(`J1`) v? tr?ng th?i `STOPPED`, trong khi War Room c? c?c run v2 m?i ?ang ch?y.
+War Room c? th? ch?n m?t entry v1 `job_J1` v? hi?n th? `UNKNOWN` + legacy
+read-only.
+
+### Root cause
+
+C? hai ngu?n state ??c l?p:
+
+- **v1 Plan page**: ??c `/api/job` v? `/api/plan` t?
+  `.agents/tmp/job_state.json`, `plan.json`, `control.json`;
+- **v2 War Room**: ??c `/api/unified/runs` t?
+  `.agents/tmp/v2/runs/<run_id>`.
+
+`dashboard_ui.html::refreshAll()` ch? l?y `/api/job` + `/api/plan` cho Plan tab;
+n? kh?ng ??c plan c?a v2 run. V? v?y:
+
+- J1 c? v?n n?m trong `.agents/tmp/plan.json`;
+- v2 run m?i ch? xu?t hi?n trong War Room;
+- Plan tab v? War Room kh?ng chia s? selected run;
+- v1 `job_J1` kh?ng c? completion event n?n adapter hi?n th? `UNKNOWN`.
+
+??y l? **split-brain UI**, kh?ng ph?i run treo. Process v2 `v2_20261112T161443`
+v?n ?ang ch?y v? gi? `run.lock`.
+
+### H??ng fix
+
+- Th?m m?t `selectedRunId` d?ng chung cho Plan / War Room / Report / Chat.
+- N?u selected run l? v2, Plan tab render `detail.plan`, `detail.execution`,
+  `detail.verify`, `detail.handoff` t? unified API.
+- Ch? d?ng `/api/job` + `/api/plan` khi selected run l? v1 legacy.
+- M?c ??nh Plan tab ch?n run v2 m?i nh?t ?ang active; v1 history n?m trong
+  filter ?Legacy v1?.
+- Kh?ng auto-select `job_J1`/b?n ghi v1 `UNKNOWN` khi c? v2 run.
+- Khi v2 run b?t ??u, archive/clear `job_state`/`plan.json` c? ho?c ??nh d?u
+  r? l? legacy.
+- Th?m regression test cho mixed v1/v2 state v? default selection.
+
+### Acceptance
+
+- [ ] Plan tab hi?n th? ??ng run v2 ?ang ch?n.
+- [ ] J1 c? kh?ng c?n xu?t hi?n nh? plan hi?n t?i.
+- [ ] War Room kh?ng auto-select v1 `UNKNOWN` khi c? v2 run.
+- [ ] Selected run ??ng b? gi?a Plan / War Room / Report.
+- [ ] Run v2 active hi?n th? ??ng plan v? tr?ng th?i.
+- [ ] C? test cho split-brain.
+
+---
+
 # 10 Core Features + F11 Reporting
 
 | ID | Chức năng | Ưu tiên | Giá trị | Effort | Target |
@@ -701,6 +758,7 @@ Chạy các tác vụ định kỳ có kiểm soát.
 ```text
 D01 token redaction
 D02 verify summary
+D03 v1/v2 plan split-brain
 → v3.0.1
 ```
 
