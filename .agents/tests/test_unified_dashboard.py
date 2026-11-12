@@ -127,10 +127,13 @@ def main() -> int:
         capped = unified_api.run_diff(hroot, hrid, max_bytes=32)
         checks += 1; assert capped["truncated"] is True
 
-        # UI is present and includes all seven panel labels.
+        # UI is present and includes all seven panel labels plus the v2 plan
+        # context.  The latter prevents the legacy v1 plan from masking an
+        # active v2 run in the Plan tab.
         ui = (AGENTS_DIR / "dashboard_ui.html").read_text(encoding="utf-8")
         for marker in ("Run timeline", "Tier", "Spend", "Usage approval",
-                       "Blackboard", "Handoff", "Run history"):
+                       "Blackboard", "Handoff", "Run history",
+                       "LIVE V2 PLAN", "planUnified", "toggleLegacyPlan"):
             checks += 1; assert marker.lower() in ui.lower(), marker
 
         print(f"UNIFIED DASHBOARD: {checks}/{checks} PASS")

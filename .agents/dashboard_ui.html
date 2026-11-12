@@ -2722,7 +2722,8 @@
       </section>
 
       <section class="view" id="view-plan">
-        <div class="card">
+        <div id="planUnified" class="card" style="display:none"></div>
+        <div class="card" id="planLegacyCard">
           <div class="spread" style="margin-bottom:8px">
             <h2 style="margin:0">Plan</h2>
             <span id="planStatus" class="pill">none</span>
@@ -2945,6 +2946,7 @@
         : ['pending', 'paused', 'blocked', 'warn'].includes(s) ? 'warn' : '';
     const state = {
       view: 'overview', runs: [], selected: null, run: null, diff: null, job: null, planState: null,
+      unifiedRuns: [], unifiedPlan: null, unifiedPlanId: null, unifiedPlanSig: '',
       quota: null, health: null, drafts: null, workspaces: [], chatTab: 'timeline', follow: false,
       chatFilter: 'all', overviewTab: 'warroom', hourlyMode: 'cost', teamData: null, replayIndex: null, replayTimer: null, pageSig: {},
       meetingRound: 'all', stream: null, streamRun: null, streamHealthy: false, streamRefreshTimer: null,
@@ -2977,12 +2979,15 @@
       try {
         const runs = await api('/api/runs?filter=all');
         state.runs = runs.runs || [];
-        const [job, plan, health, team] = await Promise.all([
+        const [job, plan, health, team, unified] = await Promise.all([
           api('/api/job'), api('/api/plan'), api('/api/health'),
-          api('/api/team').catch(() => ({}))
+          api('/api/team').catch(() => ({})),
+          api('/api/unified/runs?include_v1=0').catch(() => ({ runs: [] }))
         ]);
         state.job = job; state.planState = plan; state.health = health;
         state.teamData = team;
+        state.unifiedRuns = unified.runs || [];
+        await syncUnifiedPlan();
         if (Date.now() - state.lastQuota > 15000) {
           try {
             state.quota = await api('/api/quota');
@@ -3017,6 +3022,107 @@
       state.run = detail; state.diff = diff; state.selected = runId;
       if (state.streamRun !== runId) { state.streamRun = runId; connectStream(); }
       if (!silent) { state.chatTab = 'timeline'; renderChat(); }
+    }
+
+    const V2_ACTIVE_STATUSES = new Set([
+      'PHASE_EXECUTING', 'PROVISIONING', 'AWAITING_SIGNOFF', 'AWAITING_USAGE',
+      'PAUSED', 'BLOCKED', 'RATE_LIMITED'
+    ]);
+
+    function pickUnifiedPlanRun(runs) {
+      const v2 = (runs || []).filter((run) => run && run.run_id);
+      return v2.find((run) => V2_ACTIVE_STATUSES.has(String(run.status || ''))) || v2[0] || null;
+    }
+
+    async function syncUnifiedPlan() {
+      const run = pickUnifiedPlanRun(state.unifiedRuns);
+      if (!run) {
+        state.unifiedPlan = null;
+        state.unifiedPlanId = null;
+        return;
+      }
+      try {
+        const detail = await api('/api/unified/runs/' + encodeURIComponent(run.run_id));
+        state.unifiedPlan = detail;
+        state.unifiedPlanId = run.run_id;
+      } catch (_) {
+        // Keep the previous v2 plan only when it is the same run.
+        if (state.unifiedPlanId !== run.run_id) state.unifiedPlan = null;
+      }
+    }
+
+    function openUnifiedRun(runId) {
+      if (!runId) return;
+      uwState.selected = runId;
+      switchView('unified');
+    }
+
+    function toggleLegacyPlan() {
+      state.showLegacyPlan = !state.showLegacyPlan;
+      renderUnifiedPlan();
+    }
+
+    function renderUnifiedPlan() {
+      const panel = $('#planUnified');
+      const legacy = $('#planLegacyCard');
+      const detail = state.unifiedPlan;
+      const plan = detail && detail.plan ? detail.plan : null;
+      if (!plan) {
+        panel.style.display = 'none';
+        legacy.style.display = '';
+        return;
+      }
+      panel.style.display = '';
+      legacy.style.display = state.showLegacyPlan ? '' : 'none';
+      if (!guardRender('plan-v2', {
+        id: detail.run_id, status: detail.status, plan: plan,
+        execution: detail.execution, showLegacy: !!state.showLegacyPlan
+      })) return;
+
+      const phases = plan.phases || [];
+      const orders = phases.flatMap((phase) => phase.work_orders || []);
+      const files = [...new Set(orders.flatMap((item) => item.target_files || []))];
+      const verify = [...new Set(orders.map((item) => item.verify_command).filter(Boolean))];
+      const status = detail.status || 'UNKNOWN';
+      const statusTone = uwTone(status);
+      const phaseHtml = phases.map((phase, index) => {
+        const work = (phase.work_orders || []).map((item) => `
+          <div class="row" style="gap:8px;padding:5px 0;border-top:1px solid #182433">
+            <span class="pill">${esc(item.id || '')}</span>
+            <span class="grow">${esc(item.objective || item.title || '')}</span>
+            <span class="mono muted">${esc((item.target_files || []).join(', ') || '-')}</span>
+          </div>`).join('');
+        return `<div class="card" style="margin-top:10px;padding:12px">
+          <div class="spread"><h3 style="margin:0">Phase ${index + 1}: ${esc(phase.id || '')}</h3>
+            <span class="pill">${esc(phase.cleanup || 'v2')}</span></div>
+          <div class="muted mono" style="margin:6px 0">depends on: ${esc((phase.depends_on || []).join(', ') || 'nothing')}</div>
+          ${work || '<p class="muted">No work orders.</p>'}
+        </div>`;
+      }).join('');
+
+      panel.innerHTML = `<div class="spread" style="margin-bottom:8px">
+        <div><div class="eyebrow">LIVE V2 PLAN · ${esc(detail.run_id)}</div>
+          <h2 style="margin:4px 0">${esc(detail.goal || plan.goal || 'Untitled plan')}</h2></div>
+        <div class="actions">
+          <span class="pill ${statusTone === 'ok' ? 'ok' : statusTone === 'bad' ? 'bad' : 'warn'}">${esc(status)}</span>
+          <button class="btn" onclick="openUnifiedRun('${esc(detail.run_id)}')">Open in War Room</button>
+          <button class="btn ghost" onclick="toggleLegacyPlan()">${state.showLegacyPlan ? 'Hide' : 'Show'} legacy v1</button>
+        </div>
+      </div>
+      <div class="row" style="gap:8px;margin:10px 0">
+        <span class="chip">${esc(detail.tier || 'tier?')}</span>
+        <span class="chip">${esc(detail.planner || 'planner?')}</span>
+        <span class="muted">${phases.length} phase(s) · ${orders.length} work order(s) · ${files.length} file(s)</span>
+      </div>
+      <div class="card" style="padding:12px">
+        <div class="k">Target files</div>
+        <div class="mono">${esc(files.join(', ') || '-')}</div>
+        <div class="k" style="margin-top:8px">Verify</div>
+        <div class="mono">${esc(verify.join('  |  ') || '-')}</div>
+        <div class="k" style="margin-top:8px">Current phase</div>
+        <div class="mono">${esc(detail.current_phase || '-')}</div>
+      </div>
+      ${phaseHtml || '<p class="muted">No phases in this plan.</p>'}`;
     }
 
     function closeStream() {
@@ -3121,13 +3227,19 @@
       const control = job.control || {};
       const decision = job.decision || (state.planState || {}).decision || {};
 
-      $('#sideState').textContent = jobState.phase || 'idle';
-      $('#sideDot').classList.toggle('off', !jobState.phase);
-      $('#sideJob').textContent = jobState.job_id ? jobState.job_id : 'no job';
+      const unifiedPlan = state.unifiedPlan;
+      $('#sideState').textContent = unifiedPlan
+        ? String(unifiedPlan.status || 'active').toLowerCase()
+        : (jobState.phase || 'idle');
+      $('#sideDot').classList.toggle('off', !(unifiedPlan || jobState.phase));
+      $('#sideJob').textContent = unifiedPlan
+        ? String(unifiedPlan.run_id || 'v2')
+        : (jobState.job_id ? jobState.job_id : 'no job');
       $('#updatedAt').textContent = 'updated ' + new Date().toLocaleTimeString();
       const badge = $('#planBadge');
-      badge.style.display = decision.status === 'pending' ? 'inline-block' : 'none';
+      badge.style.display = unifiedPlan || decision.status !== 'pending' ? 'none' : 'inline-block';
 
+      if (state.view === 'plan') renderUnifiedPlan();
       if (state.view === 'overview') {
         renderOverview(plan, jobState, decision, control);
         renderWarRoom(plan, jobState, decision);
@@ -5324,8 +5436,11 @@
       try {
         const data = await api('/api/unified/runs?include_v1=1');
         uwState.runs = data.runs || [];
-        if (!keepSelection || !uwState.selected) {
-          const first = uwState.runs[0];
+        const v2Runs = uwState.runs.filter((run) => run.source !== 'v1');
+        const first = v2Runs.find((run) => V2_ACTIVE_STATUSES.has(String(run.status || '')))
+          || v2Runs[0] || uwState.runs[0];
+        const selectedExists = uwState.runs.some((run) => run.run_id === uwState.selected);
+        if (!keepSelection || !uwState.selected || !selectedExists) {
           uwState.selected = first ? first.run_id : null;
         }
         uwRenderRunList();
