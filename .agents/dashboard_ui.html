@@ -2503,7 +2503,7 @@
         left: 64px
       }
     }
-    /* Unified War Room (v2 runs + v1 history) */
+    /* Active run panel (single bound run) */
     .uw-badge { font-size: 10px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim) }
     .uw-badge.e { color: #8bd3ff; border-color: #2d6385 }
     .uw-badge.p { color: #ffd98a; border-color: #6b5522 }
@@ -2550,12 +2550,6 @@
             <rect x="14" y="14" width="7" height="7" rx="1.5" />
           </svg>
           <span>Overview</span></button>
-        <button data-view="unified">
-          <svg viewBox="0 0 24 24">
-            <path d="M4 5h16M4 12h10M4 19h16" />
-            <circle cx="18" cy="12" r="2" />
-          </svg>
-          <span>War Room</span></button>
         <button data-view="plan">
           <svg viewBox="0 0 24 24">
             <path d="M9 6h11M9 12h11M9 18h11" />
@@ -2614,6 +2608,8 @@
           <p id="pageSub">Mission control</p>
         </div>
         <div class="topright">
+          <button class="btn ghost" onclick="switchView('unified')"
+            title="Live state of the active run">Active run</button>
           <span id="updatedAt">-</span>
           <span class="dot" id="connDot"></span>
         </div>
@@ -2645,27 +2641,18 @@
         </div>
       </section>
 
-      <!-- UNIFIED WAR ROOM (v2 state + read-only v1 history) -->
+      <!-- ACTIVE RUN (one run only; no run list and no history selector) -->
+      <!-- run history stays on disk and is intentionally not rendered here. -->
       <section class="view" id="view-unified">
-        <div class="grid g2">
-          <div class="card">
+        <div class="card">
             <div class="spread" style="margin-bottom:8px">
-              <h2 style="margin:0">War Room</h2>
-              <button class="btn ghost" onclick="uwLoadRuns()">Refresh</button>
+              <h2 id="uwGoal" style="margin:0">No active run</h2>
+              <div class="row">
+                <span id="uwStatus" class="pill">-</span>
+                <button class="btn ghost" onclick="uwLoadRuns()">Refresh</button>
+              </div>
             </div>
-            <div class="row" style="margin-bottom:8px">
-              <input id="uwSearch" placeholder="filter run id or goal" oninput="uwRenderRunList()">
-              <button class="btn" onclick="uwLoadRuns()">Reload</button>
-            </div>
-            <div id="uwRunList" class="muted">Loading unified runs...</div>
-            <h3 style="margin:14px 0 6px">Run history</h3>
-            <div id="uwHistory" class="muted">No history.</div>
-          </div>
-          <div class="card">
-            <div class="spread" style="margin-bottom:8px">
-              <h2 id="uwGoal" style="margin:0">Select a run</h2>
-              <span id="uwStatus" class="pill">-</span>
-            </div>
+            <div class="muted" id="uwBound" style="font-size:10.5px;margin-bottom:8px"></div>
             <div class="row" style="gap:8px;margin-bottom:10px">
               <span id="uwTier" class="uw-badge e">Tier -</span>
               <span id="uwPlanner" class="uw-badge p">Planner -</span>
@@ -2687,7 +2674,6 @@
               <button class="btn" id="uwAccept" onclick="uwAction('control','accept')">Accept handoff</button>
             </div>
             <div id="uwMsg" class="muted" style="margin-top:8px"></div>
-          </div>
         </div>
 
         <div class="card" style="margin-top:14px">
@@ -2709,7 +2695,7 @@
             <button class="btn" id="uwRollbackBtn" onclick="uwAction('rollback')">Rollback</button>
           </div>
           <div id="uwHandoffInfo" class="muted" style="margin-top:8px"></div>
-          <pre id="uwDiff" class="uw-pre" style="margin-top:10px">Select a handoff run.</pre>
+          <pre id="uwDiff" class="uw-pre" style="margin-top:10px">No handoff diff for this run.</pre>
         </div>
 
         <div class="card" style="margin-top:14px">
@@ -2742,7 +2728,8 @@
         <div class="card">
           <div class="chathead">
             <div class="row">
-              <select id="runSelect" class="btn ghost" onchange="selectRun(this.value)"></select>
+              <select id="runSelect" class="btn ghost" hidden aria-hidden="true"
+                style="display:none" onchange="selectRun(this.value)"></select>
               <span id="chatMeta" class="muted mono"></span>
             </div>
             <div class="row">
@@ -2958,6 +2945,9 @@
     };
     // Optional deep-link/test hook: ?follow=1 opens Chat at the newest event.
     if (new URLSearchParams(location.search).get('follow') === '1') state.follow = true;
+    // The server binds the page to one run (--run-id or the newest active v2
+    // run).  Everything below reads this value, never an older-run list.
+    const ACTIVE_RUN = "__ACTIVE_RUN_ID__";
 
     /* ---------- data ---------- */
     async function api(url, options) {
@@ -2982,7 +2972,9 @@
         const [job, plan, health, team, unified] = await Promise.all([
           api('/api/job'), api('/api/plan'), api('/api/health'),
           api('/api/team').catch(() => ({})),
-          api('/api/unified/runs?include_v1=0').catch(() => ({ runs: [] }))
+          // A bound page never loads the run list; it asks for its one run.
+          ACTIVE_RUN ? Promise.resolve({ runs: [] })
+            : api('/api/unified/runs?include_v1=0').catch(() => ({ runs: [] }))
         ]);
         state.job = job; state.planState = plan; state.health = health;
         state.teamData = team;
@@ -2994,10 +2986,7 @@
             state.lastQuota = Date.now();
           } catch (_) { /* keep the previous quota snapshot */ }
         }
-        if (!state.selected) {
-          const first = state.runs.find((run) => run.task_id) || state.runs[0];
-          if (first) state.selected = first.run_id;
-        }
+        if (ACTIVE_RUN) state.selected = ACTIVE_RUN;
         if (state.selected) await loadRun(state.selected, true);
         $('#connDot').classList.remove('off');
         render();
@@ -3012,10 +3001,26 @@
 
     async function loadRun(runId, silent = false) {
       if (!runId) return;
-      const [detail, diff] = await Promise.all([
-        api('/api/runs/' + encodeURIComponent(runId)),
-        api('/api/diff?run_id=' + encodeURIComponent(runId)).catch(() => ({}))
-      ]);
+      let detail;
+      let diff = {};
+      try {
+        [detail, diff] = await Promise.all([
+          api('/api/runs/' + encodeURIComponent(runId)),
+          api('/api/diff?run_id=' + encodeURIComponent(runId)).catch(() => ({}))
+        ]);
+      } catch (error) {
+        // A v2 run lives in the v2 state root, not in the v1 ledger.  Keep the
+        // page bound to it instead of dropping the whole refresh.
+        try {
+          const unified = await api('/api/unified/runs/' + encodeURIComponent(runId));
+          detail = {
+            run: { run_id: runId, status: unified.status,
+              events: (unified.events || []).length || unified.event_count || 0 },
+            timeline: unified.timeline || [], meeting: unified.blackboard || {}, events: []
+          };
+          diff = {};
+        } catch (_) { return; }
+      }
       const sig = sigOf({ detail, diff });
       if (sig === state.sig.run && silent) return;
       state.sig.run = sig;
@@ -3030,6 +3035,7 @@
     ]);
 
     function pickUnifiedPlanRun(runs) {
+      if (ACTIVE_RUN) return { run_id: ACTIVE_RUN };
       const v2 = (runs || []).filter((run) => run && run.run_id);
       return v2.find((run) => V2_ACTIVE_STATUSES.has(String(run.status || ''))) || v2[0] || null;
     }
@@ -3052,8 +3058,9 @@
     }
 
     function openUnifiedRun(runId) {
-      if (!runId) return;
-      uwState.selected = runId;
+      const target = ACTIVE_RUN || runId;
+      if (!target) return;
+      uwState.selected = target;
       switchView('unified');
     }
 
@@ -3105,7 +3112,7 @@
           <h2 style="margin:4px 0">${esc(detail.goal || plan.goal || 'Untitled plan')}</h2></div>
         <div class="actions">
           <span class="pill ${statusTone === 'ok' ? 'ok' : statusTone === 'bad' ? 'bad' : 'warn'}">${esc(status)}</span>
-          <button class="btn" onclick="openUnifiedRun('${esc(detail.run_id)}')">Open in War Room</button>
+          <button class="btn" onclick="openUnifiedRun('${esc(detail.run_id)}')">Open active run</button>
           <button class="btn ghost" onclick="toggleLegacyPlan()">${state.showLegacyPlan ? 'Hide' : 'Show'} legacy v1</button>
         </div>
       </div>
@@ -3138,6 +3145,8 @@
       state.streamRefreshTimer = setTimeout(async () => {
         state.streamRefreshTimer = null;
         await refreshAll();
+        // Keep the active-run panel live from the same SSE tick.
+        if (!document.hidden && state.view === 'unified') await uwLoadRuns(true);
       }, 250);
     }
 
@@ -3188,7 +3197,7 @@
         section.classList.toggle('active', section.id === 'view-' + view));
       const titles = {
         overview: ['Overview', 'Plan, agents, verify and report'],
-        unified: ['War Room', 'Unified v2 runs, spend, usage, blackboard and delivery'],
+        unified: ['Active run', 'Live state of the one run this dashboard serves'],
         plan: ['Plan', 'Intelligence, subtasks and approval'],
         warroom: ['War room', 'Five agents, one Lead, live state'],
         verify: ['Verify', 'The real machine decides what passes'],
@@ -5389,8 +5398,8 @@
       } catch (error) { toast(error.message); }
     }
 
-    /* ---------- Unified War Room ---------- */
-    const uwState = { runs: [], selected: null, detail: null, cursor: null, loading: false };
+    /* ---------- Active run (one run, no history selector) ---------- */
+    const uwState = { selected: ACTIVE_RUN, detail: null, cursor: null, loading: false };
     function uwTone(status) {
       const value = String(status || '');
       if (['DONE', 'HANDOFF_READY', 'PHASE_COMMITTED'].includes(value)) return 'ok';
@@ -5398,68 +5407,41 @@
       if (['AWAITING_SIGNOFF', 'AWAITING_USAGE', 'PAUSED', 'RATE_LIMITED'].includes(value)) return 'warn';
       return '';
     }
-    function uwRenderRunList() {
-      const box = $('#uwRunList');
-      const needle = ($('#uwSearch').value || '').trim().toLowerCase();
-      const runs = uwState.runs.filter((run) =>
-        !needle || String(run.run_id || '').toLowerCase().includes(needle)
-        || String(run.goal || '').toLowerCase().includes(needle));
-      if (!runs.length) { box.innerHTML = '<span class="muted">No runs yet. Start with: swarm "your goal"</span>'; return; }
-      box.innerHTML = '';
-      for (const run of runs) {
-        const el = document.createElement('div');
-        el.className = 'uw-run' + (uwState.selected === run.run_id ? ' active' : '');
-        el.innerHTML = `<span class="uw-badge ${run.source === 'v1' ? '' : 'e'}">${esc(run.source || 'v2')}</span>
-          <b class="mono">${esc(run.run_id)}</b><span class="grow muted">${esc(String(run.goal || '').slice(0, 70))}</span>
-          ${run.tier ? `<span class="uw-badge e">${esc(run.tier)}</span>` : ''}
-          <span class="pill ${uwTone(run.status) === 'bad' ? 'bad' : uwTone(run.status) === 'ok' ? 'ok' : ''}">${esc(run.status || '?')}</span>`;
-        el.onclick = () => uwSelect(run.run_id);
-        box.appendChild(el);
-      }
-    }
-    function uwRenderHistory(summary) {
-      const box = $('#uwHistory');
-      const rows = uwState.runs.slice(0, 25);
-      if (!rows.length) { box.textContent = 'No history.'; return; }
-      const counts = (summary && summary.counts) || {};
-      const chips = Object.entries(counts).map(([status, count]) =>
-        `<span class="uw-badge">${esc(status)} ${count}</span>`).join(' ');
-      box.innerHTML = `<div style="margin-bottom:6px">${chips || ''}</div>` + rows.map((run) => `
-        <div class="uw-run" onclick="uwSelect('${esc(run.run_id)}')">
-          <span class="mono">${esc(run.run_id)}</span><span class="grow muted">${esc(run.updated_at || '')}</span>
-          <span class="uw-badge">${esc(run.source || 'v2')}</span><span class="pill">${esc(run.status || '?')}</span>
-        </div>`).join('');
+    function uwRenderBound() {
+      const bound = $('#uwBound');
+      if (!bound) return;
+      bound.textContent = ACTIVE_RUN
+        ? 'bound to run ' + ACTIVE_RUN + ' · earlier runs are not listed here'
+        : 'no run bound · start one, or serve with --run-id <run_id>';
     }
     async function uwLoadRuns(keepSelection = false) {
+      uwRenderBound();
+      const runId = ACTIVE_RUN || uwState.selected;
+      if (!runId) {
+        uwState.selected = null; uwState.detail = null;
+        $('#uwGoal').textContent = 'No active run';
+        $('#uwStatus').textContent = '-';
+        $('#uwStatus').className = 'pill';
+        return;
+      }
       if (uwState.loading) return;
       uwState.loading = true;
       try {
-        const data = await api('/api/unified/runs?include_v1=1');
-        uwState.runs = data.runs || [];
-        const v2Runs = uwState.runs.filter((run) => run.source !== 'v1');
-        const first = v2Runs.find((run) => V2_ACTIVE_STATUSES.has(String(run.status || '')))
-          || v2Runs[0] || uwState.runs[0];
-        const selectedExists = uwState.runs.some((run) => run.run_id === uwState.selected);
-        if (!keepSelection || !uwState.selected || !selectedExists) {
-          uwState.selected = first ? first.run_id : null;
-        }
-        uwRenderRunList();
-        uwRenderHistory(data.summary || {});
-        if (uwState.selected) await uwSelect(uwState.selected, true);
+        await uwSelect(runId, true);
       } catch (error) {
-        $('#uwRunList').innerHTML = `<span class="bad">${esc(error.message)}</span>`;
+        $('#uwMsg').innerHTML = `<span class="bad">${esc(error.message)}</span>`;
       } finally {
         uwState.loading = false;
       }
     }
     async function uwSelect(runId, silent = false) {
-      if (!runId) return;
-      uwState.selected = runId;
-      uwRenderRunList();
+      const target = ACTIVE_RUN || runId;
+      if (!target) return;
+      uwState.selected = target;
       try {
         const [detail, events] = await Promise.all([
-          api('/api/unified/runs/' + encodeURIComponent(runId)),
-          api('/api/unified/runs/' + encodeURIComponent(runId) + '/events?limit=50')
+          api('/api/unified/runs/' + encodeURIComponent(target)),
+          api('/api/unified/runs/' + encodeURIComponent(target) + '/events?limit=50')
         ]);
         uwState.detail = detail;
         uwState.cursor = events.next_cursor;
@@ -5619,12 +5601,15 @@
 
     const VIEWS = ['overview', 'unified', 'plan', 'chat', 'workspaces', 'quota', 'drafts', 'settings'];
     const STAGE_TABS = { warroom: 'warroom', verify: 'verify', report: 'report', done: 'report' };
-    const initialView = (location.hash || '#overview').slice(1);
+    // A bound page lands on the active run; an unbound dashboard keeps Overview.
+    const DEFAULT_VIEW = ACTIVE_RUN ? 'unified' : 'overview';
+    const initialView = (location.hash || '#' + DEFAULT_VIEW).slice(1);
     const runParam = new URLSearchParams(location.search).get('run');
-    if (runParam) state.selected = runParam;
+    if (ACTIVE_RUN) { state.selected = ACTIVE_RUN; uwState.selected = ACTIVE_RUN; }
+    else if (runParam) state.selected = runParam;
     switchView(STAGE_TABS[initialView] ? initialView
       : initialView === 'analyze' ? 'plan'
-        : VIEWS.includes(initialView) ? initialView : 'overview');
+        : VIEWS.includes(initialView) ? initialView : DEFAULT_VIEW);
     window.addEventListener('hashchange', () => {
       const view = (location.hash || '#overview').slice(1);
       const target = view === 'analyze' ? 'plan' : view;

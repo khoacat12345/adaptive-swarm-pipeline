@@ -13,7 +13,7 @@ Chi dung thu vien chuan (`http.server`). Doc truc tiep:
     <root>/.agents/draft/         (ban nhap cua Coder -> diff)
 
 API:
-    GET /                              SPA (War Room, dark mode)
+    GET /                              SPA (single active run, dark mode)
     GET /v2                            alias trang Usage/sign-off v2
     GET /api/unified/runs              run v2 (va v1 read-only) da chuan hoa
     GET /api/unified/runs/<id>         detail: tier/planner/spend/verify/handoff
@@ -245,12 +245,43 @@ def diff_for_run(root: Path, ledger: Path, run_id: str) -> dict:
 # HTML (SPA)
 # --------------------------------------------------------------------------
 HTML = (Path(__file__).resolve().with_name("dashboard_ui.html")).read_text(encoding="utf-8")
+# The page is single-run: the server tells the browser which run it may show.
+RUN_ID_PLACEHOLDER = '"__ACTIVE_RUN_ID__"'
+
+
+def page_html(run_id: str | None) -> str:
+    """Injectable dashboard HTML bound to one run (or to nothing)."""
+    bound = str(run_id).strip() if run_id else None
+    return HTML.replace(RUN_ID_PLACEHOLDER, json.dumps(bound))
+
+
+def resolve_active_run(root: Path) -> str | None:
+    """Newest v2 run that is still active, or None.
+
+    Finished runs are never auto-selected: the page shows one live run only, and
+    older cache entries must not resurrect a completed one.
+    """
+    try:
+        from unified import state as unified_state
+
+        runs = unified_state.list_runs(root, include_v1=False)
+    except Exception:                       # noqa: BLE001 - dashboard must still open
+        return None
+    for run in runs:
+        status = str(run.get("status") or "").upper()
+        if status in unified_state.ACTIVE_STATUSES:
+            run_id = str(run.get("run_id") or "").strip()
+            if run_id:
+                return run_id
+    return None
 
 
 # --------------------------------------------------------------------------
 # HTTP server
 # --------------------------------------------------------------------------
-def make_handler(root: Path, ledger: Path):
+def make_handler(root: Path, ledger: Path, run_id: str | None = None):
+    pinned_run_id = (str(run_id).strip() or None) if run_id else None
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "SwarmDashboard/1.0"
 
@@ -371,7 +402,9 @@ def make_handler(root: Path, ledger: Path):
                         root, route, parse_qs(parsed.query))
                     self._json(payload, status)
                 elif route == "/":
-                    self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
+                    active_run = pinned_run_id or resolve_active_run(root)
+                    self._send(200, page_html(active_run).encode("utf-8"),
+                               "text/html; charset=utf-8")
                 elif route == "/v2":
                     from v2 import web as v2_web
                     self._send(200, v2_web.page().encode("utf-8"), "text/html; charset=utf-8")
@@ -742,7 +775,8 @@ def make_handler(root: Path, ledger: Path):
 
 
 def make_server(port: int = DEFAULT_PORT, *, root=".", ledger=None,
-                host: str = DEFAULT_HOST) -> ThreadingHTTPServer:
+                host: str = DEFAULT_HOST,
+                run_id: str | None = None) -> ThreadingHTTPServer:
     root_path = Path(root).resolve()
     ledger_path = Path(ledger).resolve() if ledger else ledger_for(root_path)
     # C1: the War Room is a local-only surface.  A caller that asks for
@@ -752,7 +786,10 @@ def make_server(port: int = DEFAULT_PORT, *, root=".", ledger=None,
         bind_host = DEFAULT_HOST
     if bind_host in ("localhost",):
         bind_host = DEFAULT_HOST
-    server = ThreadingHTTPServer((bind_host, int(port)), make_handler(root_path, ledger_path))
+    server = ThreadingHTTPServer(
+        (bind_host, int(port)),
+        make_handler(root_path, ledger_path, run_id=run_id),
+    )
     server.daemon_threads = True
     return server
 
@@ -771,14 +808,16 @@ def _port_busy(host: str, port: int, *, timeout: float = 0.4) -> bool:
 
 
 def serve(port: int = DEFAULT_PORT, *, root=".", ledger=None, host: str = DEFAULT_HOST,
-          open_browser: bool = False) -> int:
+          open_browser: bool = False, run_id: str | None = None) -> int:
     if _port_busy(host, port):
         print(f"dashboard: port {port} da co process khac giu -- khong khoi dong them.")
         print("  dung process cu truoc, hoac chay voi --port khac (vd --port 8081)")
         return 1
-    server = make_server(port, root=root, ledger=ledger, host=host)
+    server = make_server(port, root=root, ledger=ledger, host=host, run_id=run_id)
     actual = server.server_address[1]
-    print(f"dashboard: http://{host}:{actual}/  (ledger={Path(ledger).resolve() if ledger else ledger_for(Path(root).resolve())})")
+    bound = str(run_id).strip() if run_id else (resolve_active_run(Path(root).resolve()) or "")
+    label = f" run={bound}" if bound else ""
+    print(f"dashboard: http://{host}:{actual}/  (ledger={Path(ledger).resolve() if ledger else ledger_for(Path(root).resolve())}){label}")
     if open_browser:
         import threading
         import webbrowser
@@ -799,6 +838,8 @@ def build_parser():
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--root", default=".")
     parser.add_argument("--ledger", default=None)
+    parser.add_argument("--run-id", default=None,
+                        help="serve only this run (default: newest active v2 run)")
     parser.add_argument("--open", action="store_true", help="open the browser automatically")
     return parser
 
@@ -806,7 +847,7 @@ def build_parser():
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     return serve(args.port, root=args.root, ledger=args.ledger, host=args.host,
-                 open_browser=args.open)
+                 open_browser=args.open, run_id=args.run_id)
 
 
 if __name__ == "__main__":
