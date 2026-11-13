@@ -245,22 +245,12 @@ def diff_for_run(root: Path, ledger: Path, run_id: str) -> dict:
 # HTML (SPA)
 # --------------------------------------------------------------------------
 HTML = (Path(__file__).resolve().with_name("dashboard_ui.html")).read_text(encoding="utf-8")
-RUN_HTML = (Path(__file__).resolve().with_name("run_ui.html")).read_text(encoding="utf-8")
-REQUIRED_HTML = """<!doctype html><html><head><meta charset=\"utf-8\">
-<title>Adaptive Swarm - Run Viewer</title></head><body>
-<main><h1>Adaptive Swarm</h1>
-<p>This UI is now single-run only. Start it from a terminal with a run id:</p>
-<pre>swarm ui --run-id &lt;run_id&gt; --open</pre>
-<p>Previous runs are no longer exposed by the UI. Raw state/logs are kept on disk.</p>
-</main></body></html>"""
 
 
 # --------------------------------------------------------------------------
 # HTTP server
 # --------------------------------------------------------------------------
-def make_handler(root: Path, ledger: Path, run_id: str | None = None):
-    selected_run_id = run_id
-
+def make_handler(root: Path, ledger: Path):
     class Handler(BaseHTTPRequestHandler):
         server_version = "SwarmDashboard/1.0"
 
@@ -381,14 +371,7 @@ def make_handler(root: Path, ledger: Path, run_id: str | None = None):
                         root, route, parse_qs(parsed.query))
                     self._json(payload, status)
                 elif route == "/":
-                    if selected_run_id:
-                        import json as _json
-                        page = RUN_HTML.replace(
-                            "'__RUN_ID__'", _json.dumps(str(selected_run_id))
-                        )
-                    else:
-                        page = REQUIRED_HTML
-                    self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+                    self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
                 elif route == "/v2":
                     from v2 import web as v2_web
                     self._send(200, v2_web.page().encode("utf-8"), "text/html; charset=utf-8")
@@ -759,8 +742,7 @@ def make_handler(root: Path, ledger: Path, run_id: str | None = None):
 
 
 def make_server(port: int = DEFAULT_PORT, *, root=".", ledger=None,
-                host: str = DEFAULT_HOST,
-                run_id: str | None = None) -> ThreadingHTTPServer:
+                host: str = DEFAULT_HOST) -> ThreadingHTTPServer:
     root_path = Path(root).resolve()
     ledger_path = Path(ledger).resolve() if ledger else ledger_for(root_path)
     # C1: the War Room is a local-only surface.  A caller that asks for
@@ -770,10 +752,7 @@ def make_server(port: int = DEFAULT_PORT, *, root=".", ledger=None,
         bind_host = DEFAULT_HOST
     if bind_host in ("localhost",):
         bind_host = DEFAULT_HOST
-    server = ThreadingHTTPServer(
-        (bind_host, int(port)),
-        make_handler(root_path, ledger_path, run_id=run_id),
-    )
+    server = ThreadingHTTPServer((bind_host, int(port)), make_handler(root_path, ledger_path))
     server.daemon_threads = True
     return server
 
@@ -792,21 +771,18 @@ def _port_busy(host: str, port: int, *, timeout: float = 0.4) -> bool:
 
 
 def serve(port: int = DEFAULT_PORT, *, root=".", ledger=None, host: str = DEFAULT_HOST,
-          open_browser: bool = False, run_id: str | None = None) -> int:
+          open_browser: bool = False) -> int:
     if _port_busy(host, port):
         print(f"dashboard: port {port} da co process khac giu -- khong khoi dong them.")
         print("  dung process cu truoc, hoac chay voi --port khac (vd --port 8081)")
         return 1
-    server = make_server(port, root=root, ledger=ledger, host=host, run_id=run_id)
+    server = make_server(port, root=root, ledger=ledger, host=host)
     actual = server.server_address[1]
-    suffix = f"?run={run_id}" if run_id else ""
-    print(f"dashboard: http://{host}:{actual}/{suffix}  (ledger={Path(ledger).resolve() if ledger else ledger_for(Path(root).resolve())})")
+    print(f"dashboard: http://{host}:{actual}/  (ledger={Path(ledger).resolve() if ledger else ledger_for(Path(root).resolve())})")
     if open_browser:
         import threading
         import webbrowser
-        threading.Timer(
-            0.6, lambda: webbrowser.open(f"http://{host}:{actual}/{suffix}")
-        ).start()
+        threading.Timer(0.6, lambda: webbrowser.open(f"http://{host}:{actual}/")).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -823,8 +799,6 @@ def build_parser():
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--root", default=".")
     parser.add_argument("--ledger", default=None)
-    parser.add_argument("--run-id", default=None,
-                        help="serve the single-run viewer for this run id")
     parser.add_argument("--open", action="store_true", help="open the browser automatically")
     return parser
 
@@ -832,7 +806,7 @@ def build_parser():
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     return serve(args.port, root=args.root, ledger=args.ledger, host=args.host,
-                 open_browser=args.open, run_id=args.run_id)
+                 open_browser=args.open)
 
 
 if __name__ == "__main__":

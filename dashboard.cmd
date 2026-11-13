@@ -1,6 +1,6 @@
 @echo off
-setlocal
-REM Single-run viewer only. Example:
-REM   dashboard.cmd --run-id v2_20261112T161142_045703 --port 8501 --open
-python "%~dp0.agents\v2\swarm_cli.py" ui %*
-exit /b %ERRORLEVEL%
+REM Double-click this file to open the Unified War Room.
+REM It starts the local server (loopback only) and opens the browser.
+cd /d "%~dp0"
+python .agents\dashboard.py --root . --port 8501 --open
+if errorlevel 1 pause

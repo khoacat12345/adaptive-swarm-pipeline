@@ -314,12 +314,6 @@ def handle_get(root: str | Path, route: str,
                 return 200, run_diff(
                     root, run_id, state_root=state_root, max_bytes=max_bytes,
                 )
-            if suffix == "logbook":
-                from unified import logbook
-
-                return 200, redact(logbook.build(
-                    root, run_id, state_root=state_root,
-                ))
             if suffix == "blackboard":
                 return 200, redact(unified_state.blackboard(
                     root, run_id, state_root=state_root,

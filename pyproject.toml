@@ -66,4 +66,4 @@ package-dir = { "agents" = ".agents", "agents.core" = ".agents/core", "agents.pr
 include-package-data = true
 
 [tool.setuptools.package-data]
-agents = ["dashboard_ui.html", "run_ui.html"]
+agents = ["dashboard_ui.html"]

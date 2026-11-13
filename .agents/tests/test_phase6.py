@@ -370,12 +370,13 @@ def test_dashboard_api(checks: Checks) -> None:
 
         with urllib.request.urlopen(base + "/", timeout=5) as response:
             html = response.read().decode("utf-8")
-        checks.check("dashboard: single-run instructions",
-                     "single-run only" in html and "swarm ui --run-id" in html,
-                     html[:300])
-        checks.check("dashboard: no War Room / run history",
-                     "War Room" not in html and "Run history" not in html,
-                     html[:300])
+        checks.check("dashboard: HTML co view plan", 'id="view-plan"' in html
+                     and 'id="nav"' in html)
+        checks.check("dashboard: 7 sidebar views + integrated overview",
+                     all(f'id="view-{name}"' in html for name in
+                         ("overview", "plan", "chat", "workspaces", "quota", "drafts", "settings"))
+                     and all(f'id="{name}"' in html for name in
+                             ("overviewTabs", "warBody", "verifyBody", "doneBody")), html[:200])
 
         with urllib.request.urlopen(base + "/api/job", timeout=5) as response:
             job_data = json.loads(response.read().decode("utf-8"))

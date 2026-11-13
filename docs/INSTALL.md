@@ -176,39 +176,31 @@ Legacy v1 commands remain frozen as a test oracle:
 python3 .agents/job.py --plan plan.json
 ```
 
-## Single-run viewer
+## Dashboard
 
-The UI is now scoped to one run and is opened from the terminal:
+The unified War Room is the only dashboard:
 
 ```powershell
-swarm ui --run-id <id> --open
+.\dashboard.cmd
 # or:
-python .agents\dashboard.py --root . --run-id <id> --port 8501 --open
-```
-
-Windows wrapper:
-
-```powershell
-.\dashboard.cmd --run-id <id> --port 8501 --open
+python .agents\dashboard.py --root . --port 8501 --open
 ```
 
 Linux/macOS:
 
 ```bash
-./dashboard.sh --run-id <id> --port 8501 --open
+./dashboard.sh
+# or:
+python3 .agents/dashboard.py --root . --port 8501 --open
 ```
 
-The default page without `--run-id` only prints instructions. There is no
-history/run selector in the UI. To view another run, open another viewer with
-that run ID; use a different port for concurrent viewers.
+`--port 8080` remains an alias for old bookmarks.
 
-The server binds `127.0.0.1` only. Control actions require the per-run sign-off
-token. Each `swarm ui` invocation also regenerates the run logbook at:
-
-```text
-.agents/tmp/v2/runs/<id>/logbook.md
-.agents/tmp/v2/runs/<id>/logbook.json
-```
+The server binds `127.0.0.1` only. Read-only dashboard mode does not need a
+token; control actions (`/api/unified/*` writes, merge, rollback) require the
+per-run sign-off token produced by the v2 prepare flow. Tokens are not printed
+by `swarm status`; the safe default is to use the War Room's read-only view or
+run the explicit CLI command.
 
 ## Verify your platform
 
