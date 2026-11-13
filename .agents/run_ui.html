@@ -179,15 +179,8 @@
           <input id="tokenInput" type="password" placeholder="run token" autocomplete="off">
           <button class="primary" onclick="action('merge')">Merge</button>
           <button class="ghost" onclick="action('rollback')">Rollback</button>
-        </div>
-        <div class="actions" style="margin-top:7px">
-          <button class="ghost" onclick="control('pause')">Pause</button>
-          <button class="ghost" onclick="control('resume')">Resume</button>
-          <button class="ghost" onclick="control('stop')">Stop</button>
-          <button class="ghost" onclick="approveUsage()">Approve Usage</button>
-          <button class="ghost" onclick="control('accept')">Accept handoff</button>
-        </div>
-        <div id="actionMsg" class="muted" style="margin-top:6px"></div></div>
+          <span id="actionMsg" class="muted"></span>
+        </div></div>
       </div>
       <div><div class="card"><h2>Spend</h2><div class="kv">
         <div class="k">Requests</div><div>${esc(spend.used_requests || 0)} / ${esc(spend.max_requests || '-')}</div>
@@ -267,25 +260,6 @@
     try {
       const data = await api('/api/unified/' + kind, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({run_id: RUN_ID, token})});
       toastAction(kind + ' → ' + (data.status || data.merge_sha || 'ok'));
-      await load();
-    } catch (error) { toastAction(error.message); }
-  }
-  async function control(actionName) {
-    const token = ($('#tokenInput') || {}).value || '';
-    if (!token) { toastAction('Run token is required.'); return; }
-    if (actionName === 'stop' && !confirm('Stop this run?')) return;
-    try {
-      const data = await api('/api/unified/control', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({run_id: RUN_ID, token, action: actionName})});
-      toastAction(actionName + ' → ' + (data.status || 'ok'));
-      await load();
-    } catch (error) { toastAction(error.message); }
-  }
-  async function approveUsage() {
-    const token = ($('#tokenInput') || {}).value || '';
-    if (!token) { toastAction('Run token is required.'); return; }
-    try {
-      const data = await api('/api/unified/usage/approve', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({run_id: RUN_ID, token})});
-      toastAction('usage → ' + (data.status || 'ok'));
       await load();
     } catch (error) { toastAction(error.message); }
   }
