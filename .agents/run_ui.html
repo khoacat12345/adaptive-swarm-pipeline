@@ -112,7 +112,7 @@
     return data;
   }
   async function load() {
-    if (!RUN_ID || RUN_ID === '__RUN_ID__') { state.error = 'No run id supplied.'; render(); return; }
+    if (!RUN_ID || RUN_ID.startsWith('__')) { state.error = 'No run id supplied.'; render(); return; }
     try {
       const [detail, events, diff, logbook] = await Promise.all([
         api('/api/unified/runs/' + encodeURIComponent(RUN_ID)),
