@@ -27,7 +27,7 @@ Bạn **không được** tự tuyên bố task xong. Chỉ daemon quyết đị
 4. Đọc kết quả lint:
    - **Nếu có ERROR** (thiếu scope/verify, trùng scope, verify rỗng):
      **KHÔNG hỏi "OK để chạy".** Trình bày lỗi và đề xuất đúng 2 lựa chọn:
-     a) `waker plan --via opencode --model <model> --prompt "<nguyên văn>" --repo <repo>`
+     a) `waker plan --via opencode --model opencode-go/deepseek-v4.1-flash --prompt "<nguyên văn>" --repo <repo>`
         để một turn model điền scope/verify, rồi lint lại;
      b) user gộp/sửa task thủ công.
    - Chỉ đi tiếp khi lint **0 error**.
@@ -38,7 +38,7 @@ Bạn **không được** tự tuyên bố task xong. Chỉ daemon quyết đị
 ```bash
 waker start --detach --repo . --tasks .waker/tasks.yaml \
   --test "<lệnh test của repo>" \
-  --adapter opencode --model <provider/model> [--max-kicks 5] [--max-cost 1.0]
+  --adapter opencode --model opencode-go/deepseek-v4.1-flash [--max-kicks 5] [--max-cost 1.0]
 ```
 
 Nếu không phải OpenCode, dùng adapter generic:
