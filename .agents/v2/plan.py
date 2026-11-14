@@ -345,12 +345,36 @@ def validate_task_graph(
                 problems.append(f"{task_id}: unknown dependency {dep}")
 
     if not problems:
-        try:
-            from .taskgraph import TaskGraph
-
-            TaskGraph.from_plan(plan).assert_valid()
-        except Exception as exc:  # noqa: BLE001 - report as a plan problem
-            problems.append(f"task graph invalid: {exc}")
+        # Cycle detection over the declared task nodes only (F01 explicit graph).
+        edges: dict[str, list[str]] = {str(item.get("id") or ""): [] for item in raw}
+        for item in raw:
+            task_id = str(item.get("id") or "")
+            deps = (
+                item.get("dependencies")
+                or item.get("depends_on")
+                or item.get("needs")
+                or []
+            )
+            if isinstance(deps, str):
+                deps = [deps]
+            for dep in deps:
+                edges.setdefault(str(dep), []).append(task_id)
+        indegree = {node: 0 for node in edges}
+        for node, targets in edges.items():
+            for target in targets:
+                indegree[target] = indegree.get(target, 0) + 1
+        queue = sorted(node for node, degree in indegree.items() if degree == 0)
+        visited = 0
+        while queue:
+            node = queue.pop(0)
+            visited += 1
+            for target in sorted(edges.get(node, [])):
+                indegree[target] -= 1
+                if indegree[target] == 0:
+                    queue.append(target)
+        if visited != len(indegree):
+            stuck = sorted(node for node, degree in indegree.items() if degree > 0)
+            problems.append("task dependency cycle among: " + ", ".join(stuck[:12]))
     return problems
 
 
@@ -426,6 +450,7 @@ def validate_plan(
                     allow_new_files=allow_new,
                 )
             )
+        errors.extend(_validate_work_order_graph(phase_id, work_orders))
 
     # Optional F01 task graph: only validated when the plan declares tasks.
     if _explicit_tasks(plan):

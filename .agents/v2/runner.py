@@ -13,16 +13,19 @@ import hmac
 import json
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import approval_policy
 
 from . import isolation
+from .attempts import AttemptHistory
 from .budget import BudgetConfig, BudgetController
 from .errors import ManifestError, StateTransitionError
 from .plan import budget_from_plan, save_plan, validate_plan
+from .scheduler import Scheduler
 from .signoff import create_signoff, signoff_summary, assert_signoff
 from .state import RunStore, resolve_state_root
+from .taskgraph import TaskGraph
 
 
 class V2Runner:
@@ -364,6 +367,86 @@ class V2Runner:
         if not data:
             raise ManifestError(f"run has no workspace: {run_id}")
         return isolation.Workspace.from_dict(data)
+
+    # ------------------------------------------------------------------
+    # Task graph, scheduling and attempts (F01 / F02 / F05)
+    # ------------------------------------------------------------------
+    def plan(self, run_id: str) -> dict[str, Any]:
+        store = self.load(run_id)
+        plan_path = store.run_dir / "plan.json"
+        if not plan_path.exists():
+            raise ManifestError(f"run has no plan: {run_id}")
+        return json.loads(plan_path.read_text(encoding="utf-8"))
+
+    def task_graph(self, run_id: str, *, include_work_orders: bool = False) -> TaskGraph:
+        return TaskGraph.from_plan(
+            self.plan(run_id), include_work_orders=include_work_orders,
+        )
+
+    def schedule(
+        self,
+        run_id: str,
+        *,
+        max_parallel: int = 4,
+        include_work_orders: bool = False,
+        gate: Any | None = None,
+        models: dict[str, str] | None = None,
+        default_model: str | None = None,
+    ) -> dict[str, Any]:
+        """Deterministic dispatch preview for a persisted plan."""
+        graph = self.task_graph(run_id, include_work_orders=include_work_orders)
+        scheduler = Scheduler(
+            graph,
+            max_parallel=max_parallel,
+            gate=gate,
+            models=models,
+            default_model=default_model,
+        )
+        return {
+            "run_id": run_id,
+            "graph": graph.as_dict(),
+            "schedule": scheduler.plan(),
+            "waves": scheduler.waves(),
+        }
+
+    def attempt_history(self, run_id: str) -> AttemptHistory:
+        return AttemptHistory(self.load(run_id).run_dir / "attempts.ndjson")
+
+    def attempts(self, run_id: str, *, limit: int = 200) -> dict[str, Any]:
+        history = self.attempt_history(run_id)
+        return {
+            "run_id": run_id,
+            "summary": history.summary(),
+            "items": history.as_list(limit=limit),
+        }
+
+    def record_quota_decision(self, run_id: str,
+                              decision: Mapping[str, Any]) -> None:
+        """Persist dispatch-gate evidence without changing run state."""
+        store = self.load(run_id)
+        store.append_event("quota.decision", dict(decision))
+
+    def request_confirmation(self, run_id: str, *,
+                             reason: str = "operator decision required") -> dict[str, Any]:
+        store = self.load(run_id)
+        status = str(store.load().get("status") or "")
+        if status == "AWAITING_USER_CONFIRMATION":
+            return store.load()
+        if status == "USER_CONFIRMED":
+            return store.load()
+        return store.transition("request_confirmation", reason=reason)
+
+    def confirm(self, run_id: str, *, answer: str = "") -> dict[str, Any]:
+        store = self.load(run_id)
+        manifest = store.transition("user_confirms")
+        if answer:
+            manifest = store.update(last_decision=answer)
+        return manifest
+
+    def reject(self, run_id: str, *, reason: str = "operator rejected") -> dict[str, Any]:
+        store = self.load(run_id)
+        return store.transition("user_rejects", reason=reason)
+
 
     def checkpoint_phase(
         self,

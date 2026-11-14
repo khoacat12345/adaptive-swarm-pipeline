@@ -603,6 +603,71 @@ def _handoff(root: Path, run_dir: Path, manifest: Mapping[str, Any]) -> dict[str
     }
 
 
+def _attempts_projection(run_dir: Path, *, limit: int = 200) -> dict[str, Any]:
+    """Read-only attempt summary; never raises for a missing journal."""
+    path = Path(run_dir) / "attempts.ndjson"
+    if not path.exists():
+        return {"total": 0, "by_state": {}, "retries": 0, "tasks": [],
+                "active": 0, "lost": 0, "history_path": str(path)}
+    try:
+        from v2.attempts import AttemptHistory
+
+        history = AttemptHistory(path)
+        summary = history.summary()
+        summary["items"] = history.as_list(limit=limit)
+        return summary
+    except Exception as exc:  # noqa: BLE001 - a bad journal must not hide a run
+        return {"total": 0, "by_state": {}, "retries": 0, "tasks": [],
+                "active": 0, "lost": 0, "history_path": str(path),
+                "error": f"{type(exc).__name__}: {exc}"[:300]}
+
+
+def _inbox_projection(run_dir: Path, *, limit: int = 50) -> dict[str, Any]:
+    """Read-only decision inbox projection from the append-only journal."""
+    path = Path(run_dir) / "inbox.ndjson"
+    rows: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for event in _read_jsonl(path):
+        message_id = str(event.get("id") or event.get("message_id") or "")
+        if not message_id:
+            continue
+        if message_id not in rows:
+            order.append(message_id)
+        rows[message_id] = dict(event)
+    messages = [rows[message_id] for message_id in order]
+    open_states = {"pending", "escalated"}
+    pending = [item for item in messages if item.get("status") in open_states]
+    blocking = [item for item in pending if item.get("blocking")]
+    return {
+        "total": len(messages),
+        "pending": len(pending),
+        "blocking": len(blocking),
+        "needs_attention": bool(blocking),
+        "open_gates": sorted({
+            str(item.get("gate")) for item in pending if item.get("gate")
+        }),
+        "items": [redact(item) for item in messages[-limit:]],
+        "pending_items": [redact(item) for item in pending[-limit:]],
+    }
+
+
+def _task_graph_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """Small deterministic DAG projection for the run detail."""
+    if not plan:
+        return {"available": False, "reason": "run has no plan"}
+    try:
+        from v2.taskgraph import TaskGraph
+
+        graph = TaskGraph.from_plan(plan, include_work_orders=True)
+        payload = graph.as_dict()
+        payload["available"] = True
+        payload["join_points"] = len(payload.get("join_points") or [])
+        payload["fanout_points"] = len(payload.get("fanout_points") or [])
+        return redact(payload)
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "reason": f"{type(exc).__name__}: {exc}"[:300]}
+
+
 def _warnings(*, manifest: Mapping[str, Any], plan: Mapping[str, Any],
               spend: Mapping[str, Any], verify: Mapping[str, Any],
               handoff: Mapping[str, Any], usage: Mapping[str, Any],
@@ -636,9 +701,71 @@ def _warnings(*, manifest: Mapping[str, Any], plan: Mapping[str, Any],
     return warnings
 
 
+def _graph_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """F01: task graph projection for the War Room (never raises)."""
+    if not plan:
+        return {"available": False}
+    try:
+        from v2.taskgraph import TaskGraph
+
+        payload = TaskGraph.from_plan(plan, include_work_orders=True).as_dict()
+        payload["available"] = True
+        return redact(payload)
+    except Exception as exc:  # noqa: BLE001 - projection must not break the UI
+        return {"available": False, "error": redact_text(str(exc), limit=300)}
+
+
+def _attempts_projection(run_dir: Path) -> dict[str, Any]:
+    """F02: attempt history read straight from the append-only journal."""
+    path = run_dir / "attempts.ndjson"
+    if not path.exists():
+        return {"available": False, "total": 0, "tasks": [], "items": []}
+    try:
+        from v2.attempts import AttemptHistory
+
+        history = AttemptHistory(path)
+        payload = history.summary()
+        payload["available"] = True
+        payload["items"] = redact(history.as_list(limit=50))
+        return payload
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "error": redact_text(str(exc), limit=300)}
+
+
+def _inbox_projection(run_dir: Path, run_id: str) -> dict[str, Any]:
+    """F03: pending decisions and open gates for the badge/panel."""
+    path = run_dir / "inbox.ndjson"
+    if not path.exists():
+        return {"available": False, "total": 0, "pending": 0, "blocking": 0,
+                "needs_attention": False, "items": [], "pending_items": []}
+    try:
+        from unified.inbox import inbox_summary
+
+        payload = inbox_summary(run_dir, run_id, state_root=run_dir.parent.parent)
+        payload["available"] = True
+        return redact(payload)
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "error": redact_text(str(exc), limit=300)}
+
+
+def _quota_projection(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """F05: the latest quota decision recorded by the scheduler/runner."""
+    for event in reversed(events):
+        name = str(event.get("event_type") or "")
+        if name not in {"quota.decision", "quota.snapshot", "quota.gate"}:
+            continue
+        data = event.get("data") if isinstance(event.get("data"), Mapping) else {}
+        payload = dict(data)
+        payload["available"] = True
+        payload["at"] = event.get("timestamp")
+        return redact(payload)
+    return {"available": False}
+
+
 def _project_manifest(root: Path, run_dir: Path, manifest: Mapping[str, Any],
                       *, events: list[dict[str, Any]] | None = None,
-                      include_plan: bool = False) -> dict[str, Any]:
+                      include_plan: bool = False,
+                      include_evidence: bool = False) -> dict[str, Any]:
     events = list(events if events is not None else _read_jsonl(run_dir / "events.ndjson"))
     plan = _read_json(run_dir / "plan.json")
     budget = _read_json(run_dir / "budget.json")
@@ -718,6 +845,13 @@ def _project_manifest(root: Path, run_dir: Path, manifest: Mapping[str, Any],
     }
     if include_plan:
         projected["plan"] = redact(plan)
+    if include_evidence:
+        projected["graph"] = _graph_projection(plan)
+        projected["attempts"] = _attempts_projection(run_dir)
+        projected["inbox"] = _inbox_projection(
+            run_dir, str(manifest.get("run_id") or run_dir.name),
+        )
+        projected["quota"] = _quota_projection(events)
     return projected
 
 
@@ -896,7 +1030,8 @@ def list_runs(root: str | Path, *, state_root: str | Path | None = None,
 
 
 def read_run(root: str | Path, run_id: str, *, state_root: str | Path | None = None,
-             include_v1: bool = True) -> dict[str, Any]:
+             include_v1: bool = True,
+             include_report: bool = True) -> dict[str, Any]:
     """Load one run with its plan, events and blackboard projection."""
     root_path = Path(root).expanduser().resolve()
     run_id = str(run_id or "").strip()
@@ -908,11 +1043,23 @@ def read_run(root: str | Path, run_id: str, *, state_root: str | Path | None = N
     if manifest:
         events = _read_jsonl(run_dir / "events.ndjson")
         detail = _project_manifest(root_path, run_dir, manifest, events=events,
-                                   include_plan=True)
+                                   include_plan=True, include_evidence=True)
         detail["events"] = [
             redact(_project_event(event)) for event in events[-500:]
         ]
         detail["blackboard"] = blackboard(root_path, run_id, state_root=state_root)
+        if include_report:
+            try:
+                from unified import report as unified_report
+
+                detail["report"] = unified_report.build_report(
+                    root_path, run_id, state_root=state_root, detail=detail,
+                )
+            except Exception as exc:  # noqa: BLE001 - report is best effort
+                detail["report"] = {
+                    "available": False,
+                    "error": redact_text(str(exc), limit=300),
+                }
         return detail
     if include_v1:
         for item in _v1_runs(root_path, v1_ledger_for(root_path)):

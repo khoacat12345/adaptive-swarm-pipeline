@@ -388,6 +388,26 @@ def schedule_plan(plan: Mapping[str, Any], **kwargs: Any) -> Scheduler:
     return Scheduler.for_plan(plan, **kwargs)
 
 
+def build_quota_gate(root: str | Path | None = None, *, tracker: Any | None = None,
+                     candidates: Iterable[str] = (),
+                     reserve_pct: float = 15.0,
+                     strict: bool | None = None,
+                     refresh: bool = False) -> Any:
+    """Build the F05 dispatch gate without importing heavy runner modules."""
+    try:
+        import quota as quota_module  # type: ignore
+    except ImportError:  # pragma: no cover - package-relative fallback
+        import sys
+        from pathlib import Path as _Path
+
+        sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+        import quota as quota_module  # type: ignore
+    return quota_module.build_gate(
+        root, tracker=tracker, candidates=candidates,
+        reserve_pct=reserve_pct, strict=strict, refresh=refresh,
+    )
+
+
 def next_ready(graph: TaskGraph, completed: Iterable[str] = (), *,
                running: Iterable[str] = ()) -> list[str]:
     """Small functional helper for callers that do not need a scheduler."""
