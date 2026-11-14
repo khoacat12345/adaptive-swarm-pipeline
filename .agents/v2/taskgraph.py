@@ -482,6 +482,28 @@ class TaskGraph:
                 )
         return graph.validate()
 
+    def summary(self) -> dict[str, Any]:
+        """Small read-only counts for status/report projections."""
+        try:
+            waves = self.levels()
+            cycle = None
+        except TaskGraphError as exc:
+            waves = []
+            cycle = str(exc)
+        kinds: dict[str, int] = {}
+        for task in self._tasks.values():
+            kinds[task.kind] = kinds.get(task.kind, 0) + 1
+        return {
+            "size": len(self._tasks),
+            "kinds": kinds,
+            "waves": len(waves),
+            "roots": len(self.roots()) if not cycle else 0,
+            "leaves": len(self.leaves()) if not cycle else 0,
+            "join_points": len(self.join_points()) if not cycle else 0,
+            "fanout_points": len(self.fanout_points()) if not cycle else 0,
+            "cycle": cycle,
+        }
+
     # ------------------------------------------------------------------
     def as_dict(self) -> dict[str, Any]:
         try:

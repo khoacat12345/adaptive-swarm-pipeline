@@ -877,6 +877,82 @@ class ExecutionEngine:
             pass
 
     # ------------------------------------------------------------------
+    # F01: dedicated worktree per task (opt-in via the plan)
+    # ------------------------------------------------------------------
+
+    def _prepare_task_worktree(self, store: Any, run_id: str, phase_id: str,
+                               work_id: str, *, base_sha: str) -> Any:
+        """Create one task worktree; fall back to the run worktree on failure."""
+        try:
+            task_ws = isolation.create_task_worktree(
+                self.runner.root,
+                isolation.safe_component(run_id),
+                isolation.safe_component(f"{phase_id}-{work_id}"),
+                base_sha=base_sha,
+                state_root=store.run_dir.parent.parent,
+            )
+        except Exception as exc:  # noqa: BLE001 - isolation is advisory, not fatal
+            try:
+                store.append_event("task.worktree_failed", {
+                    "run_id": run_id, "phase_id": phase_id, "task_id": work_id,
+                    "error": str(exc)[:400],
+                })
+            except Exception:
+                pass
+            return None
+        try:
+            store.append_event("task.worktree", task_ws.as_dict())
+        except Exception:
+            pass
+        return task_ws
+
+    def _integrate_task_worktree(self, store: Any, run_worktree: Path,
+                                 task_worktree: Path,
+                                 files: Mapping[str, str]) -> None:
+        """Copy the verified task content into the run worktree."""
+        if not files:
+            return
+        import safe_writer  # type: ignore
+
+        pairs = [(relative, run_worktree / relative) for relative in files]
+        tx = safe_writer.Transaction(
+            root=run_worktree, log=False, reason="v2-task-integrate",
+        )
+        try:
+            tx.begin(pairs)
+            for relative, content in files.items():
+                tx.write(relative, str(content), encoding="utf-8")
+            tx.commit()
+        except Exception:
+            if getattr(tx, "state", "") == "open":
+                try:
+                    tx.rollback("task integration failed")
+                except Exception:
+                    pass
+            raise
+        try:
+            store.append_event("task.integrated", {
+                "task_worktree": str(task_worktree),
+                "run_worktree": str(run_worktree),
+                "files": sorted(files),
+            })
+        except Exception:
+            pass
+
+    def _cleanup_task_worktree(self, store: Any, task_ws: Any, *,
+                              verified: bool) -> None:
+        record = isolation.cleanup_task_worktree(
+            task_ws,
+            state_root=store.run_dir.parent.parent,
+            keep_branch=True,
+            reason="task verified" if verified else "task failed",
+        )
+        try:
+            store.append_event("task.worktree_cleaned", record)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
     # Public execution
     # ------------------------------------------------------------------
 
@@ -1062,6 +1138,22 @@ class ExecutionEngine:
                 feedback: str | None = None
                 verified = False
                 last_attempt_record: Any = None
+                # F01: opt-in dedicated worktree per task.
+                environment = plan.get("environment")
+                environment = environment if isinstance(environment, Mapping) else {}
+                task_isolation = bool(
+                    plan.get("task_isolation")
+                    or str(plan.get("isolation") or "") == "per-task"
+                    or environment.get("task_worktrees")
+                )
+                task_ws = (
+                    self._prepare_task_worktree(
+                        store, run_id, phase_id, work_id,
+                        base_sha=workspace.base_sha,
+                    )
+                    if task_isolation else None
+                )
+                exec_root = task_ws.path if task_ws is not None else workspace.path
                 attempt_limit = self.max_repair_attempts
                 if self.retry_policy is not None:
                     attempt_limit = min(
@@ -1101,7 +1193,7 @@ class ExecutionEngine:
                             coder,
                             lambda wo=work_order, attempt=attempt, feedback=feedback: coder.backend.propose(
                                 wo,
-                                cwd=workspace.path,
+                                cwd=exec_root,
                                 round_index=attempt + 1,
                                 feedback=feedback,
                             ),
@@ -1115,7 +1207,7 @@ class ExecutionEngine:
                             raise ExecutionError(f"coder returned no files for {work_id}")
                         files = {str(k): str(v) for k, v in files.items()}
                         tx, verify, diff, files = self._apply(
-                            workspace.path, work_order, files, test_hashes
+                            exec_root, work_order, files, test_hashes
                         )
                         self._record_verify(
                             store, phase_id=phase_id, work_id=work_id,
@@ -1172,6 +1264,10 @@ class ExecutionEngine:
                         tx.commit()
                         tx = None
                         verified = True
+                        if task_ws is not None:
+                            self._integrate_task_worktree(
+                                store, workspace.path, task_ws.path, files,
+                            )
                         self._record_reviews(
                             store, phase_id=phase_id, work_id=work_id, findings=findings,
                         )
@@ -1290,6 +1386,9 @@ class ExecutionEngine:
                              "error": str(exc)[:300]}
                         )
                         continue
+                if task_ws is not None:
+                    self._cleanup_task_worktree(store, task_ws, verified=verified)
+                    task_ws = None
                 if not verified:
                     phase_result["status"] = "failed"
                     phase_results.append(phase_result)
@@ -1300,6 +1399,8 @@ class ExecutionEngine:
                         verify={"phase": phase_id, "work_order": work_id},
                     )
                     raise ExecutionError(f"phase {phase_id} failed at {work_id}")
+                if task_ws is not None:
+                    self._cleanup_task_worktree(store, task_ws, verified=verified)
 
             store.transition("verify_start")
             checkpoint = self.runner.checkpoint_phase(run_id, phase_id)

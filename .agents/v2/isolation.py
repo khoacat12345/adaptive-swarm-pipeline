@@ -620,7 +620,13 @@ def create_task_worktree(
         else task_worktree_root(main, run_id)
     )
     slug = safe_component(f"{run_id}-{task_id}")
-    branch_name = branch or f"{DEFAULT_BRANCH_PREFIX}{safe_component(run_id)}/task/{safe_component(task_id)}"
+    # Task branches live under swarm/task/ so they never collide with the
+    # run branch ``swarm/<run_id>`` (a git ref cannot be a file and a
+    # directory at the same time).
+    branch_name = branch or (
+        f"{DEFAULT_BRANCH_PREFIX}task/{safe_component(run_id)}/"
+        f"{safe_component(task_id)}"
+    )
     workspace = create_worktree(
         main,
         slug,
