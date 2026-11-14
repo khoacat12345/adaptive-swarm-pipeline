@@ -198,6 +198,13 @@ def ask_decision(root: str | Path, run_id: str, question: str, *,
     )
     _append_decision_event(root, run_id, state_root, message)
     paused = _pause_for_blocking(root, run_id, state_root, message)
+    if message.blocks_run:
+        _notify(root, "DECISION_PENDING", {
+            "run_id": run_id,
+            "status": "AWAITING_DECISION",
+            "reason": f"{message.id} ({message.gate or message.kind}): "
+                      f"{message.question[:160]}",
+        })
     return redact({"ok": True, "message": message.as_dict(), "paused": paused})
 
 
@@ -216,6 +223,11 @@ def reply_decision(root: str | Path, message_id: str, answer: str, *,
     answered = inbox.reply(message_id, answer, answered_by=answered_by)
     _append_decision_event(root, answered.run_id, state_root, answered)
     resumed = _resume_if_unblocked(root, answered.run_id, state_root, inbox)
+    _notify(root, "DECISION_ANSWERED", {
+        "run_id": answered.run_id,
+        "status": "ANSWERED",
+        "reason": f"{answered.id} answered by {answered.answered_by}",
+    })
     return redact({
         "ok": True,
         "message": answered.as_dict(),
@@ -242,6 +254,16 @@ def _locked(root: str | Path):
 # ---------------------------------------------------------------------------
 # F03 decision inbox helpers (shared by CLI + API)
 # ---------------------------------------------------------------------------
+def _notify(root: str | Path, event: str, payload: Mapping[str, Any]) -> None:
+    """One-way operator notification; never raises and never blocks the call."""
+    try:
+        from v2.alerts import notify_event
+
+        notify_event(root, event, dict(payload))
+    except Exception:  # noqa: BLE001 - notifications are strictly optional
+        pass
+
+
 def _append_decision_event(root: str | Path, run_id: str,
                            state_root: str | Path | None,
                            message: Any) -> None:

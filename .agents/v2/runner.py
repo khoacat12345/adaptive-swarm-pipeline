@@ -321,7 +321,17 @@ class V2Runner:
 
     def stop(self, run_id: str, *, reason: str = "user requested stop") -> dict[str, Any]:
         store = self.load(run_id)
-        return store.transition("stop", reason=reason)
+        manifest = store.transition("stop", reason=reason)
+        # F01: a stopped run must not leave task worktrees behind.
+        try:
+            cleanup = self.cleanup_task_worktrees(
+                run_id, reason=f"run stopped: {reason}",
+            )
+            if cleanup.get("tracked"):
+                store.append_event("task.worktrees_cleaned", cleanup)
+        except Exception:  # noqa: BLE001 - cleanup must never mask the stop
+            pass
+        return manifest
 
     def recover(self, run_id: str) -> dict[str, Any]:
         """Recover a process-killed phase back to a re-executable state.

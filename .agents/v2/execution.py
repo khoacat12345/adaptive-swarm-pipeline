@@ -1287,6 +1287,11 @@ class ExecutionEngine:
                         self._finish_attempt(
                             attempt_history, attempt_record, ok=False, error=exc,
                         )
+                        if task_ws is not None:
+                            self._cleanup_task_worktree(
+                                store, task_ws, verified=False,
+                            )
+                            task_ws = None
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("reviewer unavailable")
@@ -1321,6 +1326,11 @@ class ExecutionEngine:
                             except Exception:
                                 pass
                         reason = exc.code
+                        if task_ws is not None:
+                            self._cleanup_task_worktree(
+                                store, task_ws, verified=False,
+                            )
+                            task_ws = None
                         try:
                             self.runner.quarantine_phase(
                                 run_id,
@@ -1336,6 +1346,11 @@ class ExecutionEngine:
                         self._finish_attempt(
                             attempt_history, attempt_record, ok=False, error=exc,
                         )
+                        if task_ws is not None:
+                            self._cleanup_task_worktree(
+                                store, task_ws, verified=False,
+                            )
+                            task_ws = None
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("M3 budget stop")
