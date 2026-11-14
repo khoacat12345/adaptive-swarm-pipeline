@@ -42,7 +42,10 @@ from v2.runner import V2Runner  # noqa: E402
 
 __version__ = "3.0.1"
 
-COMMANDS = {"doctor", "planner", "run", "status", "handoff", "merge", "resume", "rollback"}
+COMMANDS = {
+    "doctor", "planner", "run", "status", "handoff", "merge", "resume",
+    "rollback", "inbox", "ask", "reply",
+}
 
 
 def _normalize_argv(argv: Sequence[str]) -> list[str]:
@@ -102,6 +105,63 @@ def _emit(payload: Mapping[str, Any], *, as_json: bool) -> None:
         for key in ("patch", "report", "worktree"):
             if handoff.get(key):
                 print(f"handoff.{key}: {handoff[key]}")
+    graph = payload.get("graph") or {}
+    if isinstance(graph, Mapping) and graph.get("available"):
+        print(f"graph: {graph.get('size') or len(graph.get('tasks') or [])} tasks, "
+              f"waves={graph.get('waves')}")
+    attempts = payload.get("attempts") or {}
+    if isinstance(attempts, Mapping) and attempts.get("total"):
+        print(f"attempts: {attempts.get('total')} "
+              f"({attempts.get('retries', 0)} retries, "
+              f"{attempts.get('lost', 0)} lost)")
+    inbox = payload.get("inbox") or {}
+    if isinstance(inbox, Mapping) and inbox.get("pending"):
+        print(f"inbox: {inbox.get('pending')} pending "
+              f"({inbox.get('blocking', 0)} blocking)")
+
+
+def _emit_inbox(payload: Mapping[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    pending = payload.get("pending") or 0
+    total = payload.get("total") or 0
+    print(f"inbox: {pending} pending / {total} total")
+    if payload.get("open_gates"):
+        print("gates: " + ", ".join(str(item) for item in payload["open_gates"]))
+    for item in payload.get("pending_items") or []:
+        if not isinstance(item, Mapping):
+            continue
+        gate = f" [{item.get('gate')}]" if item.get("gate") else ""
+        print(f"- {item.get('id')}{gate} {item.get('question')}")
+
+
+def _enrich_status(runner: V2Runner, run_id: str) -> dict[str, Any]:
+    """F01/F02/F03/F05: attach graph, attempts, inbox and quota to status."""
+    payload: dict[str, Any] = {}
+    try:
+        graph = runner.task_graph(run_id, include_work_orders=True).as_dict()
+        payload["graph"] = {
+            "available": True,
+            "size": graph.get("size"),
+            "waves": graph.get("waves"),
+            "topological_order": graph.get("topological_order"),
+            "cycle": graph.get("cycle"),
+            "tasks": graph.get("tasks"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        payload["graph"] = {"available": False, "error": str(exc)[:200]}
+    try:
+        payload["attempts"] = runner.attempts(run_id, limit=50)["summary"]
+    except Exception:  # noqa: BLE001
+        payload["attempts"] = {}
+    try:
+        from unified.inbox import inbox_summary
+
+        payload["inbox"] = inbox_summary(runner.root, run_id, state_root=runner.state_root)
+    except Exception:  # noqa: BLE001
+        payload["inbox"] = {}
+    return payload
 
 
 def _run_task(
@@ -237,6 +297,32 @@ def _build_parser() -> argparse.ArgumentParser:
                               help="revert a previous explicit merge")
     rollback.add_argument("--run-id", required=True)
     rollback.add_argument("--message", default=None)
+
+    inbox = sub.add_parser("inbox", parents=[common],
+                           help="list pending decisions for a run")
+    inbox.add_argument("run_id")
+    inbox.add_argument("--all", action="store_true",
+                       help="also include answered/cancelled messages")
+
+    ask = sub.add_parser("ask", parents=[common],
+                         help="worker asks a question or requests approval")
+    ask.add_argument("run_id")
+    ask.add_argument("question")
+    ask.add_argument("--gate", choices=(
+        "usage_approval", "review_approval", "merge_approval",
+        "destructive_action", "scope_change",
+    ), default=None)
+    ask.add_argument("--task", dest="task_id", default=None)
+    ask.add_argument("--author", default="worker")
+    ask.add_argument("--no-block", dest="blocking", action="store_false")
+    ask.set_defaults(blocking=True)
+
+    reply = sub.add_parser("reply", parents=[common],
+                           help="answer a decision and unblock the worker")
+    reply.add_argument("message_id")
+    reply.add_argument("answer")
+    reply.add_argument("--run-id", default=None)
+    reply.add_argument("--answered-by", default="operator")
     return parser
 
 
@@ -332,6 +418,7 @@ def main(
             if args.command == "status":
                 run_id = args.run_id or _latest_run(runner)
                 payload = runner.status(run_id)
+                payload.update(_enrich_status(runner, run_id))
                 _emit(payload, as_json=as_json)
                 return 0
             if args.command == "handoff":
@@ -375,6 +462,45 @@ def main(
             _emit(payload, as_json=as_json)
             return 0
         except (V2Error, ExecutionError) as exc:
+            _emit({"ok": False, "status": "FAILED", "error": str(exc)},
+                  as_json=as_json)
+            return 2
+
+    if args.command in {"inbox", "ask", "reply"}:
+        from unified import api as unified_api
+
+        state_root, _ = _resolve_state_paths(root, args)
+        try:
+            if args.command == "inbox":
+                payload = unified_api.run_inbox(
+                    root, args.run_id, state_root=state_root,
+                )
+                if not args.all:
+                    payload = {
+                        **payload,
+                        "items": payload.get("pending_items") or [],
+                    }
+                _emit_inbox(payload, as_json=as_json)
+                return 0
+            if args.command == "ask":
+                payload = unified_api.ask_decision(
+                    root, args.run_id, args.question,
+                    state_root=state_root,
+                    gate=args.gate,
+                    blocking=bool(args.blocking),
+                    task_id=args.task_id,
+                    author=args.author,
+                )
+                _emit(payload, as_json=as_json)
+                return 0
+            payload = unified_api.reply_decision(
+                root, args.message_id, args.answer,
+                run_id=args.run_id, state_root=state_root,
+                answered_by=args.answered_by,
+            )
+            _emit(payload, as_json=as_json)
+            return 0
+        except (V2Error, ExecutionError, FileNotFoundError) as exc:
             _emit({"ok": False, "status": "FAILED", "error": str(exc)},
                   as_json=as_json)
             return 2

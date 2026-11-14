@@ -341,12 +341,18 @@ def _diff(old: str, new: str, relative: str) -> str:
 
 
 def _quota_evidence(store: Any) -> dict[str, Any]:
-    """Latest quota snapshot recorded by the runner, if any."""
+    """Latest quota snapshot/decision recorded by the runner, if any."""
     try:
         for event in reversed(store.read_events()):
-            if event.get("event_type") == "quota.snapshot":
+            name = str(event.get("event_type") or "")
+            if name in {"quota.snapshot", "quota.decision", "quota.gate"}:
                 data = event.get("data")
-                return dict(data) if isinstance(data, Mapping) else {}
+                if not isinstance(data, Mapping):
+                    continue
+                payload = dict(data)
+                payload.setdefault("event_type", name)
+                payload.setdefault("at", event.get("timestamp"))
+                return payload
     except Exception:  # noqa: BLE001 - evidence only
         pass
     return {}
@@ -396,11 +402,15 @@ class ExecutionEngine:
         max_repair_attempts: int = 3,
         max_no_progress: int = 2,
         verify_timeout: int = 300,
+        retry_policy: RetryPolicy | None = None,
+        quota_gate: Any | None = None,
     ):
         self.runner = runner
         self.max_repair_attempts = max(0, int(max_repair_attempts))
         self.max_no_progress = max(1, int(max_no_progress))
         self.verify_timeout = int(verify_timeout)
+        self.retry_policy = retry_policy
+        self.quota_gate = quota_gate
 
     # ------------------------------------------------------------------
     # Guards
@@ -953,6 +963,25 @@ class ExecutionEngine:
             pass
 
         budget = self._budget(store, plan)
+        # F05: consult the dispatch gate before any model call.  The gate is
+        # optional so existing runs keep their exact behavior.
+        if self.quota_gate is not None:
+            decision = self.quota_gate.decide(
+                coder.model, task_id="run", phase_id="",
+            )
+            payload = decision.as_dict() if hasattr(decision, "as_dict") \
+                else dict(decision or {})
+            try:
+                store.append_event("quota.decision", payload)
+            except Exception:  # noqa: BLE001
+                pass
+            if not payload.get("ok", True) or payload.get("action") == "pause":
+                reason = str(payload.get("reason") or "quota exhausted")
+                try:
+                    store.transition("rate_limit", reason=reason)
+                except Exception:  # noqa: BLE001
+                    pass
+                raise ExecutionError(f"quota gate paused dispatch: {reason}")
         test_hashes = self._snapshot_tests(workspace.path, plan)
         phases = topo_phases(plan)
         if not phases:
@@ -1033,7 +1062,13 @@ class ExecutionEngine:
                 feedback: str | None = None
                 verified = False
                 last_attempt_record: Any = None
-                for attempt in range(0, self.max_repair_attempts + 1):
+                attempt_limit = self.max_repair_attempts
+                if self.retry_policy is not None:
+                    attempt_limit = min(
+                        attempt_limit,
+                        max(0, int(self.retry_policy.max_attempts) - 1),
+                    )
+                for attempt in range(0, attempt_limit + 1):
                     is_repair = attempt > 0
                     tx = None
                     attempt_record = self._begin_attempt(
@@ -1042,6 +1077,22 @@ class ExecutionEngine:
                     )
                     if attempt_record is not None:
                         last_attempt_record = attempt_record
+                        if attempt > 0 and self.retry_policy is not None:
+                            escalate_to = self.retry_policy.escalated_model(
+                                coder.model, attempt + 1,
+                            )
+                            if escalate_to:
+                                attempt_record.metadata["escalate_to"] = escalate_to
+                                try:
+                                    store.append_event("attempt.escalation", {
+                                        "task_id": work_id,
+                                        "phase_id": phase_id,
+                                        "attempt": attempt + 1,
+                                        "from_model": coder.model,
+                                        "to_model": escalate_to,
+                                    })
+                                except Exception:  # noqa: BLE001
+                                    pass
                     try:
                         self._mark_working(attempt_history, attempt_record)
                         files = self._call(

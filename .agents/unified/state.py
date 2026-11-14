@@ -739,9 +739,9 @@ def _inbox_projection(run_dir: Path, run_id: str) -> dict[str, Any]:
         return {"available": False, "total": 0, "pending": 0, "blocking": 0,
                 "needs_attention": False, "items": [], "pending_items": []}
     try:
-        from unified.inbox import inbox_summary
+        from unified.inbox import DecisionInbox
 
-        payload = inbox_summary(run_dir, run_id, state_root=run_dir.parent.parent)
+        payload = DecisionInbox(run_dir, run_id=run_id).summary()
         payload["available"] = True
         return redact(payload)
     except Exception as exc:  # noqa: BLE001

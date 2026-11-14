@@ -394,7 +394,22 @@ def make_handler(root: Path, ledger: Path, run_id: str | None = None):
                 self._json({"error": "forbidden host"}, 403)
                 return
             try:
-                if route == "/api/unified/runs" or route == "/api/unified/summary" \
+                if route.startswith("/api/unified/runs/") and route.endswith("/report.md"):
+                    from unified import api as unified_api
+
+                    status, payload = unified_api.handle_get(
+                        root, route, parse_qs(parsed.query))
+                    markdown = payload.get("markdown") if isinstance(payload, dict) else None
+                    if status == 200 and markdown:
+                        filename = str(payload.get("filename") or "run-report.md")
+                        self._send(
+                            200, markdown.encode("utf-8"),
+                            "text/markdown; charset=utf-8",
+                            {"Content-Disposition": f'attachment; filename="{filename}"'},
+                        )
+                    else:
+                        self._json(payload, status)
+                elif route == "/api/unified/runs" or route == "/api/unified/summary" \
                         or route.startswith("/api/unified/runs/"):
                     from unified import api as unified_api
 

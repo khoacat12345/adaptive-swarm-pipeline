@@ -344,10 +344,22 @@ class V2Runner:
         recovered = safe_writer.recover_open_transactions(
             workspace.path, log=False,
         )
+        # F02: a killed process leaves attempts in DISPATCHED/WORKING/VERIFYING.
+        # Mark them LOST before resetting the state machine so a retry is not
+        # mistaken for the first attempt.
+        lost_attempts: list[str] = []
+        try:
+            history = AttemptHistory(store.run_dir / "attempts.ndjson")
+            for attempt in history.active():
+                history.lose(attempt.attempt_id, reason="process kill recovery")
+                lost_attempts.append(attempt.attempt_id)
+        except Exception:  # noqa: BLE001 - recovery must not fail on audit IO
+            pass
         store.transition("recover", reason="process kill recovery")
         store.append_event("run.recovered", {
             "from": status,
             "transactions": recovered,
+            "lost_attempts": lost_attempts,
             "worktree": str(workspace.path),
         })
         return {
@@ -425,6 +437,21 @@ class V2Runner:
         """Persist dispatch-gate evidence without changing run state."""
         store = self.load(run_id)
         store.append_event("quota.decision", dict(decision))
+
+    def record_quota_snapshot(self, run_id: str,
+                              snapshot: Mapping[str, Any]) -> None:
+        """Persist a normalized ``quota.snapshot`` for the dashboard panel."""
+        store = self.load(run_id)
+        store.append_event("quota.snapshot", dict(snapshot))
+
+    def cleanup_task_worktrees(self, run_id: str, *,
+                               reason: str = "run cancelled") -> dict[str, Any]:
+        """F01: wipe every tracked per-task worktree (cancel/fail path)."""
+        store = self.load(run_id)
+        return isolation.cleanup_run_worktrees(
+            self.root, run_id, state_root=store.run_dir.parent.parent,
+            reason=reason,
+        )
 
     def request_confirmation(self, run_id: str, *,
                              reason: str = "operator decision required") -> dict[str, Any]:
@@ -527,4 +554,8 @@ class V2Runner:
             except (OSError, json.JSONDecodeError):
                 summary["budget"] = None
         summary["signoff"] = signoff_summary(store)
+        try:
+            summary["attempts"] = self.attempts(run_id, limit=50)["summary"]
+        except Exception:  # noqa: BLE001 - attempt history is optional evidence
+            summary["attempts"] = {}
         return summary

@@ -293,15 +293,21 @@ def build_report(
     *,
     state_root: str | Path | None = None,
     include_v1: bool = False,
+    detail: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile the completion report for one run.
+
+    ``detail`` lets the state projection reuse a detail it has already built,
+    which also avoids a recursion through ``read_run``.
 
     Raises ``FileNotFoundError`` when the run does not exist, which lets the API
     answer 404 without guessing.
     """
-    detail = unified_state.read_run(
-        root, run_id, state_root=state_root, include_v1=include_v1,
-    )
+    if not isinstance(detail, Mapping):
+        detail = unified_state.read_run(
+            root, run_id, state_root=state_root, include_v1=include_v1,
+            include_report=False,
+        )
     run_dir = Path(str(detail.get("run_dir") or ""))
     status = str(detail.get("status") or "UNKNOWN")
     handoff = detail.get("handoff") if isinstance(detail.get("handoff"), Mapping) else {}
@@ -332,6 +338,7 @@ def build_report(
     verify_detail = detail.get("verify") if isinstance(detail.get("verify"), Mapping) else {}
     report = {
         "schema_version": SCHEMA_VERSION,
+        "available": True,
         "run_id": detail.get("run_id") or str(run_id),
         "source": detail.get("source") or "v2",
         "status": status,
