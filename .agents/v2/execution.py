@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
 from . import isolation
+from .attempts import AttemptRecorder, AttemptStore, RetryPolicy
 from .budget import BudgetConfig, BudgetController
 from .capability_runtime import build_context as build_capability_context
 from .errors import (
@@ -339,6 +340,18 @@ def _diff(old: str, new: str, relative: str) -> str:
     )
 
 
+def _quota_evidence(store: Any) -> dict[str, Any]:
+    """Latest quota snapshot recorded by the runner, if any."""
+    try:
+        for event in reversed(store.read_events()):
+            if event.get("event_type") == "quota.snapshot":
+                data = event.get("data")
+                return dict(data) if isinstance(data, Mapping) else {}
+    except Exception:  # noqa: BLE001 - evidence only
+        pass
+    return {}
+
+
 @dataclass
 class ExecutionResult:
     run_id: str
@@ -352,6 +365,9 @@ class ExecutionResult:
     planner: str = "P2"
     reviewer_roles: tuple[str, ...] = REVIEW_ROLES
     low_risk_opt_in: bool = False
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    graph: dict[str, Any] = field(default_factory=dict)
+    quota: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -366,6 +382,9 @@ class ExecutionResult:
             "requests": self.requests,
             "repairs": self.repairs,
             "handoff": self.handoff,
+            "attempts": self.attempts,
+            "graph": self.graph,
+            "quota": self.quota,
         }
 
 
@@ -744,6 +763,103 @@ class ExecutionEngine:
         return findings
 
     # ------------------------------------------------------------------
+    # F02/F11 evidence helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _attempt_sink(store: Any) -> Callable[..., None]:
+        def sink(event_type: str, data: dict, status: str = "info") -> None:
+            try:
+                store.append_event(str(event_type), dict(data))
+            except Exception:  # noqa: BLE001 - evidence is best effort
+                pass
+
+        return sink
+
+    @staticmethod
+    def _begin_attempt(
+        recorder: AttemptRecorder,
+        task_id: str,
+        attempt: int,
+        seat: ExecutionSeat,
+        family: str,
+        worktree: Path,
+        work_order: Mapping[str, Any],
+    ) -> Any:
+        try:
+            spec = json.dumps(dict(work_order), sort_keys=True, ensure_ascii=False)
+            return recorder.begin(
+                task_id,
+                attempt=attempt,
+                model=seat.model,
+                family=family,
+                worktree=str(worktree),
+                worker_id=seat.model,
+                spec_hash=hashlib.sha256(spec.encode("utf-8")).hexdigest()[:16],
+                metadata={"level": int(work_order.get("level", 1) or 1)},
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _finish_attempt(
+        recorder: AttemptRecorder,
+        record: Any,
+        *,
+        ok: bool,
+        verify: Mapping[str, Any] | None = None,
+        error: Any = None,
+        evidence: Mapping[str, Any] | None = None,
+        kind: str | None = None,
+    ) -> None:
+        if record is None:
+            return
+        try:
+            extra = [dict(evidence)] if evidence else []
+            if ok:
+                recorder.succeed(record, verify=verify, evidence=extra)
+            else:
+                recorder.fail(record, error, kind=kind, verify=verify)
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _record_verify(
+        store: Any,
+        *,
+        phase_id: str,
+        work_id: str,
+        work_order: Mapping[str, Any],
+        verify: Mapping[str, Any],
+    ) -> None:
+        try:
+            exit_code = verify.get("exit_code")
+            store.append_event("task.verify", {
+                "task_id": work_id,
+                "phase_id": phase_id,
+                "command": str(work_order.get("verify_command") or ""),
+                "exit_code": exit_code,
+                "output_tail": str(
+                    verify.get("output_tail") or verify.get("stderr") or ""
+                )[-2000:],
+                "status": "verified" if exit_code == 0 else "failed",
+            })
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _record_reviews(store: Any, *, phase_id: str, work_id: str,
+                        findings: list[ReviewFinding]) -> None:
+        try:
+            store.append_event("task.reviews", {
+                "task_id": work_id,
+                "phase_id": phase_id,
+                "reviews": [dict(finding.__dict__) for finding in findings],
+            })
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ------------------------------------------------------------------
     # Public execution
     # ------------------------------------------------------------------
 
@@ -834,6 +950,36 @@ class ExecutionEngine:
         phases = topo_phases(plan)
         if not phases:
             raise ExecutionError("plan has no phases")
+        # F02: durable attempt history + retry/escalation policy.
+        attempt_store = AttemptStore(store.run_dir)
+        recorder = AttemptRecorder(
+            attempt_store,
+            RetryPolicy(
+                max_attempts=max(1, self.max_repair_attempts + 1),
+                models=(coder.model,),
+            ),
+            event_sink=self._attempt_sink(store),
+        )
+        # F01: validate/project the task graph once, before any work starts.
+        from .taskgraph import safe_graph_from_plan
+
+        task_graph, graph_problems = safe_graph_from_plan(plan)
+        if task_graph is not None:
+            try:
+                store.append_event("taskgraph.validated", {
+                    "run_id": run_id,
+                    "summary": task_graph.summary(),
+                    "problems": graph_problems,
+                })
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            try:
+                store.append_event("taskgraph.invalid", {
+                    "run_id": run_id, "problems": graph_problems,
+                })
+            except Exception:  # noqa: BLE001
+                pass
         store.transition("worktree_ready")
         phase_results: list[dict[str, Any]] = []
         checkpoints: list[dict[str, Any]] = []
@@ -878,9 +1024,16 @@ class ExecutionEngine:
                     pass
                 feedback: str | None = None
                 verified = False
+                last_attempt_record: Any = None
                 for attempt in range(0, self.max_repair_attempts + 1):
                     is_repair = attempt > 0
                     tx = None
+                    attempt_record = self._begin_attempt(
+                        recorder, work_id, attempt + 1, coder, coder_family,
+                        workspace.path, work_order,
+                    )
+                    if attempt_record is not None:
+                        last_attempt_record = attempt_record
                     try:
                         files = self._call(
                             budget,
@@ -904,11 +1057,21 @@ class ExecutionEngine:
                         tx, verify, diff, files = self._apply(
                             workspace.path, work_order, files, test_hashes
                         )
+                        self._record_verify(
+                            store, phase_id=phase_id, work_id=work_id,
+                            work_order=work_order, verify=verify,
+                        )
                         signature = (
                             work_id,
                             f"{verify.get('exit_code')}:{str(verify.get('output_tail') or verify.get('stderr') or '')[:200]}",
                         )
                         if tx is None:
+                            self._finish_attempt(
+                                recorder, attempt_record, ok=False, verify=verify,
+                                error=f"verify failed: {signature[1]}",
+                                kind="verify_failed",
+                                evidence={"attempt": attempt + 1, "exit_code": verify.get("exit_code")},
+                            )
                             self._record_lesson(
                                 kind="verify_failure", error=signature[1],
                                 work_order=work_order, phase_id=phase_id,
@@ -950,6 +1113,16 @@ class ExecutionEngine:
                         tx.commit()
                         tx = None
                         verified = True
+                        self._record_reviews(
+                            store, phase_id=phase_id, work_id=work_id, findings=findings,
+                        )
+                        self._finish_attempt(
+                            recorder, attempt_record, ok=True, verify=verify,
+                            evidence={
+                                "attempt": attempt + 1,
+                                "reviews": [finding.verdict for finding in findings],
+                            },
+                        )
                         phase_result["work_orders"].append(
                             {
                                 "id": work_id,
@@ -960,6 +1133,10 @@ class ExecutionEngine:
                         )
                         break
                     except ReviewerUnavailable as exc:
+                        self._finish_attempt(
+                            recorder, attempt_record, ok=False, error=exc,
+                            kind="worker_lost",
+                        )
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("reviewer unavailable")
@@ -981,6 +1158,9 @@ class ExecutionEngine:
                             pass
                         raise
                     except (SecurityVeto, TestIntegrityError, CrossFamilyError, NoProgressError) as exc:
+                        self._finish_attempt(
+                            recorder, attempt_record, ok=False, error=exc,
+                        )
                         self._record_lesson(
                             kind=exc.code, error=str(exc),
                             work_order=work_order, phase_id=phase_id,
@@ -1003,6 +1183,9 @@ class ExecutionEngine:
                             pass
                         raise
                     except BudgetError as exc:
+                        self._finish_attempt(
+                            recorder, attempt_record, ok=False, error=exc, kind="quota",
+                        )
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("M3 budget stop")
@@ -1020,6 +1203,10 @@ class ExecutionEngine:
                             pass
                         raise
                     except ExecutionError as exc:
+                        self._finish_attempt(
+                            recorder, attempt_record, ok=False, error=exc,
+                            kind="review_rejected",
+                        )
                         self._record_lesson(
                             kind="review_reject", error=str(exc),
                             work_order=work_order, phase_id=phase_id,
@@ -1036,6 +1223,9 @@ class ExecutionEngine:
                         )
                         continue
                     except Exception as exc:
+                        self._finish_attempt(
+                            recorder, attempt_record, ok=False, error=exc,
+                        )
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("M3 apply failed")
@@ -1078,6 +1268,25 @@ class ExecutionEngine:
             })
         except Exception:
             pass
+        attempt_payload = attempt_store.summary()
+        graph_payload: dict[str, Any] = {"available": False, "problems": graph_problems}
+        if task_graph is not None:
+            for item in phase_results:
+                for order in item.get("work_orders") or []:
+                    try:
+                        node = task_graph.get(f"{item.get('phase_id')}.{order.get('id')}")
+                    except Exception:  # noqa: BLE001 - explicit graphs may use bare ids
+                        continue
+                    node.status = "done" if order.get("status") == "verified" else "failed"
+                    node.attempts = int(order.get("attempt") or 0)
+            summary = task_graph.summary()
+            summary.update({
+                "available": True,
+                "problems": graph_problems,
+                "nodes": [task.as_dict() for task in task_graph.tasks],
+                "waves": task_graph.layers(),
+            })
+            graph_payload = summary
         return ExecutionResult(
             run_id=run_id,
             status=store.load().get("status") or "HANDOFF_READY",
@@ -1092,4 +1301,7 @@ class ExecutionEngine:
             low_risk_opt_in=bool(
                 low_risk_opt_in or plan.get("low_risk_opt_in") is True
             ),
+            attempts=[item.as_dict() for item in attempt_store.load()],
+            graph=graph_payload,
+            quota=_quota_evidence(store),
         )
