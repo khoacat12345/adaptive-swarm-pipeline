@@ -157,7 +157,10 @@ class Scheduler:
         return rows
 
     def state_of(self, task_id: str) -> str:
-        return str(self._states[str(task_id)]["state"])
+        try:
+            return str(self._states[str(task_id)]["state"])
+        except KeyError as exc:
+            raise ScheduleError(f"unknown scheduled task: {task_id}") from exc
 
     def running(self) -> list[str]:
         return self._with_state(TASK_RUNNING)
@@ -221,20 +224,34 @@ class Scheduler:
         )
 
     def refresh(self) -> None:
-        """Promote pending tasks whose dependencies are all done."""
-        done = set(self.completed())
-        failed = set(self.failed()) | set(self.blocked())
-        for task_id, row in self._states.items():
-            if row["state"] in TERMINAL_TASK_STATES | {TASK_RUNNING, TASK_PAUSED}:
-                continue
-            deps = self.graph.parents(task_id)
-            if any(dep in failed for dep in deps):
-                row["state"] = TASK_BLOCKED
-                row["reason"] = "upstream task failed"
-            elif all(dep in done for dep in deps):
-                row["state"] = TASK_READY
-            else:
-                row["state"] = TASK_PENDING
+        """Promote ready tasks and propagate blocked states transitively."""
+        # A single pass is not enough: blocking B must also block C that waits
+        # on B.  Iterate to a fixed point (at most one update per node).
+        for _ in range(len(self._states) + 1):
+            done = set(self.completed())
+            failed = set(self.failed()) | set(self.blocked())
+            changed = False
+            for task_id, row in self._states.items():
+                if row["state"] in TERMINAL_TASK_STATES | {TASK_RUNNING, TASK_PAUSED}:
+                    continue
+                deps = self.graph.parents(task_id)
+                if any(dep in failed for dep in deps):
+                    if row["state"] != TASK_BLOCKED:
+                        row["state"] = TASK_BLOCKED
+                        changed = True
+                    row["reason"] = "upstream task failed"
+                elif all(dep in done for dep in deps):
+                    if row["state"] != TASK_READY:
+                        row["state"] = TASK_READY
+                        changed = True
+                    row["reason"] = ""
+                else:
+                    if row["state"] != TASK_PENDING:
+                        row["state"] = TASK_PENDING
+                        changed = True
+                    row["reason"] = ""
+            if not changed:
+                break
 
     def next_batch(self, *, limit: int | None = None,
                    dispatch: bool = True) -> list[DispatchDecision]:
@@ -261,6 +278,9 @@ class Scheduler:
                 wave=self._wave_of.get(task_id, 0),
                 model=model,
             )
+            # Every decision is evidence, including pauses and skips.  Keeping
+            # them in one list lets the report explain why a task did not run.
+            self.dispatched.append(decision)
             if self.gate is not None:
                 gate_decision = self.gate.decide(
                     model,
@@ -292,7 +312,6 @@ class Scheduler:
                 self._states[task_id].get("attempts") or 0
             ) + 1
             self._states[task_id]["reason"] = ""
-            self.dispatched.append(decision)
             decisions.append(decision)
             capacity -= 1
         return decisions

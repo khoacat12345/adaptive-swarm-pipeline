@@ -372,8 +372,11 @@ class TaskGraph:
         """Every task downstream of a failed task can never run."""
         blocked: set[str] = set()
         for task_id in failed:
-            blocked.update(self.descendants(task_id))
-            blocked.add(str(task_id))
+            tid = str(task_id)
+            if tid not in self._tasks:
+                raise TaskGraphError(f"unknown task: {tid}")
+            blocked.update(self.descendants(tid))
+            blocked.add(tid)
         return sorted(blocked, key=lambda tid: self._key(self._tasks[tid]))
 
     # ------------------------------------------------------------------
@@ -395,6 +398,8 @@ class TaskGraph:
             phase_id = str(phase.get("id") or "").strip()
             if not phase_id:
                 raise TaskGraphError(f"phase {phase_index} has no id")
+            if phase_id in phase_ids:
+                raise TaskGraphError(f"duplicate phase id: {phase_id}")
             phase_ids.append(phase_id)
             graph.add_task(
                 phase_id,
@@ -405,6 +410,13 @@ class TaskGraph:
                 priority=phase_index,
                 payload=dict(phase),
             )
+        known_phases = set(phase_ids)
+        for phase in phases:
+            for dep in _string_list(phase.get("depends_on")):
+                if dep not in known_phases:
+                    raise TaskGraphError(
+                        f"{phase.get('id')}: unknown phase dependency {dep}"
+                    )
         if not include_work_orders:
             return graph.validate()
 
@@ -437,10 +449,14 @@ class TaskGraph:
             if not local:
                 # A phase with no work order is still a schedulable node so
                 # downstream phases do not silently lose their dependency.
+                # Phase-to-phase edges are wired below from the upstream
+                # phases' leaf work orders; keeping this node dependency-free
+                # here avoids referencing phase ids that are not graph nodes
+                # in work-order mode.
                 graph.add_task(
                     phase_id,
                     title=str(phase.get("title") or phase_id),
-                    depends_on=phase.get("depends_on") or (),
+                    depends_on=(),
                     kind=KIND_PHASE,
                     phase_id=phase_id,
                     priority=phase_index,
