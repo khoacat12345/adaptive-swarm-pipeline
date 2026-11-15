@@ -103,16 +103,125 @@ def diffstat(patch: str) -> dict[str, Any]:
     }
 
 
-def _verify_rows(detail: Mapping[str, Any], events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _exit_code(value: Any) -> int | None:
+    """Normalize an exit code; anything non-numeric means "no evidence"."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _event_verify_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rebuild verify evidence from raw events (checkpoints + merge re-runs).
+
+    ``detail.verify`` normally already carries the projection, but older runs
+    (and runs whose manifest was trimmed) only have events.  The event shapes
+    mirror ``unified.state._verify_summary`` so both views agree.
+    """
     rows: list[dict[str, Any]] = []
+
+    def append(
+        source: str,
+        timestamp: Any,
+        *,
+        command: Any = None,
+        exit_code: Any = None,
+        output: Any = None,
+        status: Any = None,
+    ) -> None:
+        code = _exit_code(exit_code)
+        if code is None:
+            return
+        rows.append({
+            "command": redact_text(command),
+            "exit_code": code,
+            "ok": code == 0,
+            "status": status,
+            "at": timestamp,
+            "output_tail": redact_text(output, limit=MAX_OUTPUT_TAIL),
+            "source": source,
+        })
+
+    for event in events:
+        name = str(event.get("event_type") or "")
+        data = event.get("data") if isinstance(event.get("data"), Mapping) else {}
+        timestamp = event.get("timestamp")
+
+        # Direct verify events keep their existing shape.
+        if "verify" in name:
+            exit_code = data.get("exit_code", data.get("verify_exit"))
+            if exit_code is None and isinstance(data.get("result"), Mapping):
+                exit_code = (data.get("result") or {}).get("exit_code")
+            append(
+                name,
+                timestamp,
+                command=data.get("command") or data.get("verify_command"),
+                exit_code=exit_code,
+                output=data.get("output_tail") or data.get("output"),
+                status=event.get("status") or data.get("status"),
+            )
+            continue
+
+        # A checkpoint is the authoritative verify evidence for its phase.
+        if name == "checkpoint.recorded":
+            append(
+                name,
+                timestamp,
+                command=data.get("verify_command"),
+                exit_code=data.get("verify_exit"),
+                output=data.get("verify_output"),
+                status=event.get("status"),
+            )
+            extra = data.get("verify_results")
+            if isinstance(extra, list):
+                for item in extra:
+                    if not isinstance(item, Mapping):
+                        continue
+                    append(
+                        name,
+                        timestamp,
+                        command=item.get("command") or item.get("verify_command"),
+                        exit_code=item.get("exit_code", item.get("verify_exit")),
+                        output=item.get("output_tail") or item.get("output"),
+                        status=item.get("status") or event.get("status"),
+                    )
+            continue
+
+        # Merge re-runs every verify command; that evidence belongs in the report.
+        if name == "run.merged":
+            merged = data.get("verify")
+            if isinstance(merged, Mapping):
+                merged = [merged]
+            if isinstance(merged, list):
+                for item in merged:
+                    if not isinstance(item, Mapping):
+                        continue
+                    append(
+                        name,
+                        timestamp,
+                        command=item.get("command") or item.get("verify_command"),
+                        exit_code=item.get("exit_code", item.get("verify_exit")),
+                        output=item.get("output_tail") or item.get("output"),
+                        status=item.get("status") or event.get("status"),
+                    )
+    return rows
+
+
+def _verify_section(detail: Mapping[str, Any],
+                    events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build ``report["verify"]``, falling back to events when needed."""
     verify = detail.get("verify") if isinstance(detail.get("verify"), Mapping) else {}
+    rows: list[dict[str, Any]] = []
     for item in verify.get("results") or []:
         if not isinstance(item, Mapping):
             continue
+        code = _exit_code(item.get("exit_code"))
         rows.append({
             "command": redact_text(item.get("command")),
-            "exit_code": item.get("exit_code"),
-            "ok": int(item.get("exit_code") or 0) == 0 if item.get("exit_code") is not None else None,
+            "exit_code": code if code is not None else item.get("exit_code"),
+            "ok": code == 0 if code is not None else None,
             "status": item.get("status"),
             "at": item.get("timestamp"),
             "output_tail": redact_text(item.get("output"), limit=MAX_OUTPUT_TAIL),
@@ -120,26 +229,33 @@ def _verify_rows(detail: Mapping[str, Any], events: list[dict[str, Any]]) -> lis
         })
     if not rows:
         # Fall back to the raw events so an old run still reports its exits.
-        for event in events:
-            name = str(event.get("event_type") or "")
-            data = event.get("data") if isinstance(event.get("data"), Mapping) else {}
-            if "verify" not in name:
-                continue
-            exit_code = data.get("exit_code", data.get("verify_exit"))
-            if exit_code is None:
-                continue
-            rows.append({
-                "command": redact_text(data.get("command") or data.get("verify_command")),
-                "exit_code": exit_code,
-                "ok": int(exit_code or 0) == 0,
-                "status": event.get("status"),
-                "at": event.get("timestamp"),
-                "output_tail": redact_text(
-                    data.get("output_tail") or data.get("output"), limit=MAX_OUTPUT_TAIL,
-                ),
-                "source": name,
-            })
-    return rows[-20:]
+        rows = _event_verify_rows(events)
+    rows = rows[-20:]
+
+    commands: list[str] = []
+    for command in verify.get("commands") or []:
+        text = str(command or "").strip()
+        if text and text not in commands:
+            commands.append(redact_text(text))
+    if not commands:
+        for row in rows:
+            text = str(row.get("command") or "").strip()
+            if text and text not in commands:
+                commands.append(text)
+
+    known = [row for row in rows if _exit_code(row.get("exit_code")) is not None]
+    ok = verify.get("ok")
+    if ok is None and known:
+        ok = all(_exit_code(row.get("exit_code")) == 0 for row in known)
+    last_exit = _exit_code(verify.get("last_exit"))
+    if last_exit is None and known:
+        last_exit = _exit_code(known[-1].get("exit_code"))
+    return {
+        "commands": commands,
+        "ok": ok,
+        "last_exit": last_exit if last_exit is not None else verify.get("last_exit"),
+        "rows": rows,
+    }
 
 
 def _review_rows(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -334,8 +450,7 @@ def build_report(
         })
 
     merge = _merge_rows(run_dir)
-    verify_rows = _verify_rows(detail, events)
-    verify_detail = detail.get("verify") if isinstance(detail.get("verify"), Mapping) else {}
+    verify = _verify_section(detail, events)
     report = {
         "schema_version": SCHEMA_VERSION,
         "available": True,
@@ -356,12 +471,7 @@ def build_report(
         "state_root": detail.get("state_root"),
         "spend": redact(detail.get("spend") or {}),
         "changes": changes,
-        "verify": {
-            "commands": verify_detail.get("commands") or [],
-            "ok": verify_detail.get("ok"),
-            "last_exit": verify_detail.get("last_exit"),
-            "rows": verify_rows,
-        },
+        "verify": verify,
         "reviews": _review_rows(events),
         "meeting": meeting,
         "graph": redact(detail.get("graph") or {}),
