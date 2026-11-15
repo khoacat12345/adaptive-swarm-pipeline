@@ -26,7 +26,11 @@ if __package__ in (None, ""):
 
 from unified.contracts import ContractError, UnifiedRequest  # noqa: E402
 from unified.orchestrator import UnifiedOrchestrator  # noqa: E402
-from v2.adapters import build_worker_seats  # noqa: E402
+from v2.adapters import (  # noqa: E402
+    build_runtime_registry,
+    build_worker_seats,
+    select_runtime,
+)
 from v2.doctor import main as doctor_main  # noqa: E402
 from v2.errors import ExecutionError, V2Error  # noqa: E402
 from v2.plan import PlanValidationError  # noqa: E402
@@ -164,6 +168,33 @@ def _enrich_status(runner: V2Runner, run_id: str) -> dict[str, Any]:
     return payload
 
 
+def _seat_factory_with_runtime(
+    seat_factory: Callable[..., Any],
+    *,
+    runtime_name: str,
+    tier: str = "E3",
+    model: str = "",
+) -> Callable[..., Any]:
+    """F04: bind one selected runtime to every coder seat the orchestrator builds.
+
+    Tier capabilities are validated once, before any worktree is created, so a
+    non-reasoning runtime/model fails closed instead of mid-run.
+    """
+    runtime = select_runtime(
+        build_runtime_registry(),
+        runtime_name=runtime_name,
+        tier=tier,
+        model=model,
+    )
+
+    def factory(**kwargs: Any) -> Any:
+        kwargs["runtime"] = runtime
+        kwargs.setdefault("tier", tier)
+        return seat_factory(**kwargs)
+
+    return factory
+
+
 def _run_task(
     args: argparse.Namespace,
     *,
@@ -179,6 +210,13 @@ def _run_task(
     ``--merge`` the operator asked for.
     """
     request = UnifiedRequest.from_namespace(args)
+    if getattr(args, "runtime", None):
+        seat_factory = _seat_factory_with_runtime(
+            seat_factory,
+            runtime_name=str(args.runtime),
+            tier=str(getattr(args, "tier", None) or "E3"),
+            model=str(getattr(args, "runtime_model", None) or ""),
+        )
     orchestrator = UnifiedOrchestrator(
         seat_factory=seat_factory,
         planner_goal=planner_goal,
@@ -254,6 +292,15 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--preset", choices=("free-only", "strict"), default=None)
     run.add_argument("--coder-model", default=None)
     run.add_argument("--coder-kind", choices=("agentic", "opencode"), default="agentic")
+    run.add_argument(
+        "--runtime", default=None,
+        help="agent runtime for the coder seat (mock, opencode, claude-code, "
+             "generic-cli); the tier capabilities are validated before the run",
+    )
+    run.add_argument(
+        "--runtime-model", default=None,
+        help="model id used for runtime capability checks (defaults to --coder-model)",
+    )
     run.add_argument("--reviewer", action="append", default=[])
     run.add_argument("--free", action="store_true")
     run.add_argument("--paid-cost", type=float, default=0.0)

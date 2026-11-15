@@ -69,12 +69,38 @@ class RuntimeResult:
 
 @runtime_checkable
 class AgentRuntime(Protocol):
+    """Full runtime contract.
+
+    F04 makes the task lifecycle (``start_task`` / ``send_message`` / ``wait``
+    / ``cancel``) part of the boundary so the engine can drive any agent CLI.
+    ``execute`` remains for the older batch adapters.
+    """
+
     name: str
 
     def capabilities(self) -> RuntimeCapabilities:
         ...
 
     def health(self) -> dict[str, Any]:
+        ...
+
+    def start_task(
+        self,
+        task: Mapping[str, Any],
+        *,
+        worktree: Any = None,
+        model: str = "",
+        tier: str = "E3",
+    ) -> str:
+        ...
+
+    def send_message(self, handle: str, message: str) -> dict[str, Any]:
+        ...
+
+    def wait(self, handle: str, *, timeout: float | None = None) -> RuntimeResult:
+        ...
+
+    def cancel(self, handle: str, *, reason: str = "") -> dict[str, Any]:
         ...
 
     def execute(
@@ -138,6 +164,19 @@ class ClaudeCodeRuntimeStub:
 
     def health(self) -> dict[str, Any]:
         return {"ok": False, "stub": True, "reason": "adapter not implemented"}
+
+    def start_task(self, task: Mapping[str, Any], *, worktree: Any = None,
+                   model: str = "", tier: str = "E3") -> str:
+        raise ExecutionError("claude-code runtime adapter is a stub")
+
+    def send_message(self, handle: str, message: str) -> dict[str, Any]:
+        raise ExecutionError("claude-code runtime adapter is a stub")
+
+    def wait(self, handle: str, *, timeout: float | None = None) -> RuntimeResult:
+        raise ExecutionError("claude-code runtime adapter is a stub")
+
+    def cancel(self, handle: str, *, reason: str = "") -> dict[str, Any]:
+        raise ExecutionError("claude-code runtime adapter is a stub")
 
     def execute(self, work_order: Mapping[str, Any], *, worktree: Any,
                 budget: Any, feedback: str | None = None) -> RuntimeResult:

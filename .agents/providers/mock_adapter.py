@@ -7,13 +7,17 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterable
 
-from .base_adapter import AgentReply, LLMAdapter
+from .base_adapter import AdapterCapabilities, AgentReply, LLMAdapter
 
 
 class MockAdapter(LLMAdapter):
     """Return scripted replies without spawning a process or touching a CLI."""
 
     name = "mock"
+    default_capabilities = AdapterCapabilities(
+        headless=True, tools=True, reasoning=True, json_output=True,
+        messaging=True, write_mode="workspace", max_parallel=8,
+    )
 
     def __init__(self, responses: Iterable | Callable | None = None,
                  *, model: str = "mock-model") -> None:
@@ -62,3 +66,11 @@ class MockAdapter(LLMAdapter):
         except (TypeError, json.JSONDecodeError):
             pass
         return AgentReply(text=text, data=data, model=self.model, raw=text)
+
+    def health(self) -> dict:
+        return {
+            "ok": True,
+            "name": self.name,
+            "model": self.model,
+            "calls": self.calls,
+        }

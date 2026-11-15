@@ -114,6 +114,7 @@ def _check_runtimes(root: Path) -> list[Check]:
 
         registry = build_runtime_registry()
         health = registry.health()
+        capabilities = registry.capabilities()
     except Exception as exc:  # noqa: BLE001 - doctor must not crash
         return [Check("runtimes", "warn", f"runtime registry unavailable: {exc}"[:300])]
     available = [name for name, row in health.items() if row.get("ok")]
@@ -127,6 +128,14 @@ def _check_runtimes(root: Path) -> list[Check]:
         detail = "ready" if row.get("ok") else "not available"
         if row.get("executable"):
             detail += f" ({row['executable']})"
+        caps = capabilities.get(name) or {}
+        if caps:
+            flags = [
+                flag for flag in ("headless", "tools", "reasoning", "messaging")
+                if caps.get(flag)
+            ]
+            if flags:
+                detail += f"; caps: {', '.join(flags)}"
         if row.get("degraded"):
             detail += "; degraded"
         if row.get("error"):

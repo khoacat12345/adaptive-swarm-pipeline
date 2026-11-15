@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -341,7 +342,12 @@ def _parse_files(stdout: str) -> dict[str, str]:
 
 
 class MockRuntime(BaseTaskRuntime):
-    """Deterministic runtime for tests and dry runs."""
+    """Deterministic runtime for tests and dry runs.
+
+    ``script`` maps a task id (or ``"*"``) to ``{"files": ..., "usage": ...}``;
+    ``latency`` simulates a slow agent without making tests flaky (it is 0 by
+    default and only sleeps when explicitly requested).
+    """
 
     name = "mock"
 
@@ -351,6 +357,7 @@ class MockRuntime(BaseTaskRuntime):
         *,
         capabilities: RuntimeCapabilities | None = None,
         fail: bool = False,
+        latency: float = 0.0,
     ):
         super().__init__(
             command=["mock"],
@@ -361,10 +368,13 @@ class MockRuntime(BaseTaskRuntime):
         )
         self.script = dict(script or {})
         self.fail = bool(fail)
+        self.latency = max(0.0, float(latency))
         self.received: list[dict[str, Any]] = []
 
     def wait(self, handle: str, *, timeout: float | None = None) -> RuntimeResult:
         item = self._get(handle)
+        if self.latency and not item.cancelled:
+            time.sleep(self.latency)
         self.received.append({
             "handle": handle,
             "task_id": item.task.get("id"),

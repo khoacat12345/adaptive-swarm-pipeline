@@ -8,6 +8,34 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 
+@dataclass(frozen=True)
+class AdapterCapabilities:
+    """Provider-side mirror of ``v2.runtime.RuntimeCapabilities``.
+
+    Keeping this tiny (no imports from ``v2``) lets provider code stay a leaf
+    dependency while still declaring what the runtime dispatcher may select.
+    """
+
+    headless: bool = True
+    tools: bool = True
+    reasoning: bool = True
+    json_output: bool = False
+    messaging: bool = False
+    write_mode: str = "workspace"
+    max_parallel: int = 1
+
+    def as_dict(self) -> dict:
+        return {
+            "headless": self.headless,
+            "tools": self.tools,
+            "reasoning": self.reasoning,
+            "json_output": self.json_output,
+            "messaging": self.messaging,
+            "write_mode": self.write_mode,
+            "max_parallel": self.max_parallel,
+        }
+
+
 @dataclass
 class AgentReply:
     """Normalized reply returned by every provider.
@@ -35,6 +63,14 @@ class LLMAdapter(ABC):
     """Provider-neutral boundary used by workers and meeting tests."""
 
     name = "base"
+    default_capabilities = AdapterCapabilities()
+
+    def capabilities(self) -> AdapterCapabilities:
+        return self.default_capabilities
+
+    def health(self) -> dict:
+        """Cheap readiness probe; subclasses override for real CLI checks."""
+        return {"ok": True, "name": self.name}
 
     @abstractmethod
     def complete(self, messages: list[dict], schema: dict | None = None) -> AgentReply:
