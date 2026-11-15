@@ -122,6 +122,12 @@ def _emit(payload: Mapping[str, Any], *, as_json: bool) -> None:
     if isinstance(inbox, Mapping) and inbox.get("pending"):
         print(f"inbox: {inbox.get('pending')} pending "
               f"({inbox.get('blocking', 0)} blocking)")
+    if payload.get("decision_id"):
+        print(f"decision: {payload['decision_id']}")
+    if payload.get("paused"):
+        print("paused: waiting for a human answer")
+    if payload.get("resumed"):
+        print("resumed: run continues")
 
 
 def _emit_inbox(payload: Mapping[str, Any], *, as_json: bool) -> None:
@@ -133,11 +139,14 @@ def _emit_inbox(payload: Mapping[str, Any], *, as_json: bool) -> None:
     print(f"inbox: {pending} pending / {total} total")
     if payload.get("open_gates"):
         print("gates: " + ", ".join(str(item) for item in payload["open_gates"]))
-    for item in payload.get("pending_items") or []:
+    for item in payload.get("items") or []:
         if not isinstance(item, Mapping):
             continue
         gate = f" [{item.get('gate')}]" if item.get("gate") else ""
-        print(f"- {item.get('id')}{gate} {item.get('question')}")
+        flags = " blocking" if item.get("blocking") else ""
+        status = str(item.get("status") or "")
+        print(f"- {item.get('decision_id') or item.get('id')}{gate}{flags} "
+              f"({status}) {item.get('question')}")
 
 
 def _enrich_status(runner: V2Runner, run_id: str) -> dict[str, Any]:
@@ -347,26 +356,39 @@ def _build_parser() -> argparse.ArgumentParser:
 
     inbox = sub.add_parser("inbox", parents=[common],
                            help="list pending decisions for a run")
-    inbox.add_argument("run_id")
+    inbox.add_argument("--run-id", default=None,
+                       help="run id (defaults to the most recent run)")
     inbox.add_argument("--all", action="store_true",
-                       help="also include answered/cancelled messages")
+                       help="also include resolved/expired/cancelled decisions")
 
     ask = sub.add_parser("ask", parents=[common],
                          help="worker asks a question or requests approval")
-    ask.add_argument("run_id")
-    ask.add_argument("question")
+    ask.add_argument("question", help="the question a human must answer")
+    ask.add_argument("--run-id", default=None,
+                     help="run id (defaults to the most recent run)")
     ask.add_argument("--gate", choices=(
         "usage_approval", "review_approval", "merge_approval",
         "destructive_action", "scope_change",
     ), default=None)
     ask.add_argument("--task", dest="task_id", default=None)
+    ask.add_argument("--option", dest="options", action="append", default=[],
+                     help="allowed answer (repeatable)")
+    ask.add_argument("--default", default=None,
+                     help="answer assumed when the decision expires")
     ask.add_argument("--author", default="worker")
-    ask.add_argument("--no-block", dest="blocking", action="store_false")
-    ask.set_defaults(blocking=True)
+    blocking_group = ask.add_mutually_exclusive_group()
+    blocking_group.add_argument(
+        "--blocking", dest="blocking", action="store_true", default=True,
+        help="pause the run until a human answers (default)",
+    )
+    blocking_group.add_argument(
+        "--no-block", "--no-blocking", dest="blocking", action="store_false",
+        help="record the decision without pausing the run",
+    )
 
     reply = sub.add_parser("reply", parents=[common],
                            help="answer a decision and unblock the worker")
-    reply.add_argument("message_id")
+    reply.add_argument("message_id", help="decision id (MSG-0001)")
     reply.add_argument("answer")
     reply.add_argument("--run-id", default=None)
     reply.add_argument("--answered-by", default="operator")
@@ -519,8 +541,11 @@ def main(
         state_root, _ = _resolve_state_paths(root, args)
         try:
             if args.command == "inbox":
+                run_id = args.run_id or _latest_run(
+                    V2Runner(root, state_root=state_root)
+                )
                 payload = unified_api.run_inbox(
-                    root, args.run_id, state_root=state_root,
+                    root, run_id, state_root=state_root,
                 )
                 if not args.all:
                     payload = {
@@ -530,12 +555,17 @@ def main(
                 _emit_inbox(payload, as_json=as_json)
                 return 0
             if args.command == "ask":
+                run_id = args.run_id or _latest_run(
+                    V2Runner(root, state_root=state_root)
+                )
                 payload = unified_api.ask_decision(
-                    root, args.run_id, args.question,
+                    root, run_id, args.question,
                     state_root=state_root,
                     gate=args.gate,
                     blocking=bool(args.blocking),
                     task_id=args.task_id,
+                    options=getattr(args, "options", []) or (),
+                    default=getattr(args, "default", None),
                     author=args.author,
                 )
                 _emit(payload, as_json=as_json)

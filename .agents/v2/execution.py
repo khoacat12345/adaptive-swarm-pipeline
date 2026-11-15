@@ -406,6 +406,7 @@ class ExecutionEngine:
         verify_timeout: int = 300,
         retry_policy: RetryPolicy | None = None,
         quota_gate: Any | None = None,
+        decision_gate: bool = True,
     ):
         self.runner = runner
         self.max_repair_attempts = max(0, int(max_repair_attempts))
@@ -413,10 +414,93 @@ class ExecutionEngine:
         self.verify_timeout = int(verify_timeout)
         self.retry_policy = retry_policy
         self.quota_gate = quota_gate
+        self.decision_gate = bool(decision_gate)
 
     # ------------------------------------------------------------------
     # Guards
     # ------------------------------------------------------------------
+
+    def _blocking_decisions(self, store: Any) -> list[dict[str, Any]]:
+        """Open blocking decisions from the run inbox (never raises)."""
+        try:
+            from unified.inbox import DecisionInbox  # local import: no cycle
+
+            inbox = DecisionInbox(store.run_dir, run_id=str(store.run_id))
+            return [item.as_dict() for item in inbox.blocking()]
+        except Exception:  # noqa: BLE001 - the gate must not mask real work
+            return []
+
+    @staticmethod
+    def _resume_from_decision(store: Any, manifest: Mapping[str, Any]) -> bool:
+        """True when this execute() is continuing a decision-paused run."""
+        return (
+            str(manifest.get("status") or "") == "PHASE_EXECUTING"
+            and bool(manifest.get("paused_for_decision"))
+        )
+
+    def _gate_decisions(
+        self,
+        store: Any,
+        run_id: str,
+        *,
+        phase_id: str = "",
+        work_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """Stop dispatch while a human decision is still pending (F03).
+
+        The run is moved to PAUSED (``resume_state`` keeps the phase the engine
+        was working on), the evidence is journaled, and the caller returns a
+        PAUSED result.  ``V2Runner.resume`` refuses to continue until every
+        blocking decision is resolved.
+        """
+        if not self.decision_gate:
+            return []
+        pending = self._blocking_decisions(store)
+        if not pending:
+            return []
+        ids = [
+            str(item.get("decision_id") or item.get("id") or "")
+            for item in pending
+        ]
+        reason = "blocking decision " + ", ".join(item for item in ids if item)
+        try:
+            store.append_event("decision.pending", {
+                "run_id": run_id,
+                "phase_id": phase_id,
+                "work_order": work_id,
+                "count": len(pending),
+                "decisions": [
+                    {
+                        "decision_id": item.get("decision_id"),
+                        "question": item.get("question"),
+                        "gate": item.get("gate"),
+                        "task_id": item.get("task_id"),
+                        "options": item.get("options") or [],
+                        "default": item.get("default"),
+                    }
+                    for item in pending
+                ],
+            })
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.runner.pause_for_decision(
+                run_id, decision_id=ids[0] if ids else "", reason=reason,
+            )
+        except Exception:  # noqa: BLE001 - the journal is still authoritative
+            pass
+        try:
+            from .alerts import notify_event
+
+            notify_event(self.runner.root, "DECISION_PENDING", {
+                "run_id": run_id,
+                "status": "AWAITING_DECISION",
+                "phase_id": phase_id,
+                "reason": reason,
+            })
+        except Exception:  # noqa: BLE001
+            pass
+        return pending
 
     def _load(self, run_id: str) -> tuple[Any, dict[str, Any], dict[str, Any], isolation.Workspace]:
         store = self.runner.load(run_id)
@@ -1001,7 +1085,12 @@ class ExecutionEngine:
         low_risk_opt_in: bool = False,
     ) -> ExecutionResult:
         store, plan, _, workspace = self._load(run_id)
-        store.assert_state("PROVISIONING")
+        manifest = store.load()
+        # F03: a run paused by a blocking decision resumes into PHASE_EXECUTING
+        # with ``paused_for_decision`` set; every other entry needs PROVISIONING.
+        resume_from_decision = self._resume_from_decision(store, manifest)
+        if not resume_from_decision:
+            store.assert_state("PROVISIONING")
         import approval_policy
         try:
             self.runner.assert_usage(run_id)
@@ -1130,7 +1219,22 @@ class ExecutionEngine:
                 })
             except Exception:  # noqa: BLE001
                 pass
-        store.transition("worktree_ready")
+        if resume_from_decision:
+            # The human answered; clear the marker and continue from the first
+            # phase that has no checkpoint yet.
+            store.update(paused_for_decision=False, pending_decision=None)
+            try:
+                store.append_event("decision.resumed", {
+                    "run_id": run_id,
+                    "committed_phases": [
+                        str(phase["id"]) for phase in phases
+                        if store.checkpoint_for(str(phase["id"]))
+                    ],
+                })
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            store.transition("worktree_ready")
         phase_results: list[dict[str, Any]] = []
         checkpoints: list[dict[str, Any]] = []
         requests = 0
@@ -1144,12 +1248,58 @@ class ExecutionEngine:
             role: reviewers[role] for role in required_roles if role in reviewers
         }
 
+        def paused_result(
+            pending: list[dict[str, Any]],
+            phase_result: dict[str, Any] | None = None,
+        ) -> ExecutionResult:
+            """Return a PAUSED result instead of pretending the run failed."""
+            if phase_result is not None:
+                phase_result["status"] = "paused"
+                if phase_result not in phase_results:
+                    phase_results.append(phase_result)
+            return ExecutionResult(
+                run_id=run_id,
+                status="PAUSED",
+                phases=phase_results,
+                checkpoints=checkpoints,
+                requests=requests,
+                repairs=repairs,
+                handoff=None,
+                tier=profile.tier,
+                planner=profile.planner,
+                reviewer_roles=profile.reviewer_roles,
+                low_risk_opt_in=bool(
+                    low_risk_opt_in or plan.get("low_risk_opt_in") is True
+                ),
+                attempts=attempt_history.as_list(),
+                graph={
+                    "available": task_graph is not None,
+                    "problems": graph_problems,
+                    "pending_decisions": [
+                        item.get("decision_id") for item in pending
+                    ],
+                },
+                quota=_quota_evidence(store),
+            )
+
+        # A decision recorded before the first dispatch pauses the run at once.
+        pending = self._gate_decisions(store, run_id)
+        if pending:
+            return paused_result(pending)
+
         for phase_index, phase in enumerate(phases):
             phase_id = str(phase["id"])
+            if resume_from_decision and store.checkpoint_for(phase_id):
+                continue
             store.update(current_phase=phase_id)
             phase_result = {"phase_id": phase_id, "work_orders": [], "status": "running"}
             for work_order in phase.get("work_orders") or []:
                 work_id = str(work_order.get("id") or "work")
+                pending = self._gate_decisions(
+                    store, run_id, phase_id=phase_id, work_id=work_id,
+                )
+                if pending:
+                    return paused_result(pending, phase_result)
                 capability = build_capability_context(
                     self.runner.root,
                     workspace.path,
@@ -1199,6 +1349,16 @@ class ExecutionEngine:
                     )
                 for attempt in range(0, attempt_limit + 1):
                     is_repair = attempt > 0
+                    pending = self._gate_decisions(
+                        store, run_id, phase_id=phase_id, work_id=work_id,
+                    )
+                    if pending:
+                        if task_ws is not None:
+                            self._cleanup_task_worktree(
+                                store, task_ws, verified=False,
+                            )
+                            task_ws = None
+                        return paused_result(pending, phase_result)
                     tx = None
                     attempt_record = self._begin_attempt(
                         attempt_history, work_id, attempt + 1, coder, coder_family,

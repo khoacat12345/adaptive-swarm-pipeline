@@ -24,6 +24,7 @@ Routes::
     POST /api/unified/control
     POST /api/unified/inbox/ask
     POST /api/unified/inbox/reply
+    POST /api/unified/runs/<id>/inbox/<decision_id>/reply
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ if str(AGENTS_DIR) not in sys.path:
     sys.path.insert(0, str(AGENTS_DIR))
 
 from unified import state as unified_state  # noqa: E402
-from unified.inbox import InboxError  # noqa: E402
+from unified.inbox import InboxError, MessageNotFound  # noqa: E402
 from unified.state import (  # noqa: E402
     MAX_DIFF_BYTES,
     MAX_EVENT_LIMIT,
@@ -70,6 +71,7 @@ POST_ROUTES = (
     "/api/unified/control",
     "/api/unified/inbox/ask",
     "/api/unified/inbox/reply",
+    "/api/unified/runs/<id>/inbox/<decision_id>/reply",
 )
 
 
@@ -177,10 +179,11 @@ def run_report_markdown(root: str | Path, run_id: str, *,
 
 def run_inbox(root: str | Path, run_id: str, *,
               state_root: str | Path | None = None) -> dict[str, Any]:
-    """F03: pending decisions for one run."""
-    from unified.inbox import inbox_summary
+    """F03: pending decisions for one run (stable projection shape)."""
+    from unified.inbox import inbox_for_run
 
-    return redact(inbox_summary(root, run_id, state_root=state_root))
+    run_dir = inbox_for_run(root, run_id, state_root=state_root).run_dir
+    return redact(unified_state._inbox_projection(run_dir, str(run_id)))
 
 
 def ask_decision(root: str | Path, run_id: str, question: str, *,
@@ -188,6 +191,8 @@ def ask_decision(root: str | Path, run_id: str, question: str, *,
                  gate: str | None = None,
                  blocking: bool = True,
                  task_id: str | None = None,
+                 options: Any = (),
+                 default: str | None = None,
                  author: str = "worker") -> dict[str, Any]:
     """Record a worker question; a blocking question pauses the run."""
     from unified.inbox import inbox_for_run
@@ -195,6 +200,7 @@ def ask_decision(root: str | Path, run_id: str, question: str, *,
     inbox = inbox_for_run(root, run_id, state_root=state_root)
     message = inbox.ask(
         question, blocking=blocking, gate=gate, task_id=task_id, author=author,
+        options=options, default=default,
     )
     _append_decision_event(root, run_id, state_root, message)
     paused = _pause_for_blocking(root, run_id, state_root, message)
@@ -202,35 +208,41 @@ def ask_decision(root: str | Path, run_id: str, question: str, *,
         _notify(root, "DECISION_PENDING", {
             "run_id": run_id,
             "status": "AWAITING_DECISION",
-            "reason": f"{message.id} ({message.gate or message.kind}): "
+            "reason": f"{message.decision_id} ({message.gate or message.kind}): "
                       f"{message.question[:160]}",
         })
-    return redact({"ok": True, "message": message.as_dict(), "paused": paused})
+    return redact({
+        "ok": True,
+        "decision_id": message.decision_id,
+        "message": message.as_dict(),
+        "paused": paused,
+    })
 
 
-def reply_decision(root: str | Path, message_id: str, answer: str, *,
+def reply_decision(root: str | Path, decision_id: str, answer: str, *,
                    run_id: str | None = None,
                    state_root: str | Path | None = None,
                    answered_by: str = "dashboard-user") -> dict[str, Any]:
-    """Answer a message and resume the run once no blocking gate remains."""
+    """Answer a decision and resume the run once no blocking gate remains."""
     from unified.inbox import find_message, inbox_for_run
 
     if run_id:
         inbox = inbox_for_run(root, run_id, state_root=state_root)
-        message = inbox.get(message_id)
+        inbox.get(decision_id)
     else:
-        inbox, message = find_message(root, message_id, state_root=state_root)
-    answered = inbox.reply(message_id, answer, answered_by=answered_by)
-    _append_decision_event(root, answered.run_id, state_root, answered)
-    resumed = _resume_if_unblocked(root, answered.run_id, state_root, inbox)
+        inbox, _message = find_message(root, decision_id, state_root=state_root)
+    resolved = inbox.resolve(decision_id, answer, answered_by=answered_by)
+    _append_decision_event(root, resolved.run_id, state_root, resolved)
+    resumed = _resume_if_unblocked(root, resolved.run_id, state_root, inbox)
     _notify(root, "DECISION_ANSWERED", {
-        "run_id": answered.run_id,
+        "run_id": resolved.run_id,
         "status": "ANSWERED",
-        "reason": f"{answered.id} answered by {answered.answered_by}",
+        "reason": f"{resolved.decision_id} answered by {resolved.answered_by}",
     })
     return redact({
         "ok": True,
-        "message": answered.as_dict(),
+        "decision_id": resolved.decision_id,
+        "message": resolved.as_dict(),
         "resumed": resumed,
     })
 
@@ -269,29 +281,36 @@ def _append_decision_event(root: str | Path, run_id: str,
                            message: Any) -> None:
     try:
         store = _runner(root, state_root).load(str(run_id))
-        if message.status == "answered":
+        if message.status in {"resolved", "answered"}:
             suffix = "answer"
+        elif message.status == "expired":
+            suffix = "expired"
         elif message.status == "cancelled":
             suffix = "cancelled"
         else:
             suffix = message.kind
         store.append_event(f"decision.{suffix}", {
+            "decision_id": message.decision_id,
             "message_id": message.id,
             "question": message.question,
             "status": message.status,
             "blocking": message.blocking,
             "gate": message.gate,
+            "options": list(message.options),
+            "default": message.default,
             "answer": message.answer,
             "answered_by": message.answered_by,
+            "answered_at": message.answered_at,
             "task_id": message.task_id,
         })
-    except Exception:  # noqa: BLE001 - the inbox file is authoritative
+    except Exception:  # noqa: BLE001 - the inbox journal is authoritative
         pass
 
 
 def _pause_for_blocking(root: str | Path, run_id: str,
                         state_root: str | Path | None,
                         message: Any) -> bool:
+    """Pause an active run while a blocking decision waits for a human."""
     if not getattr(message, "blocks_run", False):
         return False
     try:
@@ -299,7 +318,11 @@ def _pause_for_blocking(root: str | Path, run_id: str,
         status = str(runner.load(str(run_id)).load().get("status") or "")
         if status in {"PROVISIONING", "PHASE_EXECUTING", "PHASE_VERIFYING",
                       "PLANNING"}:
-            runner.pause(str(run_id), reason=f"blocking decision {message.id}")
+            runner.pause(
+                str(run_id),
+                reason=f"blocking decision {message.decision_id} "
+                       f"(awaiting a human answer)",
+            )
             return True
     except Exception:  # noqa: BLE001 - pausing is best effort
         pass
@@ -309,6 +332,7 @@ def _pause_for_blocking(root: str | Path, run_id: str,
 def _resume_if_unblocked(root: str | Path, run_id: str,
                          state_root: str | Path | None,
                          inbox: Any) -> bool:
+    """Resume a PAUSED run once no blocking decision remains open."""
     try:
         if inbox.needs_attention():
             return False
@@ -552,7 +576,9 @@ def handle_post(root: str | Path, route: str,
             if target_run:
                 _assert_token(root, target_run, token, state_root)
             return 200, reply_decision(
-                root, str(payload.get("message_id") or payload.get("id") or ""),
+                root,
+                str(payload.get("decision_id") or payload.get("message_id")
+                    or payload.get("id") or ""),
                 str(payload.get("answer") or ""),
                 run_id=str(payload.get("run_id") or "") or None,
                 state_root=state_root,
@@ -566,11 +592,30 @@ def handle_post(root: str | Path, route: str,
                 gate=payload.get("gate") or None,
                 blocking=bool(payload.get("blocking", True)),
                 task_id=payload.get("task_id") or None,
+                options=payload.get("options") or (),
+                default=payload.get("default"),
                 author=str(payload.get("author") or "worker"),
             )
+        # F03: run-scoped reply.  The decision id is part of the path, so the
+        # same route works from a bookmark or a shell ``curl``.
+        prefix = "/api/unified/runs/"
+        if route.startswith(prefix) and route.endswith("/reply"):
+            parts = route[len(prefix):].strip("/").split("/")
+            if len(parts) == 4 and parts[1] == "inbox" and parts[3] == "reply":
+                return 200, reply_decision(
+                    root, parts[2], str(payload.get("answer") or ""),
+                    run_id=parts[0],
+                    state_root=state_root,
+                    answered_by=str(
+                        payload.get("answered_by") or "dashboard-user"
+                    ),
+                )
+            return 404, {"error": "not found"}
         return 404, {"error": "not found"}
     except PermissionError as exc:
         return 403, {"error": redact_text(exc)}
+    except MessageNotFound as exc:
+        return 404, {"error": redact_text(exc)}
     except (PlanChangedError, StateTransitionError) as exc:
         return 409, {"error": redact_text(exc)}
     except InboxError as exc:

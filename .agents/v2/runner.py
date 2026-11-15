@@ -321,8 +321,124 @@ class V2Runner:
         return store.transition("pause", reason=reason)
 
     def resume(self, run_id: str) -> dict[str, Any]:
+        """Resume a paused run — never while a blocking decision is open.
+
+        The inbox is the server-side source of truth: a paused run cannot move
+        until every blocking decision has been resolved by a human.
+        """
         store = self.load(run_id)
-        return store.transition("resume")
+        blocking = self.inbox(run_id).blocking()
+        if blocking:
+            open_ids = ", ".join(item.decision_id for item in blocking)
+            raise StateTransitionError(
+                f"blocking decision(s) still open: {open_ids}; answer them with "
+                f"`swarm reply <decision_id> <answer>` first"
+            )
+        manifest = store.transition("resume")
+        try:
+            store.append_event("decision.resumed", {
+                "run_id": run_id,
+                "status": manifest.get("status"),
+                "paused_for_decision": bool(manifest.get("paused_for_decision")),
+            })
+        except Exception:  # noqa: BLE001 - the transition already succeeded
+            pass
+        return manifest
+
+    # ------------------------------------------------------------------
+    # F03: decision inbox (pause on ask, resume on resolve)
+    # ------------------------------------------------------------------
+    def inbox(self, run_id: str):
+        """The append-only decision journal for one run."""
+        from unified.inbox import DecisionInbox
+
+        return DecisionInbox(self.load(run_id).run_dir, run_id=str(run_id))
+
+    def inbox_state(self, run_id: str) -> dict[str, Any]:
+        return self.inbox(run_id).summary()
+
+    def pending_decisions(self, run_id: str) -> list[dict[str, Any]]:
+        """Every open blocking decision, as JSON-safe payloads."""
+        return [item.as_dict() for item in self.inbox(run_id).blocking()]
+
+    def pause_for_decision(
+        self,
+        run_id: str,
+        *,
+        decision_id: str = "",
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """Pause an active run because a human answer is required."""
+        store = self.load(run_id)
+        manifest = store.load()
+        status = str(manifest.get("status") or "")
+        note = str(reason or "").strip() or (
+            f"blocking decision {decision_id}" if decision_id
+            else "blocking decision pending"
+        )
+        if status != "PAUSED":
+            manifest = store.transition("pause", reason=note)
+        manifest = store.update(
+            paused_for_decision=True,
+            pending_decision=(str(decision_id) or None),
+        )
+        try:
+            store.append_event("decision.paused", {
+                "run_id": run_id,
+                "decision_id": str(decision_id) or None,
+                "reason": note,
+                "previous_status": status,
+                "resume_state": manifest.get("resume_state"),
+            })
+        except Exception:  # noqa: BLE001
+            pass
+        return manifest
+
+    def resume_if_unblocked(self, run_id: str) -> dict[str, Any]:
+        """Resume a PAUSED run once no blocking decision is left open."""
+        store = self.load(run_id)
+        status = str(store.load().get("status") or "")
+        blocking = self.inbox(run_id).blocking()
+        if blocking:
+            return {
+                "run_id": run_id,
+                "resumed": False,
+                "status": status,
+                "blocking": [item.decision_id for item in blocking],
+            }
+        if status != "PAUSED":
+            return {"run_id": run_id, "resumed": False, "status": status}
+        resumed = self.resume(run_id)
+        return {
+            "run_id": run_id,
+            "resumed": True,
+            "status": resumed.get("status"),
+        }
+
+    def wait_for_decision(
+        self,
+        run_id: str,
+        decision_id: str,
+        *,
+        timeout: float = 0.0,
+        poll: float = 1.0,
+    ):
+        """Poll the journal until the decision closes (``timeout=0`` = once).
+
+        Returns the latest snapshot; the caller decides what an open decision
+        means for its own loop.  Never raises on timeout.
+        """
+        import time
+
+        inbox = self.inbox(run_id)
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            message = inbox.get(decision_id)
+            if not message.open or timeout <= 0:
+                return message
+            if time.monotonic() >= deadline:
+                return message
+            time.sleep(max(0.05, float(poll)))
 
     def stop(self, run_id: str, *, reason: str = "user requested stop") -> dict[str, Any]:
         store = self.load(run_id)

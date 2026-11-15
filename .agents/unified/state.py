@@ -703,19 +703,26 @@ def _graph_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _inbox_projection(run_dir: Path, run_id: str) -> dict[str, Any]:
-    """F03: pending decisions and open gates for the badge/panel."""
-    path = run_dir / "inbox.ndjson"
-    if not path.exists():
-        return {"available": False, "total": 0, "pending": 0, "blocking": 0,
-                "needs_attention": False, "items": [], "pending_items": []}
-    try:
-        from unified.inbox import DecisionInbox
+    """F03: pending decisions and open gates for the badge/panel.
 
-        payload = DecisionInbox(run_dir, run_id=run_id).summary()
+    The payload always carries the same keys, so a missing or corrupt journal
+    looks exactly like an empty inbox and the dashboard never has to guard for
+    absent fields.  This function never raises.
+    """
+    from unified.inbox import DecisionInbox, empty_summary
+
+    path = Path(run_dir) / "inbox.ndjson"
+    payload: dict[str, Any] = empty_summary(str(run_id))
+    payload["available"] = False
+    if not path.exists():
+        return payload
+    try:
+        payload.update(DecisionInbox(run_dir, run_id=str(run_id)).summary())
         payload["available"] = True
         return redact(payload)
-    except Exception as exc:  # noqa: BLE001
-        return {"available": False, "error": redact_text(str(exc), limit=300)}
+    except Exception as exc:  # noqa: BLE001 - a bad journal must not hide a run
+        payload["error"] = redact_text(f"{type(exc).__name__}: {exc}", limit=300)
+        return payload
 
 
 def _quota_projection(events: list[dict[str, Any]]) -> dict[str, Any]:
