@@ -341,8 +341,8 @@ class V2Runner:
                 "status": manifest.get("status"),
                 "paused_for_decision": bool(manifest.get("paused_for_decision")),
             })
-        except Exception:  # noqa: BLE001 - the transition already succeeded
-            pass
+        except Exception as exc:  # the transition already succeeded
+            manifest["event_error"] = f"{type(exc).__name__}: {exc}"[:300]
         return manifest
 
     # ------------------------------------------------------------------
@@ -390,8 +390,8 @@ class V2Runner:
                 "previous_status": status,
                 "resume_state": manifest.get("resume_state"),
             })
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:
+            manifest["event_error"] = f"{type(exc).__name__}: {exc}"[:300]
         return manifest
 
     def resume_if_unblocked(self, run_id: str) -> dict[str, Any]:

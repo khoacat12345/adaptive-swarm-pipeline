@@ -431,7 +431,7 @@ class ExecutionEngine:
             return []
 
     @staticmethod
-    def _resume_from_decision(store: Any, manifest: Mapping[str, Any]) -> bool:
+    def _resume_from_decision(manifest: Mapping[str, Any]) -> bool:
         """True when this execute() is continuing a decision-paused run."""
         return (
             str(manifest.get("status") or "") == "PHASE_EXECUTING"
@@ -463,32 +463,26 @@ class ExecutionEngine:
             for item in pending
         ]
         reason = "blocking decision " + ", ".join(item for item in ids if item)
-        try:
-            store.append_event("decision.pending", {
-                "run_id": run_id,
-                "phase_id": phase_id,
-                "work_order": work_id,
-                "count": len(pending),
-                "decisions": [
-                    {
-                        "decision_id": item.get("decision_id"),
-                        "question": item.get("question"),
-                        "gate": item.get("gate"),
-                        "task_id": item.get("task_id"),
-                        "options": item.get("options") or [],
-                        "default": item.get("default"),
-                    }
-                    for item in pending
-                ],
-            })
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            self.runner.pause_for_decision(
-                run_id, decision_id=ids[0] if ids else "", reason=reason,
-            )
-        except Exception:  # noqa: BLE001 - the journal is still authoritative
-            pass
+        store.append_event("decision.pending", {
+            "run_id": run_id,
+            "phase_id": phase_id,
+            "work_order": work_id,
+            "count": len(pending),
+            "decisions": [
+                {
+                    "decision_id": item.get("decision_id"),
+                    "question": item.get("question"),
+                    "gate": item.get("gate"),
+                    "task_id": item.get("task_id"),
+                    "options": item.get("options") or [],
+                    "default": item.get("default"),
+                }
+                for item in pending
+            ],
+        })
+        self.runner.pause_for_decision(
+            run_id, decision_id=ids[0] if ids else "", reason=reason,
+        )
         try:
             from .alerts import notify_event
 
@@ -498,8 +492,11 @@ class ExecutionEngine:
                 "phase_id": phase_id,
                 "reason": reason,
             })
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # notification is optional, but never silent
+            store.append_event("decision.notify_error", {
+                "run_id": run_id,
+                "error": f"{type(exc).__name__}: {exc}"[:300],
+            })
         return pending
 
     def _load(self, run_id: str) -> tuple[Any, dict[str, Any], dict[str, Any], isolation.Workspace]:
@@ -1088,7 +1085,7 @@ class ExecutionEngine:
         manifest = store.load()
         # F03: a run paused by a blocking decision resumes into PHASE_EXECUTING
         # with ``paused_for_decision`` set; every other entry needs PROVISIONING.
-        resume_from_decision = self._resume_from_decision(store, manifest)
+        resume_from_decision = self._resume_from_decision(manifest)
         if not resume_from_decision:
             store.assert_state("PROVISIONING")
         import approval_policy
@@ -1635,10 +1632,7 @@ class ExecutionEngine:
         except Exception:
             pass
         attempt_summary = attempt_history.summary()
-        try:
-            store.append_event("attempts.summary", attempt_summary)
-        except Exception:  # noqa: BLE001
-            pass
+        store.append_event("attempts.summary", attempt_summary)
         graph_payload: dict[str, Any] = {
             "available": False, "problems": graph_problems, "states": {},
         }
