@@ -28,6 +28,11 @@ from .state import RunStore, resolve_state_root
 from .taskgraph import TaskGraph
 
 
+#: An attempt whose heartbeat is older than this is presumed LOST.  A single
+#: model call can be slow, so the default is deliberately generous.
+ATTEMPT_LOST_AFTER_SECONDS = 900.0
+
+
 class V2Runner:
     def __init__(
         self,
@@ -355,11 +360,17 @@ class V2Runner:
             workspace.path, log=False,
         )
         # F02: a killed process leaves attempts in DISPATCHED/WORKING/VERIFYING.
-        # Mark them LOST before resetting the state machine so a retry is not
-        # mistaken for the first attempt.
+        # Heartbeat age is checked first (a stale attempt is LOST even before a
+        # kill), then anything still active is closed out because the process
+        # that owned it is gone. A retry is therefore never mistaken for the
+        # first attempt.
         lost_attempts: list[str] = []
         try:
             history = AttemptHistory(store.run_dir / "attempts.ndjson")
+            for attempt in history.mark_lost(
+                timeout_seconds=ATTEMPT_LOST_AFTER_SECONDS,
+            ):
+                lost_attempts.append(attempt.attempt_id)
             for attempt in history.active():
                 history.lose(attempt.attempt_id, reason="process kill recovery")
                 lost_attempts.append(attempt.attempt_id)
@@ -434,11 +445,24 @@ class V2Runner:
     def attempt_history(self, run_id: str) -> AttemptHistory:
         return AttemptHistory(self.load(run_id).run_dir / "attempts.ndjson")
 
-    def attempts(self, run_id: str, *, limit: int = 200) -> dict[str, Any]:
+    def attempts(self, run_id: str, limit: int = 200) -> dict[str, Any]:
+        """F02: attempt history for a run (summary + newest ``limit`` items).
+
+        The journal is optional evidence: a run without one still answers with
+        a stable, zeroed summary so callers never have to special-case it.
+        """
         history = self.attempt_history(run_id)
+        summary = history.summary()
         return {
             "run_id": run_id,
-            "summary": history.summary(),
+            "total": int(summary.get("total") or 0),
+            "retries": int(summary.get("retries") or 0),
+            "lost": int(summary.get("lost") or 0),
+            "active": int(summary.get("active") or 0),
+            "by_state": dict(summary.get("by_state") or {}),
+            "tasks": list(summary.get("tasks") or []),
+            "history_path": summary.get("history_path"),
+            "summary": summary,
             "items": history.as_list(limit=limit),
         }
 

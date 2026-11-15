@@ -10,6 +10,11 @@ small::
                   +-----------+----------+--> FAILED
                   +-----------+----------+--> LOST
 
+``IDLE`` is not active: an attempt that was recorded but never dispatched can
+only be dispatched.  ``FAILED``/``LOST`` are reachable from the three active
+states (``DISPATCHED``, ``WORKING``, ``VERIFYING``) and, together with
+``SETTLED``, are terminal.
+
 ``LOST`` is reserved for a worker that stopped heart-beating (process kill,
 provider disconnect).  The history is an append-only JSONL file inside the run
 directory, so a crashed process leaves a readable audit trail and the next run
@@ -41,7 +46,7 @@ TERMINAL = {SETTLED, FAILED, LOST}
 ACTIVE = {DISPATCHED, WORKING, VERIFYING}
 
 TRANSITIONS: dict[str, set[str]] = {
-    IDLE: {DISPATCHED, FAILED, LOST},
+    IDLE: {DISPATCHED},
     DISPATCHED: {WORKING, FAILED, LOST},
     WORKING: {VERIFYING, FAILED, LOST},
     VERIFYING: {SETTLED, FAILED, LOST},
@@ -85,6 +90,7 @@ class Attempt:
     run_id: str = ""
     phase_id: str = ""
     worker: str = "coder"
+    worker_id: str = ""
     model: str = ""
     state: str = IDLE
     number: int = 1
@@ -103,6 +109,8 @@ class Attempt:
         self.task_id = str(self.task_id or "").strip()
         if not self.task_id:
             raise AttemptError("attempt requires a task_id")
+        self.worker = str(self.worker or "coder")
+        self.worker_id = str(self.worker_id or self.worker)
         self.state = str(self.state or IDLE).upper()
         if self.state not in TRANSITIONS:
             raise AttemptError(f"unknown attempt state: {self.state}")
@@ -147,6 +155,7 @@ class Attempt:
             "run_id": self.run_id,
             "phase_id": self.phase_id,
             "worker": self.worker,
+            "worker_id": self.worker_id or self.worker,
             "model": self.model,
             "state": self.state,
             "number": self.number,
@@ -163,12 +172,14 @@ class Attempt:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "Attempt":
+        worker = str(data.get("worker") or data.get("worker_id") or "coder")
         return cls(
             attempt_id=str(data.get("attempt_id") or ""),
             task_id=str(data.get("task_id") or ""),
             run_id=str(data.get("run_id") or ""),
             phase_id=str(data.get("phase_id") or ""),
-            worker=str(data.get("worker") or "coder"),
+            worker=worker,
+            worker_id=str(data.get("worker_id") or worker),
             model=str(data.get("model") or ""),
             state=str(data.get("state") or IDLE).upper(),
             number=int(data.get("number") or 1),

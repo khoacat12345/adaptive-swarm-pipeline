@@ -604,51 +604,38 @@ def _handoff(root: Path, run_dir: Path, manifest: Mapping[str, Any]) -> dict[str
 
 
 def _attempts_projection(run_dir: Path, *, limit: int = 200) -> dict[str, Any]:
-    """Read-only attempt summary; never raises for a missing journal."""
+    """Read-only attempt summary from the append-only journal (F02).
+
+    The payload always carries the same keys, so a missing or corrupt journal
+    has the same shape as a healthy one and the dashboard never has to guard
+    for absent fields.  This function never raises.
+    """
     path = Path(run_dir) / "attempts.ndjson"
+    payload: dict[str, Any] = {
+        "available": False,
+        "total": 0,
+        "by_state": {},
+        "retries": 0,
+        "tasks": [],
+        "active": 0,
+        "lost": 0,
+        "items": [],
+        "history_path": str(path),
+    }
     if not path.exists():
-        return {"total": 0, "by_state": {}, "retries": 0, "tasks": [],
-                "active": 0, "lost": 0, "history_path": str(path)}
+        return payload
     try:
         from v2.attempts import AttemptHistory
 
         history = AttemptHistory(path)
-        summary = history.summary()
-        summary["items"] = history.as_list(limit=limit)
-        return summary
+        payload.update(history.summary())
+        payload["available"] = True
+        payload["items"] = redact(history.as_list(limit=limit))
     except Exception as exc:  # noqa: BLE001 - a bad journal must not hide a run
-        return {"total": 0, "by_state": {}, "retries": 0, "tasks": [],
-                "active": 0, "lost": 0, "history_path": str(path),
-                "error": f"{type(exc).__name__}: {exc}"[:300]}
-
-
-def _inbox_projection(run_dir: Path, *, limit: int = 50) -> dict[str, Any]:
-    """Read-only decision inbox projection from the append-only journal."""
-    path = Path(run_dir) / "inbox.ndjson"
-    rows: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
-    for event in _read_jsonl(path):
-        message_id = str(event.get("id") or event.get("message_id") or "")
-        if not message_id:
-            continue
-        if message_id not in rows:
-            order.append(message_id)
-        rows[message_id] = dict(event)
-    messages = [rows[message_id] for message_id in order]
-    open_states = {"pending", "escalated"}
-    pending = [item for item in messages if item.get("status") in open_states]
-    blocking = [item for item in pending if item.get("blocking")]
-    return {
-        "total": len(messages),
-        "pending": len(pending),
-        "blocking": len(blocking),
-        "needs_attention": bool(blocking),
-        "open_gates": sorted({
-            str(item.get("gate")) for item in pending if item.get("gate")
-        }),
-        "items": [redact(item) for item in messages[-limit:]],
-        "pending_items": [redact(item) for item in pending[-limit:]],
-    }
+        payload["error"] = redact_text(
+            f"{type(exc).__name__}: {exc}", limit=300,
+        )
+    return payload
 
 
 def _task_graph_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
@@ -712,23 +699,6 @@ def _graph_projection(plan: Mapping[str, Any]) -> dict[str, Any]:
         payload["available"] = True
         return redact(payload)
     except Exception as exc:  # noqa: BLE001 - projection must not break the UI
-        return {"available": False, "error": redact_text(str(exc), limit=300)}
-
-
-def _attempts_projection(run_dir: Path) -> dict[str, Any]:
-    """F02: attempt history read straight from the append-only journal."""
-    path = run_dir / "attempts.ndjson"
-    if not path.exists():
-        return {"available": False, "total": 0, "tasks": [], "items": []}
-    try:
-        from v2.attempts import AttemptHistory
-
-        history = AttemptHistory(path)
-        payload = history.summary()
-        payload["available"] = True
-        payload["items"] = redact(history.as_list(limit=50))
-        return payload
-    except Exception as exc:  # noqa: BLE001
         return {"available": False, "error": redact_text(str(exc), limit=300)}
 
 

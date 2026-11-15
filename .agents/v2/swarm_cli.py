@@ -109,9 +109,9 @@ def _emit(payload: Mapping[str, Any], *, as_json: bool) -> None:
     if isinstance(graph, Mapping) and graph.get("available"):
         print(f"graph: {graph.get('size') or len(graph.get('tasks') or [])} tasks, "
               f"waves={graph.get('waves')}")
-    attempts = payload.get("attempts") or {}
-    if isinstance(attempts, Mapping) and attempts.get("total"):
-        print(f"attempts: {attempts.get('total')} "
+    attempts = payload.get("attempts")
+    if isinstance(attempts, Mapping):
+        print(f"attempts: {attempts.get('total', 0)} "
               f"({attempts.get('retries', 0)} retries, "
               f"{attempts.get('lost', 0)} lost)")
     inbox = payload.get("inbox") or {}

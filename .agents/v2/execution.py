@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
 from . import isolation
-from .attempts import VERIFYING, WORKING, AttemptHistory
+from .attempts import ACTIVE, DISPATCHED, VERIFYING, WORKING, AttemptHistory
 from .budget import BudgetConfig, BudgetController
 from .capability_runtime import build_context as build_capability_context
 from .errors import (
@@ -32,7 +32,7 @@ from .errors import (
 )
 
 from .plan import plan_hash
-from .runner import V2Runner
+from .runner import ATTEMPT_LOST_AFTER_SECONDS, V2Runner
 
 TEST_NAME_RE = re.compile(r"(^test_.*\.py$|.*_test\.py$|^conftest\.py$)", re.IGNORECASE)
 SECRET_RE = re.compile(
@@ -828,16 +828,22 @@ class ExecutionEngine:
         verified: bool = False,
         error: Any = None,
     ) -> None:
+        """Walk the remaining legal hops; never settle from an illegal state."""
         if record is None:
             return
         try:
-            if verified and record.state == WORKING:
-                history.transition(record.attempt_id, VERIFYING, reason="verify")
             if ok:
-                history.settle(record.attempt_id, reason="verified")
-            else:
-                history.fail(record.attempt_id, reason=str(error or "failed")[:1500])
-        except Exception:  # noqa: BLE001
+                if record.state == DISPATCHED:
+                    history.transition(record.attempt_id, WORKING, reason="done")
+                if verified and record.state == WORKING:
+                    history.transition(record.attempt_id, VERIFYING, reason="verify")
+                if record.state in ACTIVE:
+                    history.settle(record.attempt_id, reason="verified")
+            elif record.state in ACTIVE:
+                history.fail(
+                    record.attempt_id, reason=str(error or "failed")[:1500],
+                )
+        except Exception:  # noqa: BLE001 - evidence must not break the run
             pass
 
     @staticmethod
@@ -1062,8 +1068,30 @@ class ExecutionEngine:
         phases = topo_phases(plan)
         if not phases:
             raise ExecutionError("plan has no phases")
-        # F02: durable attempt history under the run directory.
+        # F02: durable attempt history under the run directory. Any attempt the
+        # previous process left active is swept to LOST here, based on heartbeat
+        # age, so a retry is never mistaken for a first attempt.
         attempt_history = AttemptHistory(store.run_dir)
+        try:
+            stale = attempt_history.mark_lost(
+                timeout_seconds=ATTEMPT_LOST_AFTER_SECONDS,
+            )
+            if stale:
+                store.append_event("attempts.lost", {
+                    "run_id": run_id,
+                    "reason": "heartbeat timeout",
+                    "attempts": [
+                        {
+                            "attempt_id": item.attempt_id,
+                            "task_id": item.task_id,
+                            "state": item.state,
+                            "heartbeat_at": item.heartbeat_at,
+                        }
+                        for item in stale
+                    ],
+                })
+        except Exception:  # noqa: BLE001 - evidence must not block work
+            pass
         # F01: validate/project the task graph once, before any work starts.
         from .taskgraph import TaskGraph, TaskGraphError
 
