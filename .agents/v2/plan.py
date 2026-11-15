@@ -20,6 +20,7 @@ from .errors import V2Error
 SCHEMA_VERSION = "2.1"
 MAX_PHASES = 6
 MAX_WORK_ORDERS = 12
+MAX_TASKS = 128
 DEFAULT_FORBIDDEN = (".git", ".env", ".agents/tmp", ".agents/config.json")
 
 
@@ -127,6 +128,83 @@ def budget_from_plan(plan: Mapping[str, Any]) -> BudgetConfig:
     return BudgetConfig(envelope=envelope, phases=phases)
 
 
+def _work_order_id(order: Mapping[str, Any], index: int) -> str:
+    return str(order.get("id") or f"W{index + 1}")
+
+
+def work_order_dependencies(plan: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Map ``phase/work`` ids to their declared intra-phase dependencies."""
+    result: dict[str, list[str]] = {}
+    for phase in plan.get("phases") or []:
+        if not isinstance(phase, Mapping):
+            continue
+        phase_id = str(phase.get("id") or "")
+        for index, order in enumerate(phase.get("work_orders") or []):
+            if not isinstance(order, Mapping):
+                continue
+            key = f"{phase_id}/{_work_order_id(order, index)}"
+            result[key] = [str(dep) for dep in (order.get("depends_on") or [])]
+    return result
+
+
+def _validate_work_order_graph(
+    phase_id: str, work_orders: list[Any],
+) -> list[str]:
+    """Validate the intra-phase work-order DAG (F01)."""
+    problems: list[str] = []
+    ids: list[str] = []
+    for index, item in enumerate(work_orders):
+        if not isinstance(item, Mapping):
+            continue
+        work_id = _work_order_id(item, index)
+        if work_id in ids:
+            problems.append(f"{phase_id}: duplicate work order id: {work_id}")
+        ids.append(work_id)
+    known = set(ids)
+    dependency_map: dict[str, list[str]] = {}
+    for index, item in enumerate(work_orders):
+        if not isinstance(item, Mapping):
+            continue
+        work_id = _work_order_id(item, index)
+        raw = item.get("depends_on") or []
+        if not isinstance(raw, list):
+            problems.append(f"{phase_id}/{work_id}: depends_on must be a list")
+            dependency_map[work_id] = []
+            continue
+        deps: list[str] = []
+        for dep in raw:
+            text = str(dep or "").strip()
+            if not text:
+                continue
+            if text == work_id:
+                problems.append(f"{phase_id}/{work_id}: cannot depend on itself")
+            elif text not in known:
+                problems.append(f"{phase_id}/{work_id}: unknown dependency {text}")
+            elif text not in deps:
+                deps.append(text)
+        dependency_map[work_id] = deps
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node: str) -> None:
+        if node in visiting:
+            problems.append(f"{phase_id}: work order dependency cycle at {node}")
+            return
+        if node in visited:
+            return
+        visiting.add(node)
+        for dep in dependency_map.get(node, []):
+            if dep in known:
+                visit(dep)
+        visiting.remove(node)
+        visited.add(node)
+
+    for work_id in ids:
+        visit(work_id)
+    return problems
+
+
 def _validate_work_order(
     item: Mapping[str, Any],
     *,
@@ -181,6 +259,122 @@ def _validate_work_order(
                 )
         except ImportError:
             problems.append(f"{phase_id}/{work_id}: system_bot unavailable for verify validation")
+    return problems
+
+
+def _explicit_tasks(plan: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Collect explicit task nodes from a plan, if it declares any.
+
+    F01 is backward compatible: a plan without ``tasks`` keeps the phase model
+    and is projected into a graph by ``v2.taskgraph`` at read time.
+    """
+    rows: list[Mapping[str, Any]] = []
+    top = plan.get("tasks")
+    if isinstance(top, list):
+        rows.extend(item for item in top if isinstance(item, Mapping))
+    for phase in plan.get("phases") or []:
+        if not isinstance(phase, Mapping):
+            continue
+        tasks = phase.get("tasks")
+        if isinstance(tasks, list):
+            rows.extend(item for item in tasks if isinstance(item, Mapping))
+    return rows
+
+
+def validate_task_graph(
+    plan: Mapping[str, Any],
+    *,
+    phase_ids: list[str] | None = None,
+    allowed_paths: list[str] | None = None,
+) -> list[str]:
+    """Validate an optional explicit ``tasks`` graph; empty list when absent."""
+    raw = _explicit_tasks(plan)
+    if not raw:
+        return []
+    problems: list[str] = []
+    if len(raw) > MAX_TASKS:
+        problems.append(f"too many tasks: {len(raw)} > {MAX_TASKS}")
+    known_phases = set(phase_ids or [])
+    seen: list[str] = []
+    for index, item in enumerate(raw):
+        task_id = str(item.get("id") or "").strip()
+        if not task_id:
+            problems.append(f"task {index}: missing id")
+            continue
+        if task_id in seen:
+            problems.append(f"duplicate task id: {task_id}")
+        seen.append(task_id)
+        phase_id = str(item.get("phase_id") or item.get("phase") or "").strip()
+        if phase_id and known_phases and phase_id not in known_phases:
+            problems.append(f"{task_id}: unknown phase {phase_id}")
+        command = str(item.get("verify_command") or "").strip()
+        if command:
+            try:
+                import system_bot  # type: ignore
+
+                guard = system_bot.check_command(command)
+                if not guard.get("allowed"):
+                    problems.append(f"{task_id}: verify_command blocked: {guard.get('reason')}")
+            except ImportError:
+                problems.append(f"{task_id}: system_bot unavailable for verify validation")
+        targets = item.get("target_files") or []
+        if isinstance(targets, str):
+            targets = [targets]
+        for relative in targets:
+            if not _safe_path(relative):
+                problems.append(f"{task_id}: unsafe target file: {relative}")
+            elif allowed_paths and not _inside(str(relative), list(allowed_paths)):
+                problems.append(f"{task_id}: target outside allowed_paths: {relative}")
+
+    known = set(seen)
+    for item in raw:
+        task_id = str(item.get("id") or "").strip()
+        deps = (
+            item.get("dependencies")
+            or item.get("depends_on")
+            or item.get("needs")
+            or []
+        )
+        if isinstance(deps, str):
+            deps = [deps]
+        for dep in deps:
+            dep = str(dep)
+            if dep == task_id:
+                problems.append(f"{task_id}: cannot depend on itself")
+            elif dep not in known:
+                problems.append(f"{task_id}: unknown dependency {dep}")
+
+    if not problems:
+        # Cycle detection over the declared task nodes only (F01 explicit graph).
+        edges: dict[str, list[str]] = {str(item.get("id") or ""): [] for item in raw}
+        for item in raw:
+            task_id = str(item.get("id") or "")
+            deps = (
+                item.get("dependencies")
+                or item.get("depends_on")
+                or item.get("needs")
+                or []
+            )
+            if isinstance(deps, str):
+                deps = [deps]
+            for dep in deps:
+                edges.setdefault(str(dep), []).append(task_id)
+        indegree = {node: 0 for node in edges}
+        for node, targets in edges.items():
+            for target in targets:
+                indegree[target] = indegree.get(target, 0) + 1
+        queue = sorted(node for node, degree in indegree.items() if degree == 0)
+        visited = 0
+        while queue:
+            node = queue.pop(0)
+            visited += 1
+            for target in sorted(edges.get(node, [])):
+                indegree[target] -= 1
+                if indegree[target] == 0:
+                    queue.append(target)
+        if visited != len(indegree):
+            stuck = sorted(node for node, degree in indegree.items() if degree > 0)
+            problems.append("task dependency cycle among: " + ", ".join(stuck[:12]))
     return problems
 
 
@@ -256,6 +450,15 @@ def validate_plan(
                     allow_new_files=allow_new,
                 )
             )
+        errors.extend(_validate_work_order_graph(phase_id, work_orders))
+
+    # Optional F01 task graph: only validated when the plan declares tasks.
+    if _explicit_tasks(plan):
+        errors.extend(validate_task_graph(plan, phase_ids=phase_ids))
+    max_parallel = plan.get("max_parallel", plan.get("parallelism"))
+    if max_parallel is not None:
+        if not isinstance(max_parallel, int) or not 1 <= max_parallel <= 16:
+            errors.append("max_parallel must be an integer in 1..16")
 
     # Dependency graph: every reference must exist and be acyclic.
     known = set(phase_ids)

@@ -13,16 +13,24 @@ import hmac
 import json
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import approval_policy
 
 from . import isolation
+from .attempts import AttemptHistory
 from .budget import BudgetConfig, BudgetController
 from .errors import ManifestError, StateTransitionError
 from .plan import budget_from_plan, save_plan, validate_plan
+from .scheduler import Scheduler
 from .signoff import create_signoff, signoff_summary, assert_signoff
 from .state import RunStore, resolve_state_root
+from .taskgraph import TaskGraph
+
+
+#: An attempt whose heartbeat is older than this is presumed LOST.  A single
+#: model call can be slow, so the default is deliberately generous.
+ATTEMPT_LOST_AFTER_SECONDS = 900.0
 
 
 class V2Runner:
@@ -313,12 +321,138 @@ class V2Runner:
         return store.transition("pause", reason=reason)
 
     def resume(self, run_id: str) -> dict[str, Any]:
+        """Resume a paused run — never while a blocking decision is open.
+
+        The inbox is the server-side source of truth: a paused run cannot move
+        until every blocking decision has been resolved by a human.
+        """
         store = self.load(run_id)
-        return store.transition("resume")
+        blocking = self.inbox(run_id).blocking()
+        if blocking:
+            open_ids = ", ".join(item.decision_id for item in blocking)
+            raise StateTransitionError(
+                f"blocking decision(s) still open: {open_ids}; answer them with "
+                f"`swarm reply <decision_id> <answer>` first"
+            )
+        manifest = store.transition("resume")
+        try:
+            store.append_event("decision.resumed", {
+                "run_id": run_id,
+                "status": manifest.get("status"),
+                "paused_for_decision": bool(manifest.get("paused_for_decision")),
+            })
+        except Exception as exc:  # the transition already succeeded
+            manifest["event_error"] = f"{type(exc).__name__}: {exc}"[:300]
+        return manifest
+
+    # ------------------------------------------------------------------
+    # F03: decision inbox (pause on ask, resume on resolve)
+    # ------------------------------------------------------------------
+    def inbox(self, run_id: str):
+        """The append-only decision journal for one run."""
+        from unified.inbox import DecisionInbox
+
+        return DecisionInbox(self.load(run_id).run_dir, run_id=str(run_id))
+
+    def inbox_state(self, run_id: str) -> dict[str, Any]:
+        return self.inbox(run_id).summary()
+
+    def pending_decisions(self, run_id: str) -> list[dict[str, Any]]:
+        """Every open blocking decision, as JSON-safe payloads."""
+        return [item.as_dict() for item in self.inbox(run_id).blocking()]
+
+    def pause_for_decision(
+        self,
+        run_id: str,
+        *,
+        decision_id: str = "",
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """Pause an active run because a human answer is required."""
+        store = self.load(run_id)
+        manifest = store.load()
+        status = str(manifest.get("status") or "")
+        note = str(reason or "").strip() or (
+            f"blocking decision {decision_id}" if decision_id
+            else "blocking decision pending"
+        )
+        if status != "PAUSED":
+            manifest = store.transition("pause", reason=note)
+        manifest = store.update(
+            paused_for_decision=True,
+            pending_decision=(str(decision_id) or None),
+        )
+        try:
+            store.append_event("decision.paused", {
+                "run_id": run_id,
+                "decision_id": str(decision_id) or None,
+                "reason": note,
+                "previous_status": status,
+                "resume_state": manifest.get("resume_state"),
+            })
+        except Exception as exc:
+            manifest["event_error"] = f"{type(exc).__name__}: {exc}"[:300]
+        return manifest
+
+    def resume_if_unblocked(self, run_id: str) -> dict[str, Any]:
+        """Resume a PAUSED run once no blocking decision is left open."""
+        store = self.load(run_id)
+        status = str(store.load().get("status") or "")
+        blocking = self.inbox(run_id).blocking()
+        if blocking:
+            return {
+                "run_id": run_id,
+                "resumed": False,
+                "status": status,
+                "blocking": [item.decision_id for item in blocking],
+            }
+        if status != "PAUSED":
+            return {"run_id": run_id, "resumed": False, "status": status}
+        resumed = self.resume(run_id)
+        return {
+            "run_id": run_id,
+            "resumed": True,
+            "status": resumed.get("status"),
+        }
+
+    def wait_for_decision(
+        self,
+        run_id: str,
+        decision_id: str,
+        *,
+        timeout: float = 0.0,
+        poll: float = 1.0,
+    ):
+        """Poll the journal until the decision closes (``timeout=0`` = once).
+
+        Returns the latest snapshot; the caller decides what an open decision
+        means for its own loop.  Never raises on timeout.
+        """
+        import time
+
+        inbox = self.inbox(run_id)
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            message = inbox.get(decision_id)
+            if not message.open or timeout <= 0:
+                return message
+            if time.monotonic() >= deadline:
+                return message
+            time.sleep(max(0.05, float(poll)))
 
     def stop(self, run_id: str, *, reason: str = "user requested stop") -> dict[str, Any]:
         store = self.load(run_id)
-        return store.transition("stop", reason=reason)
+        manifest = store.transition("stop", reason=reason)
+        # F01: a stopped run must not leave task worktrees behind.
+        try:
+            cleanup = self.cleanup_task_worktrees(
+                run_id, reason=f"run stopped: {reason}",
+            )
+            if cleanup.get("tracked"):
+                store.append_event("task.worktrees_cleaned", cleanup)
+        except Exception:  # noqa: BLE001 - cleanup must never mask the stop
+            pass
+        return manifest
 
     def recover(self, run_id: str) -> dict[str, Any]:
         """Recover a process-killed phase back to a re-executable state.
@@ -341,10 +475,28 @@ class V2Runner:
         recovered = safe_writer.recover_open_transactions(
             workspace.path, log=False,
         )
+        # F02: a killed process leaves attempts in DISPATCHED/WORKING/VERIFYING.
+        # Heartbeat age is checked first (a stale attempt is LOST even before a
+        # kill), then anything still active is closed out because the process
+        # that owned it is gone. A retry is therefore never mistaken for the
+        # first attempt.
+        lost_attempts: list[str] = []
+        try:
+            history = AttemptHistory(store.run_dir / "attempts.ndjson")
+            for attempt in history.mark_lost(
+                timeout_seconds=ATTEMPT_LOST_AFTER_SECONDS,
+            ):
+                lost_attempts.append(attempt.attempt_id)
+            for attempt in history.active():
+                history.lose(attempt.attempt_id, reason="process kill recovery")
+                lost_attempts.append(attempt.attempt_id)
+        except Exception:  # noqa: BLE001 - recovery must not fail on audit IO
+            pass
         store.transition("recover", reason="process kill recovery")
         store.append_event("run.recovered", {
             "from": status,
             "transactions": recovered,
+            "lost_attempts": lost_attempts,
             "worktree": str(workspace.path),
         })
         return {
@@ -364,6 +516,155 @@ class V2Runner:
         if not data:
             raise ManifestError(f"run has no workspace: {run_id}")
         return isolation.Workspace.from_dict(data)
+
+    # ------------------------------------------------------------------
+    # Task graph, scheduling and attempts (F01 / F02 / F05)
+    # ------------------------------------------------------------------
+    def plan(self, run_id: str) -> dict[str, Any]:
+        store = self.load(run_id)
+        plan_path = store.run_dir / "plan.json"
+        if not plan_path.exists():
+            raise ManifestError(f"run has no plan: {run_id}")
+        return json.loads(plan_path.read_text(encoding="utf-8"))
+
+    def task_graph(self, run_id: str, *, include_work_orders: bool = False) -> TaskGraph:
+        return TaskGraph.from_plan(
+            self.plan(run_id), include_work_orders=include_work_orders,
+        )
+
+    def schedule(
+        self,
+        run_id: str,
+        *,
+        max_parallel: int = 4,
+        include_work_orders: bool = False,
+        gate: Any | None = None,
+        models: dict[str, str] | None = None,
+        default_model: str | None = None,
+    ) -> dict[str, Any]:
+        """Deterministic dispatch preview for a persisted plan."""
+        graph = self.task_graph(run_id, include_work_orders=include_work_orders)
+        scheduler = Scheduler(
+            graph,
+            max_parallel=max_parallel,
+            gate=gate,
+            models=models,
+            default_model=default_model,
+        )
+        return {
+            "run_id": run_id,
+            "graph": graph.as_dict(),
+            "schedule": scheduler.plan(),
+            "waves": scheduler.waves(),
+        }
+
+    def attempt_history(self, run_id: str) -> AttemptHistory:
+        return AttemptHistory(self.load(run_id).run_dir / "attempts.ndjson")
+
+    def attempts(self, run_id: str, limit: int = 200) -> dict[str, Any]:
+        """F02: attempt history for a run (summary + newest ``limit`` items).
+
+        The journal is optional evidence: a run without one still answers with
+        a stable, zeroed summary so callers never have to special-case it.
+        """
+        history = self.attempt_history(run_id)
+        summary = history.summary()
+        return {
+            "run_id": run_id,
+            "total": int(summary.get("total") or 0),
+            "retries": int(summary.get("retries") or 0),
+            "lost": int(summary.get("lost") or 0),
+            "active": int(summary.get("active") or 0),
+            "by_state": dict(summary.get("by_state") or {}),
+            "tasks": list(summary.get("tasks") or []),
+            "history_path": summary.get("history_path"),
+            "summary": summary,
+            "items": history.as_list(limit=limit),
+        }
+
+    def record_quota_decision(self, run_id: str,
+                              decision: Mapping[str, Any]) -> None:
+        """Persist dispatch-gate evidence without changing run state."""
+        from .quota_gate import normalize_decision
+
+        store = self.load(run_id)
+        store.append_event("quota.decision", normalize_decision(decision))
+
+    def record_quota_snapshot(self, run_id: str,
+                              snapshot: Mapping[str, Any]) -> None:
+        """Persist a normalized ``quota.snapshot`` for the dashboard panel."""
+        store = self.load(run_id)
+        store.append_event("quota.snapshot", dict(snapshot))
+
+    def quota_gate(
+        self,
+        run_id: str,
+        *,
+        snapshot: Mapping[str, Any] | None = None,
+        refresh: bool = False,
+        candidates: Any = (),
+        reserve_pct: float = 15.0,
+        verifier_reserve_pct: float = 10.0,
+        strict: bool | None = None,
+    ) -> Any:
+        """F05: build a dispatch gate bound to this run.
+
+        The gate is offline by default -- dispatch must never block on a live
+        quota fetch.  Pass ``snapshot`` (a cached ``QuotaTracker.snapshot()``)
+        to keep tests and air-gapped machines fully deterministic, or
+        ``refresh=True`` to read the usage API before the first decision.
+        """
+        from . import quota_gate as gate_module
+
+        self.load(run_id)  # fail fast on an unknown run
+        if snapshot is not None:
+            return gate_module.gate_from_snapshot(
+                snapshot,
+                root=self.root,
+                candidates=candidates,
+                reserve_pct=reserve_pct,
+                verifier_reserve_pct=verifier_reserve_pct,
+                strict=strict,
+            )
+        return gate_module.build_gate(
+            self.root,
+            candidates=candidates,
+            reserve_pct=reserve_pct,
+            verifier_reserve_pct=verifier_reserve_pct,
+            strict=strict,
+            refresh=refresh,
+        )
+
+    def cleanup_task_worktrees(self, run_id: str, *,
+                               reason: str = "run cancelled") -> dict[str, Any]:
+        """F01: wipe every tracked per-task worktree (cancel/fail path)."""
+        store = self.load(run_id)
+        return isolation.cleanup_run_worktrees(
+            self.root, run_id, state_root=store.run_dir.parent.parent,
+            reason=reason,
+        )
+
+    def request_confirmation(self, run_id: str, *,
+                             reason: str = "operator decision required") -> dict[str, Any]:
+        store = self.load(run_id)
+        status = str(store.load().get("status") or "")
+        if status == "AWAITING_USER_CONFIRMATION":
+            return store.load()
+        if status == "USER_CONFIRMED":
+            return store.load()
+        return store.transition("request_confirmation", reason=reason)
+
+    def confirm(self, run_id: str, *, answer: str = "") -> dict[str, Any]:
+        store = self.load(run_id)
+        manifest = store.transition("user_confirms")
+        if answer:
+            manifest = store.update(last_decision=answer)
+        return manifest
+
+    def reject(self, run_id: str, *, reason: str = "operator rejected") -> dict[str, Any]:
+        store = self.load(run_id)
+        return store.transition("user_rejects", reason=reason)
+
 
     def checkpoint_phase(
         self,
@@ -444,4 +745,8 @@ class V2Runner:
             except (OSError, json.JSONDecodeError):
                 summary["budget"] = None
         summary["signoff"] = signoff_summary(store)
+        try:
+            summary["attempts"] = self.attempts(run_id, limit=50)["summary"]
+        except Exception:  # noqa: BLE001 - attempt history is optional evidence
+            summary["attempts"] = {}
         return summary

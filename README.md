@@ -32,6 +32,20 @@ swarm merge --run-id <id>
 previously separate v1/v2 entrypoints into one CLI, one orchestrator, one state
 model and one War Room.
 
+### What's New in v3.1.0
+
+- **TaskGraph DAG** with cycle detection, topological ordering, fan-out/fan-in,
+  and deterministic scheduling.
+- **Parallel concurrency scheduler** with bounded workers and fail-fast
+  cascading blocks for downstream tasks.
+- **Quota-aware dispatch gate** with rolling 5-hour/weekly/monthly headroom,
+  verifier reserve buffers, and reassign-or-pause fallbacks.
+- **Decision Inbox** for human-in-the-loop approvals with durable
+  `swarm ask` / `swarm reply` pause-and-resume flow.
+- **Built-in AST Anti-Slop Quality Gate** enforcing zero duplicate functions,
+  no swallowed exceptions, and a 100-line function limit.
+- **65 automated test suites** running green across the engine.
+
 ---
 
 ## Quick Installation
@@ -56,7 +70,7 @@ Verify the installation:
 
 ```bash
 swarm --version
-# swarm 3.0.0
+# swarm 3.1.0
 ```
 
 [PyPI package](https://pypi.org/project/adaptive-swarm-pipeline/) ·

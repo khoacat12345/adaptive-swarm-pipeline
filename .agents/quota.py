@@ -31,6 +31,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -566,6 +567,70 @@ class QuotaTracker:
                 return model, info
         return None, info
 
+    # -- dispatch headroom (F05) -------------------------------------
+    @classmethod
+    def from_snapshot(cls, payload: dict | None, *, root=None,
+                      plan_cap: float | None = None,
+                      cache_ttl: int = 0) -> "QuotaTracker":
+        """Build an offline tracker from a cached snapshot.
+
+        Dispatch tests and air-gapped machines must never hit the network or a
+        live sqlite database.  The snapshot shape is exactly ``snapshot()``.
+        """
+        tracker = cls(root=root, plan_cap=plan_cap, cache_ttl=cache_ttl)
+        data = payload if isinstance(payload, dict) else {}
+        tracker.available = bool(data.get("available"))
+        tracker.error = data.get("error")
+        tracker.usage = {
+            window: {str(model): float(cost) for model, cost in (values or {}).items()}
+            for window, values in (data.get("usage") or {}).items()
+            if isinstance(values, dict)
+        }
+        tracker.spend = dict(data.get("spend") or {})
+        tracker.reset = dict(data.get("reset") or {})
+        tracker.hourly = list(data.get("hourly") or [])
+        tracker.requests = list(data.get("requests") or [])
+        tracker.message_count = int(data.get("message_count") or 0)
+        tracker.meters = dict(data.get("meters") or {})
+        tracker.console = bool(data.get("console"))
+        tracker.console_error = data.get("console_error")
+        tracker.fetched_at = float(data.get("fetched_at") or 0.0)
+        if data.get("plan_cap") is not None:
+            tracker.plan_cap = float(data["plan_cap"])
+        return tracker
+
+    def headroom(self, model: str, *, reserve_pct: float = 15.0) -> dict:
+        """Quota decision for one more dispatch of ``model``.
+
+        ``reserve_pct`` keeps that share of every window free for verification
+        and reviewers.  Free/unknown-capped models are unlimited; a paid model
+        with unknown usage is *not* silently treated as healthy.
+        """
+        return evaluate_headroom(
+            model, self.remaining(model), reserve_pct=reserve_pct,
+        )
+
+    def choose_with_headroom(
+        self,
+        chain: list[str],
+        *,
+        reserve_pct: float = 15.0,
+        refresh: bool = True,
+    ) -> tuple[str | None, dict]:
+        """Pick the first model in ``chain`` with dispatch headroom."""
+        if refresh:
+            self.refresh()
+        info = {
+            model: evaluate_headroom(
+                model, self.remaining(model), reserve_pct=reserve_pct,
+            )
+            for model in chain
+        }
+        for model in chain:
+            if info[model]["ok"]:
+                return model, info
+        return None, info
+
     def snapshot(self) -> dict:
         reset = dict(self.reset)
         for key in ("today", "week", "month"):
@@ -580,6 +645,452 @@ class QuotaTracker:
                 "console": self.console, "console_error": self.console_error,
                 "meters": self.meters,
                 "usage": {window: dict(values) for window, values in self.usage.items()}}
+
+
+    # ------------------------------------------------------------------
+    # F05 normalized snapshot helpers (scheduler / dashboard projection)
+    # ------------------------------------------------------------------
+    def model_snapshot(self, model: str, *, reserve_pct: float = 15.0) -> dict:
+        """Stable per-model view built on ``evaluate_headroom``."""
+        decision = evaluate_headroom(
+            model, self.remaining(model), reserve_pct=reserve_pct,
+        )
+        worst = float(decision.get("worst_pct") or 0.0)
+        return {
+            "model": model,
+            "ok": bool(decision.get("ok")),
+            "unlimited": bool(decision.get("unlimited")),
+            "unknown": bool(decision.get("unknown")),
+            "reason": decision.get("reason") or "",
+            "headroom_pct": round(max(0.0, 100.0 - worst), 1),
+            "worst_pct": round(worst, 1),
+            "reserve_pct": decision.get("reserve_pct", reserve_pct),
+            "wait_seconds": decision.get("wait_seconds", 0),
+            "windows": self.remaining(model).get("windows") or {},
+            "source": "free" if decision.get("unlimited") else
+                      ("unknown" if decision.get("unknown") else "tracker"),
+        }
+
+    def snapshot_models(self, models=None, *, reserve_pct: float = 15.0) -> dict:
+        """``{model: model_snapshot}`` for an explicit chain or every capped model."""
+        names = list(models) if models else list(self.caps)
+        rows = {
+            str(name): self.model_snapshot(str(name), reserve_pct=reserve_pct)
+            for name in names
+        }
+        return {
+            "available": bool(self.available),
+            "error": self.error,
+            "plan_cap": self.plan_cap,
+            "reserve_pct": reserve_pct,
+            "shared": self.shared(),
+            "models": rows,
+        }
+
+    def best(self, models, *, reserve_pct: float = 15.0) -> tuple[str | None, dict]:
+        """Pick the model with the most headroom; free models win ties."""
+        rows = {
+            str(name): self.model_snapshot(str(name), reserve_pct=reserve_pct)
+            for name in models
+        }
+        usable = [(name, row) for name, row in rows.items() if row["ok"]]
+        if not usable:
+            return None, rows
+        usable.sort(
+            key=lambda item: (bool(item[1]["unlimited"]), item[1]["headroom_pct"]),
+            reverse=True,
+        )
+        return usable[0][0], rows
+
+
+def load_tracker(*, root=None, refresh: bool = True, **kwargs) -> QuotaTracker:
+    """Best-effort tracker factory: quota is advisory, never fatal."""
+    tracker = QuotaTracker(root=root, **kwargs)
+    if refresh:
+        try:
+            tracker.refresh()
+        except Exception as exc:  # noqa: BLE001
+            tracker.error = f"refresh failed: {str(exc)[:160]}"
+    return tracker
+
+
+def snapshot(models=None, *, root=None, tracker: QuotaTracker | None = None,
+             refresh: bool = True) -> dict:
+    """Module-level snapshot helper for CLI/scheduler callers."""
+    active = tracker or load_tracker(root=root, refresh=refresh)
+    payload = active.snapshot_models(models)
+    payload["fetched_at"] = active.fetched_at
+    return payload
+
+
+def _clamp_pct(value, default: float = 15.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(0.0, min(95.0, number))
+
+
+def evaluate_headroom(model: str, info: dict | None, *,
+                      reserve_pct: float = 15.0) -> dict:
+    """Pure quota decision used by the dispatch gate.
+
+    ``info`` is a ``QuotaTracker.remaining(model)`` payload.  The function is
+    intentionally total: missing or malformed data fails closed for paid models
+    and stays open for models without a cap.
+    """
+    reserve = _clamp_pct(reserve_pct)
+    data = info if isinstance(info, dict) else {}
+    if data.get("unlimited"):
+        return {
+            "model": str(model), "ok": True, "unlimited": True,
+            "reason": "no monthly cap", "reserve_pct": reserve,
+            "worst_pct": 0.0, "blocked_windows": [], "wait_seconds": 0,
+        }
+    if data.get("unknown") or not data:
+        return {
+            "model": str(model), "ok": False, "unlimited": False,
+            "unknown": True, "reason": "quota usage is unavailable",
+            "reserve_pct": reserve, "worst_pct": 0.0,
+            "blocked_windows": [], "wait_seconds": 0,
+            "shared": data.get("shared") or {},
+        }
+    windows: dict[str, dict] = {}
+    blocked: list[str] = []
+    wait_seconds = 0
+    # A provider that answered 429 (or a caller-recorded cooldown) is exhausted
+    # for this dispatch even when the spend windows still look healthy.  This
+    # keeps the gate honest when rate limits, not budget, are the bottleneck.
+    raw_rate = data.get("rate_limit")
+    rate = raw_rate if isinstance(raw_rate, dict) else {}
+    limited = bool(data.get("rate_limited") or rate.get("limited"))
+    if isinstance(raw_rate, (int, float)) and not isinstance(raw_rate, bool):
+        limited = limited or raw_rate > 0
+    if limited:
+        blocked.append("rate_limit")
+        try:
+            wait_seconds = int(
+                rate.get("wait_seconds") or data.get("retry_after") or 0
+            )
+        except (TypeError, ValueError):
+            wait_seconds = 0
+    for window in ("today", "week", "month"):
+        item = data.get("windows", {}).get(window) or {}
+        if not item:
+            continue
+        limit = float(item.get("limit") or 0.0)
+        used = float(item.get("used") or 0.0)
+        if limit <= 0:
+            continue
+        allowed = limit * (1.0 - reserve / 100.0)
+        remaining = max(0.0, allowed - used)
+        pct = (remaining / allowed * 100.0) if allowed > 0 else 0.0
+        windows[window] = {
+            "used": round(used, 4), "limit": round(limit, 4),
+            "allowed": round(allowed, 4), "remaining": round(remaining, 4),
+            "headroom_pct": round(pct, 1),
+        }
+        if used >= allowed:
+            blocked.append(window)
+    shared = data.get("shared") if isinstance(data.get("shared"), dict) else {}
+    if shared and not shared.get("ok", True):
+        blocked.append("shared")
+        if shared.get("worst_pct") is not None:
+            wait_seconds = 0
+    worst = float(data.get("worst_pct") or 0.0)
+    ok = not blocked and bool(data.get("ok", True))
+    reason = "headroom available" if ok else "quota reserve exhausted: " + (
+        ", ".join(blocked) or "unknown"
+    )
+    return {
+        "model": str(model), "ok": ok, "unlimited": False,
+        "reason": reason, "reserve_pct": reserve,
+        "worst_pct": round(worst, 1), "windows": windows,
+        "blocked_windows": blocked, "wait_seconds": int(wait_seconds),
+        "shared": shared,
+    }
+
+
+def choose_with_headroom(
+    chain: list[str],
+    info: dict,
+    *,
+    reserve_pct: float = 15.0,
+) -> tuple[str | None, dict]:
+    """Pick a dispatchable model from precomputed ``remaining`` payloads."""
+    decisions = {
+        model: evaluate_headroom(
+            model, (info or {}).get(model), reserve_pct=reserve_pct,
+        )
+        for model in chain
+    }
+    for model in chain:
+        if decisions[model]["ok"]:
+            return model, decisions
+    return None, decisions
+
+
+# --------------------------------------------------------------------------
+# Dispatch gate (F05): "may this task start on this model right now?"
+# --------------------------------------------------------------------------
+@dataclass
+class QuotaDecision:
+    """One dispatch decision with redaction-safe evidence."""
+
+    model: str | None = None
+    ok: bool = True
+    action: str = "dispatch"  # dispatch | reassign | pause
+    reason: str = ""
+    wait_seconds: int = 0
+    evidence: dict = None
+
+    def __post_init__(self) -> None:
+        if self.evidence is None:
+            self.evidence = {}
+
+    def as_dict(self) -> dict:
+        return {
+            "model": self.model,
+            "ok": bool(self.ok),
+            "action": self.action,
+            "reason": self.reason,
+            "wait_seconds": int(self.wait_seconds or 0),
+            "evidence": dict(self.evidence or {}),
+        }
+
+
+def _dedupe(values) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+class QuotaGate:
+    """Stateful dispatch gate over a :class:`QuotaTracker`.
+
+    * a model without a monthly cap is always dispatchable;
+    * a paid model must keep ``reserve_pct`` free in every window;
+    * an exhausted model is reassigned along the candidate chain;
+    * when nothing has headroom the task is paused until a window resets.
+
+    The gate never performs a model call and never touches the repository.
+    """
+
+    def __init__(
+        self,
+        tracker: "QuotaTracker | None" = None,
+        *,
+        root=None,
+        reserve_pct: float = 15.0,
+        verifier_reserve_pct: float = 10.0,
+        candidates=(),
+        strict: bool | None = None,
+        refresh: bool = False,
+    ) -> None:
+        self.tracker = tracker
+        self.root = Path(root).resolve() if root else None
+        self.reserve_pct = _clamp_pct(reserve_pct)
+        self.verifier_reserve_pct = _clamp_pct(verifier_reserve_pct)
+        self.candidates = _dedupe(candidates)
+        self.strict = strict
+        self.refresh = bool(refresh)
+        self._refreshed = tracker is not None
+        self.decisions: list[dict] = []
+
+    def _ensure_tracker(self) -> "QuotaTracker":
+        if self.tracker is None:
+            self.tracker = QuotaTracker(root=self.root)
+        if self.refresh and not self._refreshed:
+            try:
+                self.tracker.refresh()
+            except Exception:  # noqa: BLE001 - the gate must never crash a run
+                pass
+            self._refreshed = True
+        return self.tracker
+
+    def _strict(self) -> bool:
+        if self.strict is not None:
+            return bool(self.strict)
+        return str(os.environ.get("SWARM_QUOTA_STRICT", "0")).strip().lower() in {
+            "1", "true", "yes", "on",
+        }
+
+    def decide(
+        self,
+        model: str | None,
+        *,
+        candidates=(),
+        phase_id: str | None = None,
+        task_id: str | None = None,
+        reserve_pct: float | None = None,
+    ) -> QuotaDecision:
+        reserve = _clamp_pct(self.reserve_pct if reserve_pct is None else reserve_pct)
+        base = str(model or "").strip()
+        chain = _dedupe([base, *candidates, *self.candidates])
+        if not chain:
+            return QuotaDecision(
+                model=None, ok=True, action="dispatch",
+                reason="no model binding; quota gate not applicable",
+                evidence={"phase_id": phase_id, "task_id": task_id},
+            )
+
+        tracker = self._ensure_tracker()
+        decisions: dict[str, dict] = {}
+        for candidate in chain:
+            try:
+                info = tracker.remaining(candidate)
+            except Exception as exc:  # noqa: BLE001
+                info = {"model": candidate, "ok": False, "unknown": True,
+                        "error": str(exc)[:200]}
+            decisions[candidate] = evaluate_headroom(
+                candidate, info, reserve_pct=reserve,
+            )
+
+        chosen: str | None = None
+        for candidate in chain:
+            if decisions[candidate].get("ok"):
+                chosen = candidate
+                break
+
+        shared: dict = {}
+        for decision in decisions.values():
+            if decision.get("shared"):
+                shared = decision["shared"]
+                break
+
+        evidence = {
+            "phase_id": phase_id,
+            "task_id": task_id,
+            "requested": base or None,
+            "chain": chain,
+            "reserve_pct": reserve,
+            "verifier_reserve_pct": self.verifier_reserve_pct,
+            "windows": {
+                name: decisions[name].get("windows", {}) for name in chain
+            },
+            "blocked": {
+                name: decisions[name].get("blocked_windows", []) for name in chain
+            },
+            "shared": shared,
+        }
+
+        if chosen is not None:
+            action = "dispatch" if chosen == base else "reassign"
+            decision = QuotaDecision(
+                model=chosen,
+                ok=True,
+                action=action,
+                reason=(
+                    decisions[chosen].get("reason") if action == "dispatch"
+                    else f"reassigned from {base or 'none'} to {chosen}"
+                ),
+                evidence=evidence,
+            )
+            self.decisions.append(decision.as_dict())
+            return decision
+
+        unknown_paid = [
+            name for name in chain if decisions[name].get("unknown")
+        ]
+        if unknown_paid and not self._strict():
+            decision = QuotaDecision(
+                model=base or (chain[0] if chain else None),
+                ok=True,
+                action="dispatch",
+                reason=(
+                    "quota usage unavailable; dispatching in non-strict mode "
+                    "(set SWARM_QUOTA_STRICT=1 to fail closed)"
+                ),
+                evidence={**evidence, "ungated": True, "unknown": unknown_paid},
+            )
+            self.decisions.append(decision.as_dict())
+            return decision
+
+        blocked = sorted({
+            window for name in chain
+            for window in decisions[name].get("blocked_windows", [])
+        })
+        wait = self.wait_seconds_for(chain)
+        decision = QuotaDecision(
+            model=base or (chain[0] if chain else None),
+            ok=False,
+            action="pause",
+            reason=(
+                "quota reserve exhausted"
+                + (f" for: {', '.join(blocked)}" if blocked else "")
+            ),
+            wait_seconds=wait,
+            evidence=evidence,
+        )
+        self.decisions.append(decision.as_dict())
+        return decision
+
+    def wait_seconds_for(self, models) -> int:
+        """Seconds until the earliest quota window reset, if known."""
+        tracker = self._ensure_tracker()
+        try:
+            snapshot = tracker.snapshot()
+        except Exception:  # noqa: BLE001
+            snapshot = {}
+        resets = []
+        for window in ("today", "week", "month"):
+            try:
+                value = int((snapshot.get("reset") or {}).get(window) or 0)
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                resets.append(value)
+        if not resets:
+            return 0
+        now_ms = int(time.time() * 1000)
+        return max(0, int((min(resets) - now_ms) / 1000))
+
+    def snapshot(self) -> dict:
+        tracker = self._ensure_tracker()
+        names = list(self.candidates) or list(getattr(tracker, "caps", {}))
+        try:
+            remaining = {model: tracker.remaining(model) for model in names}
+        except Exception:  # noqa: BLE001
+            remaining = {}
+        try:
+            tracker_snapshot = tracker.snapshot()
+        except Exception:  # noqa: BLE001
+            tracker_snapshot = {}
+        return {
+            "strict": self._strict(),
+            "reserve_pct": self.reserve_pct,
+            "verifier_reserve_pct": self.verifier_reserve_pct,
+            "candidates": list(self.candidates),
+            "tracker": tracker_snapshot,
+            "remaining": remaining,
+            "decisions": list(self.decisions[-50:]),
+        }
+
+    def headroom_table(self, models=None) -> dict[str, dict]:
+        tracker = self._ensure_tracker()
+        names = _dedupe(models or self.candidates or getattr(tracker, "caps", {}))
+        return {
+            model: tracker.headroom(model, reserve_pct=self.reserve_pct)
+            for model in names
+        }
+
+
+def build_gate(
+    root=None,
+    *,
+    tracker: "QuotaTracker | None" = None,
+    candidates=(),
+    reserve_pct: float = 15.0,
+    strict: bool | None = None,
+    refresh: bool = False,
+) -> QuotaGate:
+    return QuotaGate(
+        tracker, root=root, candidates=candidates,
+        reserve_pct=reserve_pct, strict=strict, refresh=refresh,
+    )
 
 
 def _cli(argv=None) -> int:

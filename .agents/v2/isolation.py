@@ -471,3 +471,249 @@ def remove_worktree(workspace: Workspace, *, keep_branch: bool = True) -> None:
         )
     if not keep_branch:
         _git(workspace.main_root, "branch", "-D", workspace.branch, check=False)
+
+
+# ---------------------------------------------------------------------------
+# F01: dedicated worktree per task
+# ---------------------------------------------------------------------------
+TASK_WORKTREE_INDEX = "worktrees.json"
+
+
+@dataclass(frozen=True)
+class TaskWorkspace:
+    """One task worktree plus the bookkeeping needed to wipe it later."""
+
+    run_id: str
+    task_id: str
+    main_root: Path
+    worktree_root: Path
+    path: Path
+    branch: str
+    base_sha: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "mode": "git-worktree",
+            "scope": "task",
+            "run_id": self.run_id,
+            "task_id": self.task_id,
+            "main_root": str(self.main_root),
+            "worktree_root": str(self.worktree_root),
+            "worktree_path": str(self.path),
+            "branch": self.branch,
+            "base_sha": self.base_sha,
+        }
+
+    def to_workspace(self) -> Workspace:
+        return Workspace(
+            run_id=f"{self.run_id}:{self.task_id}",
+            main_root=self.main_root,
+            worktree_root=self.worktree_root,
+            path=self.path,
+            branch=self.branch,
+            base_sha=self.base_sha,
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TaskWorkspace":
+        return cls(
+            run_id=str(data["run_id"]),
+            task_id=str(data["task_id"]),
+            main_root=Path(data["main_root"]).resolve(),
+            worktree_root=Path(data["worktree_root"]).resolve(),
+            path=Path(data["worktree_path"]).resolve(),
+            branch=str(data["branch"]),
+            base_sha=str(data["base_sha"]),
+        )
+
+
+class TaskWorktreeRegistry:
+    """Tracked index of task worktrees so none leaks after a failure."""
+
+    def __init__(self, state_root: str | Path) -> None:
+        self.state_root = Path(state_root)
+        self.path = self.state_root / TASK_WORKTREE_INDEX
+
+    def load(self) -> list[dict[str, Any]]:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            return []
+        rows = payload.get("worktrees") if isinstance(payload, dict) else payload
+        return [item for item in (rows or []) if isinstance(item, dict)]
+
+    def _save(self, rows: list[dict[str, Any]]) -> None:
+        self.state_root.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps({"worktrees": rows}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        os.replace(tmp, self.path)
+
+    def add(self, record: Mapping[str, Any]) -> dict[str, Any]:
+        rows = [
+            item for item in self.load()
+            if not (
+                item.get("task_id") == record.get("task_id")
+                and item.get("run_id") == record.get("run_id")
+            )
+        ]
+        entry = dict(record)
+        entry.setdefault("created_at", utc_now_iso())
+        rows.append(entry)
+        self._save(rows)
+        return entry
+
+    def remove(self, *, run_id: str, task_id: str) -> bool:
+        rows = self.load()
+        kept = [
+            item for item in rows
+            if not (item.get("run_id") == str(run_id) and item.get("task_id") == str(task_id))
+        ]
+        if len(kept) == len(rows):
+            return False
+        self._save(kept)
+        return True
+
+    def records(self, *, run_id: str | None = None) -> list[dict[str, Any]]:
+        rows = self.load()
+        if run_id is None:
+            return rows
+        return [item for item in rows if item.get("run_id") == str(run_id)]
+
+    def summary(self) -> dict[str, Any]:
+        rows = self.load()
+        alive = [item for item in rows if Path(str(item.get("worktree_path") or "")).exists()]
+        return {
+            "tracked": len(rows),
+            "alive": len(alive),
+            "missing": len(rows) - len(alive),
+            "items": rows,
+        }
+
+
+def task_worktree_root(root: str | Path, run_id: str | None = None) -> Path:
+    """``%LOCALAPPDATA%\\AdaptiveSwarm\\worktrees\\tasks[\\<run>]`` (or the POSIX twin)."""
+    main = git_root(root)
+    base = default_worktree_root(main) / "tasks"
+    return (base / safe_component(run_id)).resolve() if run_id else base.resolve()
+
+
+def create_task_worktree(
+    root: str | Path,
+    run_id: str,
+    task_id: str,
+    *,
+    worktree_root: str | Path | None = None,
+    base_sha: str | None = None,
+    branch: str | None = None,
+    state_root: str | Path | None = None,
+    min_free_bytes: int = 256 * 1024 * 1024,
+) -> TaskWorkspace:
+    """Create one isolated worktree for one task and index it."""
+    main = git_root(root)
+    task_root = (
+        Path(worktree_root).expanduser().resolve()
+        if worktree_root is not None
+        else task_worktree_root(main, run_id)
+    )
+    slug = safe_component(f"{run_id}-{task_id}")
+    # Task branches live under swarm/task/ so they never collide with the
+    # run branch ``swarm/<run_id>`` (a git ref cannot be a file and a
+    # directory at the same time).
+    branch_name = branch or (
+        f"{DEFAULT_BRANCH_PREFIX}task/{safe_component(run_id)}/"
+        f"{safe_component(task_id)}"
+    )
+    workspace = create_worktree(
+        main,
+        slug,
+        worktree_root=task_root,
+        base_sha=base_sha,
+        require_clean=False,
+        branch=branch_name,
+        min_free_bytes=min_free_bytes,
+    )
+    task_workspace = TaskWorkspace(
+        run_id=str(run_id),
+        task_id=str(task_id),
+        main_root=workspace.main_root,
+        worktree_root=workspace.worktree_root,
+        path=workspace.path,
+        branch=workspace.branch,
+        base_sha=workspace.base_sha,
+    )
+    if state_root is not None:
+        TaskWorktreeRegistry(state_root).add(task_workspace.as_dict())
+    return task_workspace
+
+
+def cleanup_task_worktree(
+    task_workspace: TaskWorkspace,
+    *,
+    state_root: str | Path | None = None,
+    keep_branch: bool = False,
+    reason: str = "task finished",
+) -> dict[str, Any]:
+    """Wipe a task worktree; never raises for a already-missing tree."""
+    record: dict[str, Any] = {
+        "run_id": task_workspace.run_id,
+        "task_id": task_workspace.task_id,
+        "path": str(task_workspace.path),
+        "branch": task_workspace.branch,
+        "removed": False,
+        "reason": str(reason),
+        "at": utc_now_iso(),
+    }
+    try:
+        remove_worktree(task_workspace.to_workspace(), keep_branch=keep_branch)
+        record["removed"] = True
+    except (IsolationError, OSError) as exc:
+        record["error"] = str(exc)[:400]
+        # A missing directory means the tree is already gone; keep the record clean.
+        if not task_workspace.path.exists():
+            record["removed"] = True
+    if state_root is not None:
+        try:
+            TaskWorktreeRegistry(state_root).remove(
+                run_id=task_workspace.run_id, task_id=task_workspace.task_id,
+            )
+        except OSError:
+            pass
+    return record
+
+
+def cleanup_run_worktrees(
+    root: str | Path,
+    run_id: str,
+    *,
+    state_root: str | Path,
+    keep_branch: bool = False,
+    reason: str = "run cancelled",
+) -> dict[str, Any]:
+    """Remove every tracked task worktree of a run (cancel/fail path)."""
+    registry = TaskWorktreeRegistry(state_root)
+    rows = registry.records(run_id=run_id)
+    results: list[dict[str, Any]] = []
+    for item in rows:
+        try:
+            task_workspace = TaskWorkspace.from_dict(item)
+        except (KeyError, ValueError, TypeError) as exc:
+            results.append({
+                "task_id": item.get("task_id"),
+                "removed": False,
+                "error": f"bad record: {exc}",
+            })
+            registry.remove(run_id=str(run_id), task_id=str(item.get("task_id")))
+            continue
+        results.append(cleanup_task_worktree(
+            task_workspace, state_root=state_root, keep_branch=keep_branch, reason=reason,
+        ))
+    return {
+        "run_id": str(run_id),
+        "tracked": len(rows),
+        "removed": sum(1 for item in results if item.get("removed")),
+        "results": results,
+    }

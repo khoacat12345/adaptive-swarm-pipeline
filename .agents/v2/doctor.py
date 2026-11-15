@@ -103,6 +103,48 @@ def _check_opencode(root: Path) -> list[Check]:
     return [Check("opencode CLI", "ok" if code == 0 else "warn", version or exe)]
 
 
+def _check_runtimes(root: Path) -> list[Check]:
+    """F04: report the agent runtimes the dispatcher can select.
+
+    A missing CLI is a warning, not a hard failure: the pipeline may still run
+    through another registered runtime or an injected test runtime.
+    """
+    try:
+        from .adapters import build_runtime_registry
+
+        registry = build_runtime_registry()
+        health = registry.health()
+        capabilities = registry.capabilities()
+    except Exception as exc:  # noqa: BLE001 - doctor must not crash
+        return [Check("runtimes", "warn", f"runtime registry unavailable: {exc}"[:300])]
+    available = [name for name, row in health.items() if row.get("ok")]
+    rows = [Check(
+        "runtimes",
+        "ok" if available else "warn",
+        f"{len(available)}/{len(health)} ready: {', '.join(available) or 'none'}",
+    )]
+    for name in sorted(health):
+        row = health[name] or {}
+        detail = "ready" if row.get("ok") else "not available"
+        if row.get("executable"):
+            detail += f" ({row['executable']})"
+        caps = capabilities.get(name) or {}
+        if caps:
+            flags = [
+                flag for flag in ("headless", "tools", "reasoning", "messaging")
+                if caps.get(flag)
+            ]
+            if flags:
+                detail += f"; caps: {', '.join(flags)}"
+        if row.get("degraded"):
+            detail += "; degraded"
+        if row.get("error"):
+            detail += f"; {row['error']}"
+        rows.append(Check(f"runtime {name}", "ok" if row.get("ok") else "warn",
+                          detail[:300]))
+    return rows
+
+
 def _check_speckit(root: Path) -> list[Check]:
     spec_dir = root / ".specify"
     if spec_dir.is_dir():
@@ -120,6 +162,7 @@ def collect(root: str | Path = ".") -> list[Check]:
     rows.extend(_check_git(path))
     rows.extend(_check_opencode(path))
     rows.extend(_check_models(path))
+    rows.extend(_check_runtimes(path))
     rows.extend(_check_speckit(path))
     return rows
 

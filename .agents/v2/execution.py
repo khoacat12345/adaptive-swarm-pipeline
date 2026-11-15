@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
 from . import isolation
+from .attempts import ACTIVE, DISPATCHED, VERIFYING, WORKING, AttemptHistory
 from .budget import BudgetConfig, BudgetController
 from .capability_runtime import build_context as build_capability_context
 from .errors import (
@@ -31,7 +32,7 @@ from .errors import (
 )
 
 from .plan import plan_hash
-from .runner import V2Runner
+from .runner import ATTEMPT_LOST_AFTER_SECONDS, V2Runner
 
 TEST_NAME_RE = re.compile(r"(^test_.*\.py$|.*_test\.py$|^conftest\.py$)", re.IGNORECASE)
 SECRET_RE = re.compile(
@@ -339,6 +340,26 @@ def _diff(old: str, new: str, relative: str) -> str:
     )
 
 
+def _quota_evidence(store: Any) -> dict[str, Any]:
+    """Merged quota snapshot/decision recorded by the runner, if any."""
+    try:
+        payload: dict[str, Any] = {}
+        for event in store.read_events():
+            name = str(event.get("event_type") or "")
+            if name not in {"quota.snapshot", "quota.decision", "quota.gate"}:
+                continue
+            data = event.get("data")
+            if not isinstance(data, Mapping):
+                continue
+            payload.update(dict(data))
+            payload["event_type"] = name
+            payload["at"] = event.get("timestamp")
+        return payload
+    except Exception:  # noqa: BLE001 - evidence only
+        pass
+    return {}
+
+
 @dataclass
 class ExecutionResult:
     run_id: str
@@ -352,6 +373,9 @@ class ExecutionResult:
     planner: str = "P2"
     reviewer_roles: tuple[str, ...] = REVIEW_ROLES
     low_risk_opt_in: bool = False
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    graph: dict[str, Any] = field(default_factory=dict)
+    quota: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -366,6 +390,9 @@ class ExecutionResult:
             "requests": self.requests,
             "repairs": self.repairs,
             "handoff": self.handoff,
+            "attempts": self.attempts,
+            "graph": self.graph,
+            "quota": self.quota,
         }
 
 
@@ -377,15 +404,100 @@ class ExecutionEngine:
         max_repair_attempts: int = 3,
         max_no_progress: int = 2,
         verify_timeout: int = 300,
+        retry_policy: RetryPolicy | None = None,
+        quota_gate: Any | None = None,
+        decision_gate: bool = True,
     ):
         self.runner = runner
         self.max_repair_attempts = max(0, int(max_repair_attempts))
         self.max_no_progress = max(1, int(max_no_progress))
         self.verify_timeout = int(verify_timeout)
+        self.retry_policy = retry_policy
+        self.quota_gate = quota_gate
+        self.decision_gate = bool(decision_gate)
 
     # ------------------------------------------------------------------
     # Guards
     # ------------------------------------------------------------------
+
+    def _blocking_decisions(self, store: Any) -> list[dict[str, Any]]:
+        """Open blocking decisions from the run inbox (never raises)."""
+        try:
+            from unified.inbox import DecisionInbox  # local import: no cycle
+
+            inbox = DecisionInbox(store.run_dir, run_id=str(store.run_id))
+            return [item.as_dict() for item in inbox.blocking()]
+        except Exception:  # noqa: BLE001 - the gate must not mask real work
+            return []
+
+    @staticmethod
+    def _resume_from_decision(manifest: Mapping[str, Any]) -> bool:
+        """True when this execute() is continuing a decision-paused run."""
+        return (
+            str(manifest.get("status") or "") == "PHASE_EXECUTING"
+            and bool(manifest.get("paused_for_decision"))
+        )
+
+    def _gate_decisions(
+        self,
+        store: Any,
+        run_id: str,
+        *,
+        phase_id: str = "",
+        work_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """Stop dispatch while a human decision is still pending (F03).
+
+        The run is moved to PAUSED (``resume_state`` keeps the phase the engine
+        was working on), the evidence is journaled, and the caller returns a
+        PAUSED result.  ``V2Runner.resume`` refuses to continue until every
+        blocking decision is resolved.
+        """
+        if not self.decision_gate:
+            return []
+        pending = self._blocking_decisions(store)
+        if not pending:
+            return []
+        ids = [
+            str(item.get("decision_id") or item.get("id") or "")
+            for item in pending
+        ]
+        reason = "blocking decision " + ", ".join(item for item in ids if item)
+        store.append_event("decision.pending", {
+            "run_id": run_id,
+            "phase_id": phase_id,
+            "work_order": work_id,
+            "count": len(pending),
+            "decisions": [
+                {
+                    "decision_id": item.get("decision_id"),
+                    "question": item.get("question"),
+                    "gate": item.get("gate"),
+                    "task_id": item.get("task_id"),
+                    "options": item.get("options") or [],
+                    "default": item.get("default"),
+                }
+                for item in pending
+            ],
+        })
+        self.runner.pause_for_decision(
+            run_id, decision_id=ids[0] if ids else "", reason=reason,
+        )
+        try:
+            from .alerts import notify_event
+
+            notify_event(self.runner.root, "DECISION_PENDING", {
+                "run_id": run_id,
+                "status": "AWAITING_DECISION",
+                "phase_id": phase_id,
+                "reason": reason,
+            })
+        except Exception as exc:  # notification is optional, but never silent
+            store.append_event("decision.notify_error", {
+                "run_id": run_id,
+                "error": f"{type(exc).__name__}: {exc}"[:300],
+            })
+        return pending
 
     def _load(self, run_id: str) -> tuple[Any, dict[str, Any], dict[str, Any], isolation.Workspace]:
         store = self.runner.load(run_id)
@@ -744,6 +856,192 @@ class ExecutionEngine:
         return findings
 
     # ------------------------------------------------------------------
+    # F02/F11 evidence helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _begin_attempt(
+        history: AttemptHistory,
+        task_id: str,
+        attempt: int,
+        seat: ExecutionSeat,
+        family: str,
+        worktree: Path,
+        work_order: Mapping[str, Any],
+        *,
+        run_id: str = "",
+        phase_id: str = "",
+    ) -> Any:
+        """Open a durable attempt (DISPATCHED). Never breaks the run."""
+        try:
+            spec = json.dumps(dict(work_order), sort_keys=True, ensure_ascii=False)
+            return history.start(
+                task_id,
+                run_id=run_id,
+                phase_id=phase_id,
+                worker=seat.role or "coder",
+                model=seat.model,
+                number=attempt,
+                metadata={
+                    "level": int(work_order.get("level", 1) or 1),
+                    "family": family,
+                    "worktree": str(worktree),
+                    "spec_hash": hashlib.sha256(spec.encode("utf-8")).hexdigest()[:16],
+                },
+            )
+        except Exception:  # noqa: BLE001 - evidence is best effort
+            return None
+
+    @staticmethod
+    def _mark_working(history: AttemptHistory, record: Any) -> None:
+        if record is None:
+            return
+        try:
+            if record.state == "DISPATCHED":
+                history.transition(record.attempt_id, WORKING, reason="propose")
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _finish_attempt(
+        history: AttemptHistory,
+        record: Any,
+        *,
+        ok: bool,
+        verified: bool = False,
+        error: Any = None,
+    ) -> None:
+        """Walk the remaining legal hops; never settle from an illegal state."""
+        if record is None:
+            return
+        try:
+            if ok:
+                if record.state == DISPATCHED:
+                    history.transition(record.attempt_id, WORKING, reason="done")
+                if verified and record.state == WORKING:
+                    history.transition(record.attempt_id, VERIFYING, reason="verify")
+                if record.state in ACTIVE:
+                    history.settle(record.attempt_id, reason="verified")
+            elif record.state in ACTIVE:
+                history.fail(
+                    record.attempt_id, reason=str(error or "failed")[:1500],
+                )
+        except Exception:  # noqa: BLE001 - evidence must not break the run
+            pass
+
+    @staticmethod
+    def _record_verify(
+        store: Any,
+        *,
+        phase_id: str,
+        work_id: str,
+        work_order: Mapping[str, Any],
+        verify: Mapping[str, Any],
+    ) -> None:
+        try:
+            exit_code = verify.get("exit_code")
+            store.append_event("task.verify", {
+                "task_id": work_id,
+                "phase_id": phase_id,
+                "command": str(work_order.get("verify_command") or ""),
+                "exit_code": exit_code,
+                "output_tail": str(
+                    verify.get("output_tail") or verify.get("stderr") or ""
+                )[-2000:],
+                "status": "verified" if exit_code == 0 else "failed",
+            })
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _record_reviews(store: Any, *, phase_id: str, work_id: str,
+                        findings: list[ReviewFinding]) -> None:
+        try:
+            store.append_event("task.reviews", {
+                "task_id": work_id,
+                "phase_id": phase_id,
+                "reviews": [dict(finding.__dict__) for finding in findings],
+            })
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ------------------------------------------------------------------
+    # F01: dedicated worktree per task (opt-in via the plan)
+    # ------------------------------------------------------------------
+
+    def _prepare_task_worktree(self, store: Any, run_id: str, phase_id: str,
+                               work_id: str, *, base_sha: str) -> Any:
+        """Create one task worktree; fall back to the run worktree on failure."""
+        try:
+            task_ws = isolation.create_task_worktree(
+                self.runner.root,
+                isolation.safe_component(run_id),
+                isolation.safe_component(f"{phase_id}-{work_id}"),
+                base_sha=base_sha,
+                state_root=store.run_dir.parent.parent,
+            )
+        except Exception as exc:  # noqa: BLE001 - isolation is advisory, not fatal
+            try:
+                store.append_event("task.worktree_failed", {
+                    "run_id": run_id, "phase_id": phase_id, "task_id": work_id,
+                    "error": str(exc)[:400],
+                })
+            except Exception:
+                pass
+            return None
+        try:
+            store.append_event("task.worktree", task_ws.as_dict())
+        except Exception:
+            pass
+        return task_ws
+
+    def _integrate_task_worktree(self, store: Any, run_worktree: Path,
+                                 task_worktree: Path,
+                                 files: Mapping[str, str]) -> None:
+        """Copy the verified task content into the run worktree."""
+        if not files:
+            return
+        import safe_writer  # type: ignore
+
+        pairs = [(relative, run_worktree / relative) for relative in files]
+        tx = safe_writer.Transaction(
+            root=run_worktree, log=False, reason="v2-task-integrate",
+        )
+        try:
+            tx.begin(pairs)
+            for relative, content in files.items():
+                tx.write(relative, str(content), encoding="utf-8")
+            tx.commit()
+        except Exception:
+            if getattr(tx, "state", "") == "open":
+                try:
+                    tx.rollback("task integration failed")
+                except Exception:
+                    pass
+            raise
+        try:
+            store.append_event("task.integrated", {
+                "task_worktree": str(task_worktree),
+                "run_worktree": str(run_worktree),
+                "files": sorted(files),
+            })
+        except Exception:
+            pass
+
+    def _cleanup_task_worktree(self, store: Any, task_ws: Any, *,
+                              verified: bool) -> None:
+        record = isolation.cleanup_task_worktree(
+            task_ws,
+            state_root=store.run_dir.parent.parent,
+            keep_branch=True,
+            reason="task verified" if verified else "task failed",
+        )
+        try:
+            store.append_event("task.worktree_cleaned", record)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
     # Public execution
     # ------------------------------------------------------------------
 
@@ -784,7 +1082,12 @@ class ExecutionEngine:
         low_risk_opt_in: bool = False,
     ) -> ExecutionResult:
         store, plan, _, workspace = self._load(run_id)
-        store.assert_state("PROVISIONING")
+        manifest = store.load()
+        # F03: a run paused by a blocking decision resumes into PHASE_EXECUTING
+        # with ``paused_for_decision`` set; every other entry needs PROVISIONING.
+        resume_from_decision = self._resume_from_decision(manifest)
+        if not resume_from_decision:
+            store.assert_state("PROVISIONING")
         import approval_policy
         try:
             self.runner.assert_usage(run_id)
@@ -830,11 +1133,105 @@ class ExecutionEngine:
             pass
 
         budget = self._budget(store, plan)
+        # F05: consult the dispatch gate before any model call.  The gate is
+        # optional so existing runs keep their exact behavior.
+        if self.quota_gate is not None:
+            from .quota_gate import normalize_decision, snapshot_evidence
+
+            headroom = snapshot_evidence(self.quota_gate, [coder.model])
+            decision = self.quota_gate.decide(
+                coder.model, task_id="run", phase_id="",
+            )
+            payload = normalize_decision(decision)
+            try:
+                # Headroom first, then the outcome: the projection merges both
+                # and the decision (latest) wins, so the panel keeps the pause
+                # reason while still knowing how much buffer was left.
+                if headroom.get("available"):
+                    store.append_event("quota.snapshot", headroom)
+                store.append_event("quota.decision", payload)
+            except Exception:  # noqa: BLE001
+                pass
+            if not payload.get("ok", True) or payload.get("action") == "pause":
+                reason = str(payload.get("reason") or "quota exhausted")
+                try:
+                    store.transition("rate_limit", reason=reason)
+                except Exception:  # noqa: BLE001
+                    pass
+                raise ExecutionError(f"quota gate paused dispatch: {reason}")
         test_hashes = self._snapshot_tests(workspace.path, plan)
         phases = topo_phases(plan)
         if not phases:
             raise ExecutionError("plan has no phases")
-        store.transition("worktree_ready")
+        # F02: durable attempt history under the run directory. Any attempt the
+        # previous process left active is swept to LOST here, based on heartbeat
+        # age, so a retry is never mistaken for a first attempt.
+        attempt_history = AttemptHistory(store.run_dir)
+        try:
+            stale = attempt_history.mark_lost(
+                timeout_seconds=ATTEMPT_LOST_AFTER_SECONDS,
+            )
+            if stale:
+                store.append_event("attempts.lost", {
+                    "run_id": run_id,
+                    "reason": "heartbeat timeout",
+                    "attempts": [
+                        {
+                            "attempt_id": item.attempt_id,
+                            "task_id": item.task_id,
+                            "state": item.state,
+                            "heartbeat_at": item.heartbeat_at,
+                        }
+                        for item in stale
+                    ],
+                })
+        except Exception:  # noqa: BLE001 - evidence must not block work
+            pass
+        # F01: validate/project the task graph once, before any work starts.
+        from .taskgraph import TaskGraph, TaskGraphError
+
+        graph_problems: list[str] = []
+        task_graph: Any = None
+        try:
+            task_graph = TaskGraph.from_plan(plan, include_work_orders=True)
+        except TaskGraphError as exc:
+            graph_problems = [str(exc)]
+        except Exception as exc:  # noqa: BLE001 - projection must not block work
+            graph_problems = [f"{type(exc).__name__}: {exc}"]
+        if task_graph is not None:
+            try:
+                graph_view = task_graph.as_dict()
+                store.append_event("taskgraph.validated", {
+                    "run_id": run_id,
+                    "size": graph_view.get("size"),
+                    "waves": graph_view.get("waves"),
+                    "problems": graph_problems,
+                })
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            try:
+                store.append_event("taskgraph.invalid", {
+                    "run_id": run_id, "problems": graph_problems,
+                })
+            except Exception:  # noqa: BLE001
+                pass
+        if resume_from_decision:
+            # The human answered; clear the marker and continue from the first
+            # phase that has no checkpoint yet.
+            store.update(paused_for_decision=False, pending_decision=None)
+            try:
+                store.append_event("decision.resumed", {
+                    "run_id": run_id,
+                    "committed_phases": [
+                        str(phase["id"]) for phase in phases
+                        if store.checkpoint_for(str(phase["id"]))
+                    ],
+                })
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            store.transition("worktree_ready")
         phase_results: list[dict[str, Any]] = []
         checkpoints: list[dict[str, Any]] = []
         requests = 0
@@ -848,12 +1245,58 @@ class ExecutionEngine:
             role: reviewers[role] for role in required_roles if role in reviewers
         }
 
+        def paused_result(
+            pending: list[dict[str, Any]],
+            phase_result: dict[str, Any] | None = None,
+        ) -> ExecutionResult:
+            """Return a PAUSED result instead of pretending the run failed."""
+            if phase_result is not None:
+                phase_result["status"] = "paused"
+                if phase_result not in phase_results:
+                    phase_results.append(phase_result)
+            return ExecutionResult(
+                run_id=run_id,
+                status="PAUSED",
+                phases=phase_results,
+                checkpoints=checkpoints,
+                requests=requests,
+                repairs=repairs,
+                handoff=None,
+                tier=profile.tier,
+                planner=profile.planner,
+                reviewer_roles=profile.reviewer_roles,
+                low_risk_opt_in=bool(
+                    low_risk_opt_in or plan.get("low_risk_opt_in") is True
+                ),
+                attempts=attempt_history.as_list(),
+                graph={
+                    "available": task_graph is not None,
+                    "problems": graph_problems,
+                    "pending_decisions": [
+                        item.get("decision_id") for item in pending
+                    ],
+                },
+                quota=_quota_evidence(store),
+            )
+
+        # A decision recorded before the first dispatch pauses the run at once.
+        pending = self._gate_decisions(store, run_id)
+        if pending:
+            return paused_result(pending)
+
         for phase_index, phase in enumerate(phases):
             phase_id = str(phase["id"])
+            if resume_from_decision and store.checkpoint_for(phase_id):
+                continue
             store.update(current_phase=phase_id)
             phase_result = {"phase_id": phase_id, "work_orders": [], "status": "running"}
             for work_order in phase.get("work_orders") or []:
                 work_id = str(work_order.get("id") or "work")
+                pending = self._gate_decisions(
+                    store, run_id, phase_id=phase_id, work_id=work_id,
+                )
+                if pending:
+                    return paused_result(pending, phase_result)
                 capability = build_capability_context(
                     self.runner.root,
                     workspace.path,
@@ -878,17 +1321,73 @@ class ExecutionEngine:
                     pass
                 feedback: str | None = None
                 verified = False
-                for attempt in range(0, self.max_repair_attempts + 1):
+                last_attempt_record: Any = None
+                # F01: opt-in dedicated worktree per task.
+                environment = plan.get("environment")
+                environment = environment if isinstance(environment, Mapping) else {}
+                task_isolation = bool(
+                    plan.get("task_isolation")
+                    or str(plan.get("isolation") or "") == "per-task"
+                    or environment.get("task_worktrees")
+                )
+                task_ws = (
+                    self._prepare_task_worktree(
+                        store, run_id, phase_id, work_id,
+                        base_sha=workspace.base_sha,
+                    )
+                    if task_isolation else None
+                )
+                exec_root = task_ws.path if task_ws is not None else workspace.path
+                attempt_limit = self.max_repair_attempts
+                if self.retry_policy is not None:
+                    attempt_limit = min(
+                        attempt_limit,
+                        max(0, int(self.retry_policy.max_attempts) - 1),
+                    )
+                for attempt in range(0, attempt_limit + 1):
                     is_repair = attempt > 0
+                    pending = self._gate_decisions(
+                        store, run_id, phase_id=phase_id, work_id=work_id,
+                    )
+                    if pending:
+                        if task_ws is not None:
+                            self._cleanup_task_worktree(
+                                store, task_ws, verified=False,
+                            )
+                            task_ws = None
+                        return paused_result(pending, phase_result)
                     tx = None
+                    attempt_record = self._begin_attempt(
+                        attempt_history, work_id, attempt + 1, coder, coder_family,
+                        workspace.path, work_order, run_id=run_id, phase_id=phase_id,
+                    )
+                    if attempt_record is not None:
+                        last_attempt_record = attempt_record
+                        if attempt > 0 and self.retry_policy is not None:
+                            escalate_to = self.retry_policy.escalated_model(
+                                coder.model, attempt + 1,
+                            )
+                            if escalate_to:
+                                attempt_record.metadata["escalate_to"] = escalate_to
+                                try:
+                                    store.append_event("attempt.escalation", {
+                                        "task_id": work_id,
+                                        "phase_id": phase_id,
+                                        "attempt": attempt + 1,
+                                        "from_model": coder.model,
+                                        "to_model": escalate_to,
+                                    })
+                                except Exception:  # noqa: BLE001
+                                    pass
                     try:
+                        self._mark_working(attempt_history, attempt_record)
                         files = self._call(
                             budget,
                             phase_id,
                             coder,
                             lambda wo=work_order, attempt=attempt, feedback=feedback: coder.backend.propose(
                                 wo,
-                                cwd=workspace.path,
+                                cwd=exec_root,
                                 round_index=attempt + 1,
                                 feedback=feedback,
                             ),
@@ -902,13 +1401,22 @@ class ExecutionEngine:
                             raise ExecutionError(f"coder returned no files for {work_id}")
                         files = {str(k): str(v) for k, v in files.items()}
                         tx, verify, diff, files = self._apply(
-                            workspace.path, work_order, files, test_hashes
+                            exec_root, work_order, files, test_hashes
+                        )
+                        self._record_verify(
+                            store, phase_id=phase_id, work_id=work_id,
+                            work_order=work_order, verify=verify,
                         )
                         signature = (
                             work_id,
                             f"{verify.get('exit_code')}:{str(verify.get('output_tail') or verify.get('stderr') or '')[:200]}",
                         )
                         if tx is None:
+                            self._finish_attempt(
+                                attempt_history, attempt_record, ok=False,
+                                verified=True,
+                                error=f"verify failed: {signature[1]}",
+                            )
                             self._record_lesson(
                                 kind="verify_failure", error=signature[1],
                                 work_order=work_order, phase_id=phase_id,
@@ -950,6 +1458,16 @@ class ExecutionEngine:
                         tx.commit()
                         tx = None
                         verified = True
+                        if task_ws is not None:
+                            self._integrate_task_worktree(
+                                store, workspace.path, task_ws.path, files,
+                            )
+                        self._record_reviews(
+                            store, phase_id=phase_id, work_id=work_id, findings=findings,
+                        )
+                        self._finish_attempt(
+                            attempt_history, attempt_record, ok=True, verified=True,
+                        )
                         phase_result["work_orders"].append(
                             {
                                 "id": work_id,
@@ -960,6 +1478,14 @@ class ExecutionEngine:
                         )
                         break
                     except ReviewerUnavailable as exc:
+                        self._finish_attempt(
+                            attempt_history, attempt_record, ok=False, error=exc,
+                        )
+                        if task_ws is not None:
+                            self._cleanup_task_worktree(
+                                store, task_ws, verified=False,
+                            )
+                            task_ws = None
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("reviewer unavailable")
@@ -981,6 +1507,9 @@ class ExecutionEngine:
                             pass
                         raise
                     except (SecurityVeto, TestIntegrityError, CrossFamilyError, NoProgressError) as exc:
+                        self._finish_attempt(
+                            attempt_history, attempt_record, ok=False, error=exc,
+                        )
                         self._record_lesson(
                             kind=exc.code, error=str(exc),
                             work_order=work_order, phase_id=phase_id,
@@ -991,6 +1520,11 @@ class ExecutionEngine:
                             except Exception:
                                 pass
                         reason = exc.code
+                        if task_ws is not None:
+                            self._cleanup_task_worktree(
+                                store, task_ws, verified=False,
+                            )
+                            task_ws = None
                         try:
                             self.runner.quarantine_phase(
                                 run_id,
@@ -1003,6 +1537,14 @@ class ExecutionEngine:
                             pass
                         raise
                     except BudgetError as exc:
+                        self._finish_attempt(
+                            attempt_history, attempt_record, ok=False, error=exc,
+                        )
+                        if task_ws is not None:
+                            self._cleanup_task_worktree(
+                                store, task_ws, verified=False,
+                            )
+                            task_ws = None
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("M3 budget stop")
@@ -1020,6 +1562,9 @@ class ExecutionEngine:
                             pass
                         raise
                     except ExecutionError as exc:
+                        self._finish_attempt(
+                            attempt_history, attempt_record, ok=False, error=exc,
+                        )
                         self._record_lesson(
                             kind="review_reject", error=str(exc),
                             work_order=work_order, phase_id=phase_id,
@@ -1036,6 +1581,9 @@ class ExecutionEngine:
                         )
                         continue
                     except Exception as exc:
+                        self._finish_attempt(
+                            attempt_history, attempt_record, ok=False, error=exc,
+                        )
                         if tx is not None and getattr(tx, "state", "") == "open":
                             try:
                                 tx.rollback("M3 apply failed")
@@ -1047,6 +1595,9 @@ class ExecutionEngine:
                              "error": str(exc)[:300]}
                         )
                         continue
+                if task_ws is not None:
+                    self._cleanup_task_worktree(store, task_ws, verified=verified)
+                    task_ws = None
                 if not verified:
                     phase_result["status"] = "failed"
                     phase_results.append(phase_result)
@@ -1057,6 +1608,8 @@ class ExecutionEngine:
                         verify={"phase": phase_id, "work_order": work_id},
                     )
                     raise ExecutionError(f"phase {phase_id} failed at {work_id}")
+                if task_ws is not None:
+                    self._cleanup_task_worktree(store, task_ws, verified=verified)
 
             store.transition("verify_start")
             checkpoint = self.runner.checkpoint_phase(run_id, phase_id)
@@ -1078,6 +1631,29 @@ class ExecutionEngine:
             })
         except Exception:
             pass
+        attempt_summary = attempt_history.summary()
+        store.append_event("attempts.summary", attempt_summary)
+        graph_payload: dict[str, Any] = {
+            "available": False, "problems": graph_problems, "states": {},
+        }
+        if task_graph is not None:
+            states: dict[str, str] = {}
+            attempts_by_node: dict[str, int] = {}
+            for item in phase_results:
+                phase_id = str(item.get("phase_id") or "")
+                for order in item.get("work_orders") or []:
+                    node_id = f"{phase_id}/{order.get('id')}"
+                    states[node_id] = (
+                        "done" if order.get("status") == "verified" else "failed"
+                    )
+                    attempts_by_node[node_id] = int(order.get("attempt") or 0)
+            graph_payload = task_graph.as_dict()
+            graph_payload.update({
+                "available": True,
+                "problems": graph_problems,
+                "states": states,
+                "attempts": attempts_by_node,
+            })
         return ExecutionResult(
             run_id=run_id,
             status=store.load().get("status") or "HANDOFF_READY",
@@ -1092,4 +1668,7 @@ class ExecutionEngine:
             low_risk_opt_in=bool(
                 low_risk_opt_in or plan.get("low_risk_opt_in") is True
             ),
+            attempts=attempt_history.as_list(),
+            graph=graph_payload,
+            quota=_quota_evidence(store),
         )

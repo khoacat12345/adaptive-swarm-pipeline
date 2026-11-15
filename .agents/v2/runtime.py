@@ -9,7 +9,7 @@ wrapped behind it without changing worktree, budget or verify semantics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
 
 from .errors import ExecutionError
 
@@ -23,6 +23,11 @@ class RuntimeCapabilities:
     write_mode: str = "patch"  # patch | workspace
     streaming: bool = False
     custom_base_url: bool = False
+    reasoning: bool = True
+    messaging: bool = True
+    cancel: bool = True
+    sandbox: bool = True
+    max_parallel: int = 1
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +38,11 @@ class RuntimeCapabilities:
             "write_mode": self.write_mode,
             "streaming": self.streaming,
             "custom_base_url": self.custom_base_url,
+            "reasoning": self.reasoning,
+            "messaging": self.messaging,
+            "cancel": self.cancel,
+            "sandbox": self.sandbox,
+            "max_parallel": self.max_parallel,
         }
 
 
@@ -59,12 +69,38 @@ class RuntimeResult:
 
 @runtime_checkable
 class AgentRuntime(Protocol):
+    """Full runtime contract.
+
+    F04 makes the task lifecycle (``start_task`` / ``send_message`` / ``wait``
+    / ``cancel``) part of the boundary so the engine can drive any agent CLI.
+    ``execute`` remains for the older batch adapters.
+    """
+
     name: str
 
     def capabilities(self) -> RuntimeCapabilities:
         ...
 
     def health(self) -> dict[str, Any]:
+        ...
+
+    def start_task(
+        self,
+        task: Mapping[str, Any],
+        *,
+        worktree: Any = None,
+        model: str = "",
+        tier: str = "E3",
+    ) -> str:
+        ...
+
+    def send_message(self, handle: str, message: str) -> dict[str, Any]:
+        ...
+
+    def wait(self, handle: str, *, timeout: float | None = None) -> RuntimeResult:
+        ...
+
+    def cancel(self, handle: str, *, reason: str = "") -> dict[str, Any]:
         ...
 
     def execute(
@@ -75,6 +111,43 @@ class AgentRuntime(Protocol):
         budget: Any,
         feedback: str | None = None,
     ) -> RuntimeResult:
+        ...
+
+
+@runtime_checkable
+class TaskRuntime(Protocol):
+    """Agent-agnostic task protocol (F04).
+
+    A runtime owns a *handle* for one task; the orchestrator can message it,
+    wait for the result and cancel it without knowing which CLI is underneath.
+    ``execute`` stays available for the older batch adapters.
+    """
+
+    name: str
+
+    def capabilities(self) -> RuntimeCapabilities:
+        ...
+
+    def health(self) -> dict[str, Any]:
+        ...
+
+    def start_task(
+        self,
+        task: Mapping[str, Any],
+        *,
+        worktree: Any = None,
+        model: str = "",
+        tier: str = "E3",
+    ) -> str:
+        ...
+
+    def send_message(self, handle: str, message: str) -> dict[str, Any]:
+        ...
+
+    def wait(self, handle: str, *, timeout: float | None = None) -> RuntimeResult:
+        ...
+
+    def cancel(self, handle: str, *, reason: str = "") -> dict[str, Any]:
         ...
 
 
@@ -91,6 +164,19 @@ class ClaudeCodeRuntimeStub:
 
     def health(self) -> dict[str, Any]:
         return {"ok": False, "stub": True, "reason": "adapter not implemented"}
+
+    def start_task(self, task: Mapping[str, Any], *, worktree: Any = None,
+                   model: str = "", tier: str = "E3") -> str:
+        raise ExecutionError("claude-code runtime adapter is a stub")
+
+    def send_message(self, handle: str, message: str) -> dict[str, Any]:
+        raise ExecutionError("claude-code runtime adapter is a stub")
+
+    def wait(self, handle: str, *, timeout: float | None = None) -> RuntimeResult:
+        raise ExecutionError("claude-code runtime adapter is a stub")
+
+    def cancel(self, handle: str, *, reason: str = "") -> dict[str, Any]:
+        raise ExecutionError("claude-code runtime adapter is a stub")
 
     def execute(self, work_order: Mapping[str, Any], *, worktree: Any,
                 budget: Any, feedback: str | None = None) -> RuntimeResult:
@@ -125,3 +211,45 @@ class RuntimeRegistry:
             name: runtime.capabilities().as_dict()
             for name, runtime in self._runtimes.items()
         }
+
+    def register_many(self, runtimes: Iterable[AgentRuntime]) -> None:
+        for runtime in runtimes:
+            self.register(runtime)
+
+    def find(self, name: str) -> AgentRuntime | None:
+        return self._runtimes.get(str(name))
+
+    def requiring(
+        self,
+        *,
+        reasoning: bool | None = None,
+        tools: bool | None = None,
+        headless: bool | None = None,
+        messaging: bool | None = None,
+    ) -> list[AgentRuntime]:
+        """Runtimes that satisfy every requested capability."""
+        wanted = {
+            "reasoning": reasoning,
+            "tools": tools,
+            "headless": headless,
+            "messaging": messaging,
+        }
+        result = []
+        for name in sorted(self._runtimes):
+            runtime = self._runtimes[name]
+            caps = runtime.capabilities()
+            if all(
+                value is None or bool(getattr(caps, key, False)) is bool(value)
+                for key, value in wanted.items()
+            ):
+                result.append(runtime)
+        return result
+
+    def health(self) -> dict[str, dict[str, Any]]:
+        rows: dict[str, dict[str, Any]] = {}
+        for name, runtime in sorted(self._runtimes.items()):
+            try:
+                rows[name] = dict(runtime.health())
+            except Exception as exc:  # noqa: BLE001 - a health probe never raises
+                rows[name] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
+        return rows

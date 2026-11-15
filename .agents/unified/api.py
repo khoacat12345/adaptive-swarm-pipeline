@@ -16,10 +16,15 @@ Routes::
     GET  /api/unified/runs/<id>
     GET  /api/unified/runs/<id>/events
     GET  /api/unified/runs/<id>/diff
+    GET  /api/unified/runs/<id>/report        (JSON, ?format=md for Markdown)
+    GET  /api/unified/runs/<id>/inbox
     POST /api/unified/usage/approve
     POST /api/unified/merge
     POST /api/unified/rollback
     POST /api/unified/control
+    POST /api/unified/inbox/ask
+    POST /api/unified/inbox/reply
+    POST /api/unified/runs/<id>/inbox/<decision_id>/reply
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ if str(AGENTS_DIR) not in sys.path:
     sys.path.insert(0, str(AGENTS_DIR))
 
 from unified import state as unified_state  # noqa: E402
+from unified.inbox import InboxError, MessageNotFound  # noqa: E402
 from unified.state import (  # noqa: E402
     MAX_DIFF_BYTES,
     MAX_EVENT_LIMIT,
@@ -54,12 +60,18 @@ GET_ROUTES = (
     "/api/unified/runs/<id>",
     "/api/unified/runs/<id>/events",
     "/api/unified/runs/<id>/diff",
+    "/api/unified/runs/<id>/report",
+    "/api/unified/runs/<id>/report.md",
+    "/api/unified/runs/<id>/inbox",
 )
 POST_ROUTES = (
     "/api/unified/usage/approve",
     "/api/unified/merge",
     "/api/unified/rollback",
     "/api/unified/control",
+    "/api/unified/inbox/ask",
+    "/api/unified/inbox/reply",
+    "/api/unified/runs/<id>/inbox/<decision_id>/reply",
 )
 
 
@@ -109,6 +121,10 @@ def run_detail(root: str | Path, run_id: str, *,
     )
     detail["can_control"] = _capabilities(root, run_id, state_root=state_root)
     detail["cap_diff_bytes"] = MAX_DIFF_BYTES
+    inbox = detail.get("inbox") if isinstance(detail.get("inbox"), Mapping) else {}
+    detail["needs_attention"] = bool(inbox.get("needs_attention")) or str(
+        detail.get("status") or ""
+    ) in {"BLOCKED", "AWAITING_USER_CONFIRMATION", "PAUSED"}
     return redact(detail)
 
 
@@ -132,6 +148,105 @@ def run_diff(root: str | Path, run_id: str, *,
     ))
 
 
+def run_report(root: str | Path, run_id: str, *,
+               state_root: str | Path | None = None,
+               include_v1: bool = False) -> dict[str, Any]:
+    """F11: full completion report as JSON."""
+    from unified import report as unified_report
+
+    return unified_report.build_report(
+        root, run_id, state_root=state_root, include_v1=include_v1,
+    )
+
+
+def run_report_markdown(root: str | Path, run_id: str, *,
+                        state_root: str | Path | None = None,
+                        include_v1: bool = False) -> dict[str, Any]:
+    """F11: Markdown rendering for the ``Download Markdown`` button."""
+    from unified import report as unified_report
+
+    payload = unified_report.build_report(
+        root, run_id, state_root=state_root, include_v1=include_v1,
+    )
+    return {
+        "run_id": payload.get("run_id") or str(run_id),
+        "filename": f"run-report-{run_id}.md",
+        "markdown": unified_report.render_markdown(payload),
+        "status": payload.get("status"),
+        "available": True,
+    }
+
+
+def run_inbox(root: str | Path, run_id: str, *,
+              state_root: str | Path | None = None) -> dict[str, Any]:
+    """F03: pending decisions for one run (stable projection shape)."""
+    from unified.inbox import inbox_for_run
+
+    run_dir = inbox_for_run(root, run_id, state_root=state_root).run_dir
+    return redact(unified_state._inbox_projection(run_dir, str(run_id)))
+
+
+def ask_decision(root: str | Path, run_id: str, question: str, *,
+                 state_root: str | Path | None = None,
+                 gate: str | None = None,
+                 blocking: bool = True,
+                 task_id: str | None = None,
+                 options: Any = (),
+                 default: str | None = None,
+                 author: str = "worker") -> dict[str, Any]:
+    """Record a worker question; a blocking question pauses the run."""
+    from unified.inbox import inbox_for_run
+
+    inbox = inbox_for_run(root, run_id, state_root=state_root)
+    message = inbox.ask(
+        question, blocking=blocking, gate=gate, task_id=task_id, author=author,
+        options=options, default=default,
+    )
+    _append_decision_event(root, run_id, state_root, message)
+    paused = _pause_for_blocking(root, run_id, state_root, message)
+    if message.blocks_run:
+        _notify(root, "DECISION_PENDING", {
+            "run_id": run_id,
+            "status": "AWAITING_DECISION",
+            "reason": f"{message.decision_id} ({message.gate or message.kind}): "
+                      f"{message.question[:160]}",
+        })
+    return redact({
+        "ok": True,
+        "decision_id": message.decision_id,
+        "message": message.as_dict(),
+        "paused": paused,
+    })
+
+
+def reply_decision(root: str | Path, decision_id: str, answer: str, *,
+                   run_id: str | None = None,
+                   state_root: str | Path | None = None,
+                   answered_by: str = "dashboard-user") -> dict[str, Any]:
+    """Answer a decision and resume the run once no blocking gate remains."""
+    from unified.inbox import find_message, inbox_for_run
+
+    if run_id:
+        inbox = inbox_for_run(root, run_id, state_root=state_root)
+        inbox.get(decision_id)
+    else:
+        inbox, _message = find_message(root, decision_id, state_root=state_root)
+    resolved = inbox.resolve(decision_id, answer, answered_by=answered_by)
+    _append_decision_event(root, resolved.run_id, state_root, resolved)
+    resumed = _resume_if_unblocked(root, resolved.run_id, state_root, inbox)
+    _notify(root, "DECISION_ANSWERED", {
+        "run_id": resolved.run_id,
+        "status": "ANSWERED",
+        "reason": f"{resolved.decision_id} answered by {resolved.answered_by}",
+    })
+    return redact({
+        "ok": True,
+        "decision_id": resolved.decision_id,
+        "message": resolved.as_dict(),
+        "resumed": resumed,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Write endpoints
 # ---------------------------------------------------------------------------
@@ -146,6 +261,89 @@ def _locked(root: str | Path):
     import run_lock
 
     return run_lock.RepoLock(root, owner="dashboard").acquire()
+
+
+# ---------------------------------------------------------------------------
+# F03 decision inbox helpers (shared by CLI + API)
+# ---------------------------------------------------------------------------
+def _notify(root: str | Path, event: str, payload: Mapping[str, Any]) -> None:
+    """One-way operator notification; never raises and never blocks the call."""
+    try:
+        from v2.alerts import notify_event
+
+        notify_event(root, event, dict(payload))
+    except Exception:  # noqa: BLE001 - notifications are strictly optional
+        pass
+
+
+def _append_decision_event(root: str | Path, run_id: str,
+                           state_root: str | Path | None,
+                           message: Any) -> None:
+    try:
+        store = _runner(root, state_root).load(str(run_id))
+        if message.status in {"resolved", "answered"}:
+            suffix = "answer"
+        elif message.status == "expired":
+            suffix = "expired"
+        elif message.status == "cancelled":
+            suffix = "cancelled"
+        else:
+            suffix = message.kind
+        store.append_event(f"decision.{suffix}", {
+            "decision_id": message.decision_id,
+            "message_id": message.id,
+            "question": message.question,
+            "status": message.status,
+            "blocking": message.blocking,
+            "gate": message.gate,
+            "options": list(message.options),
+            "default": message.default,
+            "answer": message.answer,
+            "answered_by": message.answered_by,
+            "answered_at": message.answered_at,
+            "task_id": message.task_id,
+        })
+    except Exception:  # noqa: BLE001 - the inbox journal is authoritative
+        pass
+
+
+def _pause_for_blocking(root: str | Path, run_id: str,
+                        state_root: str | Path | None,
+                        message: Any) -> bool:
+    """Pause an active run while a blocking decision waits for a human."""
+    if not getattr(message, "blocks_run", False):
+        return False
+    try:
+        runner = _runner(root, state_root)
+        status = str(runner.load(str(run_id)).load().get("status") or "")
+        if status in {"PROVISIONING", "PHASE_EXECUTING", "PHASE_VERIFYING",
+                      "PLANNING"}:
+            runner.pause(
+                str(run_id),
+                reason=f"blocking decision {message.decision_id} "
+                       f"(awaiting a human answer)",
+            )
+            return True
+    except Exception:  # noqa: BLE001 - pausing is best effort
+        pass
+    return False
+
+
+def _resume_if_unblocked(root: str | Path, run_id: str,
+                         state_root: str | Path | None,
+                         inbox: Any) -> bool:
+    """Resume a PAUSED run once no blocking decision remains open."""
+    try:
+        if inbox.needs_attention():
+            return False
+        runner = _runner(root, state_root)
+        status = str(runner.load(str(run_id)).load().get("status") or "")
+        if status == "PAUSED":
+            runner.resume(str(run_id))
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
 
 
 def approve_usage(root: str | Path, run_id: str, token: str = "",
@@ -318,6 +516,18 @@ def handle_get(root: str | Path, route: str,
                 return 200, redact(unified_state.blackboard(
                     root, run_id, state_root=state_root,
                 ))
+            if suffix in {"report", "report.md"}:
+                if suffix == "report.md" or _one(query, "format").lower() in {"md", "markdown"}:
+                    return 200, run_report_markdown(
+                        root, run_id, state_root=state_root,
+                        include_v1=_flag(query, "include_v1", False),
+                    )
+                return 200, run_report(
+                    root, run_id, state_root=state_root,
+                    include_v1=_flag(query, "include_v1", False),
+                )
+            if suffix == "inbox":
+                return 200, run_inbox(root, run_id, state_root=state_root)
         return 404, {"error": "not found"}
     except FileNotFoundError as exc:
         return 404, {"error": redact_text(exc)}
@@ -361,10 +571,54 @@ def handle_post(root: str | Path, route: str,
                 str(payload.get("action") or ""),
                 state_root=state_root,
             )
+        if route == "/api/unified/inbox/reply":
+            target_run = str(payload.get("run_id") or "")
+            if target_run:
+                _assert_token(root, target_run, token, state_root)
+            return 200, reply_decision(
+                root,
+                str(payload.get("decision_id") or payload.get("message_id")
+                    or payload.get("id") or ""),
+                str(payload.get("answer") or ""),
+                run_id=str(payload.get("run_id") or "") or None,
+                state_root=state_root,
+                answered_by=str(payload.get("answered_by") or "dashboard-user"),
+            )
+        if route == "/api/unified/inbox/ask":
+            return 200, ask_decision(
+                root, run_id,
+                str(payload.get("question") or ""),
+                state_root=state_root,
+                gate=payload.get("gate") or None,
+                blocking=bool(payload.get("blocking", True)),
+                task_id=payload.get("task_id") or None,
+                options=payload.get("options") or (),
+                default=payload.get("default"),
+                author=str(payload.get("author") or "worker"),
+            )
+        # F03: run-scoped reply.  The decision id is part of the path, so the
+        # same route works from a bookmark or a shell ``curl``.
+        prefix = "/api/unified/runs/"
+        if route.startswith(prefix) and route.endswith("/reply"):
+            parts = route[len(prefix):].strip("/").split("/")
+            if len(parts) == 4 and parts[1] == "inbox" and parts[3] == "reply":
+                return 200, reply_decision(
+                    root, parts[2], str(payload.get("answer") or ""),
+                    run_id=parts[0],
+                    state_root=state_root,
+                    answered_by=str(
+                        payload.get("answered_by") or "dashboard-user"
+                    ),
+                )
+            return 404, {"error": "not found"}
         return 404, {"error": "not found"}
     except PermissionError as exc:
         return 403, {"error": redact_text(exc)}
+    except MessageNotFound as exc:
+        return 404, {"error": redact_text(exc)}
     except (PlanChangedError, StateTransitionError) as exc:
+        return 409, {"error": redact_text(exc)}
+    except InboxError as exc:
         return 409, {"error": redact_text(exc)}
     except ManifestError as exc:
         return 404, {"error": redact_text(exc)}
