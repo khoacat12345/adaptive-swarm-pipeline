@@ -44,7 +44,7 @@ from v2.planner_adapter import (  # noqa: E402
 )
 from v2.runner import V2Runner  # noqa: E402
 
-__version__ = "3.0.1"
+__version__ = "3.1.0"
 
 COMMANDS = {
     "doctor", "planner", "run", "status", "handoff", "merge", "resume",
