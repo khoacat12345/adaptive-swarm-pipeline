@@ -719,17 +719,33 @@ def _inbox_projection(run_dir: Path, run_id: str) -> dict[str, Any]:
 
 
 def _quota_projection(events: list[dict[str, Any]]) -> dict[str, Any]:
-    """F05: the latest quota decision recorded by the scheduler/runner."""
-    for event in reversed(events):
+    """F05: merged quota evidence recorded by the scheduler/runner/engine.
+
+    ``quota.snapshot`` carries headroom, ``quota.decision`` carries the
+    dispatch outcome.  Events are merged oldest-to-newest so the newest value
+    of each key wins; a pause stays visible via ``needs_attention``.
+    """
+    found: list[tuple[str, dict[str, Any], Any]] = []
+    for event in events:
         name = str(event.get("event_type") or "")
         if name not in {"quota.decision", "quota.snapshot", "quota.gate"}:
             continue
         data = event.get("data") if isinstance(event.get("data"), Mapping) else {}
-        payload = dict(data)
-        payload["available"] = True
-        payload["at"] = event.get("timestamp")
-        return redact(payload)
-    return {"available": False}
+        found.append((name, dict(data), event.get("timestamp")))
+    if not found:
+        return {"available": False}
+    payload: dict[str, Any] = {}
+    for name, data, timestamp in found:
+        payload.update(data)
+        payload["event_type"] = name
+        payload["at"] = timestamp
+    ok = bool(payload.get("ok", payload.get("action") != "pause"))
+    payload["available"] = True
+    payload["ok"] = ok
+    payload["needs_attention"] = bool(
+        payload.get("action") == "pause" or not ok
+    )
+    return redact(payload)
 
 
 def _project_manifest(root: Path, run_dir: Path, manifest: Mapping[str, Any],

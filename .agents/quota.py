@@ -758,6 +758,22 @@ def evaluate_headroom(model: str, info: dict | None, *,
     windows: dict[str, dict] = {}
     blocked: list[str] = []
     wait_seconds = 0
+    # A provider that answered 429 (or a caller-recorded cooldown) is exhausted
+    # for this dispatch even when the spend windows still look healthy.  This
+    # keeps the gate honest when rate limits, not budget, are the bottleneck.
+    raw_rate = data.get("rate_limit")
+    rate = raw_rate if isinstance(raw_rate, dict) else {}
+    limited = bool(data.get("rate_limited") or rate.get("limited"))
+    if isinstance(raw_rate, (int, float)) and not isinstance(raw_rate, bool):
+        limited = limited or raw_rate > 0
+    if limited:
+        blocked.append("rate_limit")
+        try:
+            wait_seconds = int(
+                rate.get("wait_seconds") or data.get("retry_after") or 0
+            )
+        except (TypeError, ValueError):
+            wait_seconds = 0
     for window in ("today", "week", "month"):
         item = data.get("windows", {}).get(window) or {}
         if not item:

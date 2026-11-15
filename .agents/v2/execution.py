@@ -341,18 +341,20 @@ def _diff(old: str, new: str, relative: str) -> str:
 
 
 def _quota_evidence(store: Any) -> dict[str, Any]:
-    """Latest quota snapshot/decision recorded by the runner, if any."""
+    """Merged quota snapshot/decision recorded by the runner, if any."""
     try:
-        for event in reversed(store.read_events()):
+        payload: dict[str, Any] = {}
+        for event in store.read_events():
             name = str(event.get("event_type") or "")
-            if name in {"quota.snapshot", "quota.decision", "quota.gate"}:
-                data = event.get("data")
-                if not isinstance(data, Mapping):
-                    continue
-                payload = dict(data)
-                payload.setdefault("event_type", name)
-                payload.setdefault("at", event.get("timestamp"))
-                return payload
+            if name not in {"quota.snapshot", "quota.decision", "quota.gate"}:
+                continue
+            data = event.get("data")
+            if not isinstance(data, Mapping):
+                continue
+            payload.update(dict(data))
+            payload["event_type"] = name
+            payload["at"] = event.get("timestamp")
+        return payload
     except Exception:  # noqa: BLE001 - evidence only
         pass
     return {}
@@ -1048,12 +1050,19 @@ class ExecutionEngine:
         # F05: consult the dispatch gate before any model call.  The gate is
         # optional so existing runs keep their exact behavior.
         if self.quota_gate is not None:
+            from .quota_gate import normalize_decision, snapshot_evidence
+
+            headroom = snapshot_evidence(self.quota_gate, [coder.model])
             decision = self.quota_gate.decide(
                 coder.model, task_id="run", phase_id="",
             )
-            payload = decision.as_dict() if hasattr(decision, "as_dict") \
-                else dict(decision or {})
+            payload = normalize_decision(decision)
             try:
+                # Headroom first, then the outcome: the projection merges both
+                # and the decision (latest) wins, so the panel keeps the pause
+                # reason while still knowing how much buffer was left.
+                if headroom.get("available"):
+                    store.append_event("quota.snapshot", headroom)
                 store.append_event("quota.decision", payload)
             except Exception:  # noqa: BLE001
                 pass

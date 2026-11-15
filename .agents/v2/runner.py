@@ -469,14 +469,55 @@ class V2Runner:
     def record_quota_decision(self, run_id: str,
                               decision: Mapping[str, Any]) -> None:
         """Persist dispatch-gate evidence without changing run state."""
+        from .quota_gate import normalize_decision
+
         store = self.load(run_id)
-        store.append_event("quota.decision", dict(decision))
+        store.append_event("quota.decision", normalize_decision(decision))
 
     def record_quota_snapshot(self, run_id: str,
                               snapshot: Mapping[str, Any]) -> None:
         """Persist a normalized ``quota.snapshot`` for the dashboard panel."""
         store = self.load(run_id)
         store.append_event("quota.snapshot", dict(snapshot))
+
+    def quota_gate(
+        self,
+        run_id: str,
+        *,
+        snapshot: Mapping[str, Any] | None = None,
+        refresh: bool = False,
+        candidates: Any = (),
+        reserve_pct: float = 15.0,
+        verifier_reserve_pct: float = 10.0,
+        strict: bool | None = None,
+    ) -> Any:
+        """F05: build a dispatch gate bound to this run.
+
+        The gate is offline by default -- dispatch must never block on a live
+        quota fetch.  Pass ``snapshot`` (a cached ``QuotaTracker.snapshot()``)
+        to keep tests and air-gapped machines fully deterministic, or
+        ``refresh=True`` to read the usage API before the first decision.
+        """
+        from . import quota_gate as gate_module
+
+        self.load(run_id)  # fail fast on an unknown run
+        if snapshot is not None:
+            return gate_module.gate_from_snapshot(
+                snapshot,
+                root=self.root,
+                candidates=candidates,
+                reserve_pct=reserve_pct,
+                verifier_reserve_pct=verifier_reserve_pct,
+                strict=strict,
+            )
+        return gate_module.build_gate(
+            self.root,
+            candidates=candidates,
+            reserve_pct=reserve_pct,
+            verifier_reserve_pct=verifier_reserve_pct,
+            strict=strict,
+            refresh=refresh,
+        )
 
     def cleanup_task_worktrees(self, run_id: str, *,
                                reason: str = "run cancelled") -> dict[str, Any]:

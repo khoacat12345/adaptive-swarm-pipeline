@@ -410,20 +410,20 @@ def schedule_plan(plan: Mapping[str, Any], **kwargs: Any) -> Scheduler:
 def build_quota_gate(root: str | Path | None = None, *, tracker: Any | None = None,
                      candidates: Iterable[str] = (),
                      reserve_pct: float = 15.0,
+                     verifier_reserve_pct: float = 10.0,
                      strict: bool | None = None,
                      refresh: bool = False) -> Any:
-    """Build the F05 dispatch gate without importing heavy runner modules."""
-    try:
-        import quota as quota_module  # type: ignore
-    except ImportError:  # pragma: no cover - package-relative fallback
-        import sys
-        from pathlib import Path as _Path
+    """Build the F05 dispatch gate without importing heavy runner modules.
 
-        sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
-        import quota as quota_module  # type: ignore
-    return quota_module.build_gate(
+    Delegates to :mod:`v2.quota_gate` so the scheduler, runner and execution
+    engine share one gate implementation and one reserve policy.
+    """
+    from . import quota_gate as gate_module
+
+    return gate_module.build_gate(
         root, tracker=tracker, candidates=candidates,
-        reserve_pct=reserve_pct, strict=strict, refresh=refresh,
+        reserve_pct=reserve_pct, verifier_reserve_pct=verifier_reserve_pct,
+        strict=strict, refresh=refresh,
     )
 
 
